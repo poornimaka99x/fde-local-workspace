@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Create a new Claude Code profile: its own config dir and auth, but the same
+# shared context, skills and agents as every other profile.
+set -euo pipefail
+
+name="${1:-}"
+if [[ -z "$name" ]]; then
+  echo "usage: claude-profile-new <name>" >&2
+  exit 1
+fi
+
+SHARED="${CLAUDE_SHARED:-$HOME/.claude-shared}"
+dir="$HOME/.claude-profiles/$name"
+
+mkdir -p "$dir"
+
+# Shared context: symlinked, so editing it once changes every profile.
+ln -sfn "$SHARED/CLAUDE.md" "$dir/CLAUDE.md"
+ln -sfn "$SHARED/shared"    "$dir/shared"
+
+# Per-profile settings live here and are NOT shared — /setup-bedrock writes into
+# this file, and that must not reach your subscription profiles.
+#
+# For the bedrock profile this file is also the single source of truth for which
+# AWS account and region Claude talks to. The shell wrapper sets no AWS variables
+# at all, precisely so that nothing can override what is written here.
+deny='"Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/secrets/**)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)"'
+
+if [[ ! -f "$dir/settings.json" ]]; then
+  if [[ "$name" == "bedrock" ]]; then
+    cat > "$dir/settings.json" <<JSON
+{
+  "includeCoAuthoredBy": false,
+  "env": {
+    "AWS_PROFILE": "${FDE_BEDROCK_AWS_PROFILE:-bedrock-dev}",
+    "AWS_REGION": "${FDE_BEDROCK_AWS_REGION:-eu-west-1}"
+  },
+  "permissions": {
+    "deny": [
+      $deny
+    ]
+  }
+}
+JSON
+  else
+    cat > "$dir/settings.json" <<JSON
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "deny": [
+      $deny
+    ]
+  }
+}
+JSON
+  fi
+fi
+
+echo "profile '$name' ready at $dir"
+echo "next: CLAUDE_CONFIG_DIR=$dir claude   # sign in, then install the toolkit plugin"

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Compatibility wrapper. This tool is now ask-ms-copilot, because "Copilot" on
+# its own was ambiguous and the ambiguity was the bug: Microsoft 365 Copilot and
+# GitHub Copilot are different products, and only the first is part of this
+# ecosystem. This wrapper will be removed once nothing references the old name.
+printf 'ask-copilot-studio is now ask-ms-copilot. Forwarding.\n' >&2
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$here/ask-ms-copilot" "$@"

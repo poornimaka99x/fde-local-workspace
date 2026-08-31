@@ -1,0 +1,17 @@
+# Runtime state, never source. Runs hold client material, task files and the
+# approval ledger; they belong to the machine, not to the repository.
+runs/
+claude-shared/runs/*
+!claude-shared/runs/.gitkeep
+
+# Secrets and local material
+env.sh
+.env.sh
+claude-shared/env.sh
+claude-shared/.env.sh
+intake/
+claude-shared/intake/
+
+.DS_Store
+__pycache__/
+*.pyc

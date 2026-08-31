@@ -1,0 +1,11 @@
+{
+  "name": "fde-toolkit",
+  "owner": { "name": "Poornima" },
+  "plugins": [
+    {
+      "name": "fde-core",
+      "source": "./plugins/fde-core",
+      "description": "Forward-deployed engineering toolkit: client context, repo onboarding, review agents and shared MCP servers, available in every repository."
+    }
+  ]
+}

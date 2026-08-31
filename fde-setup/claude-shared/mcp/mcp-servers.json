@@ -1,0 +1,18 @@
+{
+  "_comment": "Single source of truth for MCP servers across Claude Code, Gemini CLI and Codex CLI. Edit here, then run: mcp-sync. Each tool stores MCP config in a different file and a different schema; mcp-sync translates. GitHub Copilot is not part of this ecosystem and is never written to.",
+  "_targets": "Every server declares who gets it. 'claude' | 'gemini' | 'codex' are global targets, written into each CLI's user-level config. 'role:<role>' is a run-scoped target: the server is NOT placed in anyone's global config, and mcp-sync --run <run-id> writes it only for the identity that holds that role in that run.",
+  "servers": {
+    "context7": {
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "targets": ["claude", "gemini", "codex"],
+      "note": "up-to-date library and framework docs. Read-only, no tenant data, safe for every identity."
+    },
+    "atlassian": {
+      "transport": "http",
+      "url": "https://mcp.atlassian.com/v1/mcp/authv2",
+      "targets": ["role:orchestrator"],
+      "note": "Jira, Confluence and — under an API token with the right scopes and the site linked to your organisation — Bitbucket Cloud. Current Rovo MCP endpoint, HTTP transport; the older /v1/sse entry is legacy. Deliberately not global: there is no permanently privileged orchestrator account, so this reaches whichever identity the user made orchestrator for the run, and only after roles are confirmed. Reads are allowed then; Jira/Confluence/Bitbucket writes still need fde approve-publish. Local git stays the primary interface to Bitbucket repositories."
+    }
+  }
+}

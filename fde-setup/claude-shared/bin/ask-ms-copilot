@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""ask-ms-copilot — the Microsoft specialist in this ecosystem.
+
+Microsoft Copilot here means Microsoft 365 Copilot / Copilot Studio. It is NOT
+GitHub Copilot, which is not part of this ecosystem at all.
+
+Microsoft 365 Copilot has no CLI and no public chat API, so it cannot be
+scripted directly. A Copilot Studio agent CAN be, over the Direct Line channel,
+and that agent can be grounded on SharePoint sites, Graph connectors and
+Dataverse. So the agent is the bridge: you build it once in Copilot Studio, and
+Claude talks to it here.
+
+What it is for:
+  - SharePoint content
+  - Outlook email context
+  - Teams meetings and recaps
+  - Microsoft 365 business documentation
+  - Copilot Notebook material, where the tenant exposes it
+  - answers grounded in approved Microsoft sources
+
+What it is not for: source code, git, Bitbucket, creating Jira work, or acting
+as the run's orchestrator. This script sends text to a chat endpoint and prints
+the reply — it executes nothing locally, so those boundaries hold structurally
+as well as by policy. The run's roles.json is what actually decides whether this
+identity is consulted at all.
+
+Credentials — Keychain first, environment second:
+
+  security add-generic-password -a "$USER" -s fde-copilot-directline -w
+
+  Microsoft's guidance is that a Direct Line secret is a service-side credential
+  and must not sit in anything a client can read; conversation-scoped tokens are
+  what you hand to exposed clients. A secret exported from a globally sourced
+  shell file is readable by every process you run, which is exactly the shape
+  they warn about — hence the Keychain.
+
+  COPILOT_DIRECTLINE_SECRET   fallback if you have no Keychain (Linux, CI)
+  COPILOT_TOKEN_ENDPOINT      use this instead where the tenant exposes only a
+                              token endpoint (Channels > Custom website)
+  COPILOT_TIMEOUT             seconds to wait for the agent (default 90)
+
+Usage:
+  ask-ms-copilot "which SharePoint docs describe the returns process?"
+  echo "<context>" | ask-ms-copilot "summarise against our SharePoint policy"
+  ask-ms-copilot --check          report whether credentials resolve (prints no secret)
+"""
+import json, os, shutil, subprocess, sys, time, urllib.error, urllib.request
+
+DL = "https://directline.botframework.com/v3/directline"
+KEYCHAIN_SERVICE = "fde-copilot-directline"
+TOKEN_ENDPOINT = os.environ.get("COPILOT_TOKEN_ENDPOINT", "")
+TIMEOUT = int(os.environ.get("COPILOT_TIMEOUT", "90"))
+
+
+def directline_secret():
+    """Keychain first. Retrieved at call time, held only in memory, never logged
+    and never echoed — nothing in this script prints it or passes it to a shell."""
+    if shutil.which("security"):
+        try:
+            r = subprocess.run(
+                ["security", "find-generic-password", "-a", os.environ.get("USER", ""),
+                 "-s", KEYCHAIN_SERVICE, "-w"],
+                capture_output=True, text=True, timeout=10)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip(), "keychain"
+        except (OSError, subprocess.SubprocessError):
+            pass
+    env = os.environ.get("COPILOT_DIRECTLINE_SECRET", "").strip()
+    if env:
+        return env, "environment"
+    return "", "none"
+
+
+def http(method, url, token=None, body=None):
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read().decode()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        sys.exit(f"HTTP {e.code} on {method} {url}\n{e.read().decode()[:600]}")
+    except urllib.error.URLError as e:
+        sys.exit(f"network error reaching {url}: {e.reason}")
+
+
+def start():
+    """Open a conversation and return (conversation_id, token).
+
+    Prefer the token endpoint: it hands back a conversation-scoped token, which
+    is what Microsoft says to use anywhere the credential could be exposed. The
+    secret path exchanges the secret for such a token immediately and then uses
+    only the token, so the secret never leaves this process."""
+    if TOKEN_ENDPOINT:
+        tok = http("GET", TOKEN_ENDPOINT).get("token")
+        if not tok:
+            sys.exit("token endpoint returned no token")
+        conv = http("POST", f"{DL}/conversations", token=tok)
+        return conv["conversationId"], conv.get("token", tok)
+    secret, _src = directline_secret()
+    if secret:
+        conv = http("POST", f"{DL}/conversations", token=secret)
+        return conv["conversationId"], conv["token"]
+    sys.exit("no Microsoft Copilot credentials. Store the Direct Line secret in the\n"
+             "  Keychain:  security add-generic-password -a \"$USER\" -s "
+             + KEYCHAIN_SERVICE + " -w\n"
+             "  or set COPILOT_TOKEN_ENDPOINT for a token-endpoint tenant.")
+
+
+def check():
+    """Report whether credentials resolve. Prints their source, never their value."""
+    if TOKEN_ENDPOINT:
+        print("Microsoft Copilot: token endpoint configured (COPILOT_TOKEN_ENDPOINT)")
+        return 0
+    secret, src = directline_secret()
+    if src == "keychain":
+        print(f"Microsoft Copilot: Direct Line secret present in macOS Keychain "
+              f"(service {KEYCHAIN_SERVICE})")
+        return 0
+    if src == "environment":
+        print("Microsoft Copilot: Direct Line secret present in the environment.")
+        print("  Move it to the Keychain — a globally sourced env file is readable")
+        print("  by every process you run:")
+        print(f'    security add-generic-password -a "$USER" -s {KEYCHAIN_SERVICE} -w')
+        return 0
+    print("Microsoft Copilot: unconfigured.")
+    print(f'  security add-generic-password -a "$USER" -s {KEYCHAIN_SERVICE} -w')
+    return 1
+
+
+def main():
+    if "--check" in sys.argv[1:]:
+        sys.exit(check())
+    prompt = " ".join(sys.argv[1:]).strip()
+    if not sys.stdin.isatty():
+        piped = sys.stdin.read().strip()
+        if piped:
+            prompt = f"{prompt}\n\n---\n{piped}" if prompt else piped
+    if not prompt:
+        sys.exit("nothing to ask")
+
+    conv_id, token = start()
+    http("POST", f"{DL}/conversations/{conv_id}/activities", token=token,
+         body={"type": "message", "from": {"id": "claude-fde"}, "text": prompt})
+
+    # Copilot Studio streams several activities; the agent is done when it stops
+    # sending for a couple of polls. Typing indicators are not answers.
+    watermark, said, seen, quiet = None, [], set(), 0
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        time.sleep(1.5)
+        url = f"{DL}/conversations/{conv_id}/activities"
+        if watermark:
+            url += f"?watermark={watermark}"
+        r = http("GET", url, token=token)
+        watermark = r.get("watermark", watermark)
+        new = []
+        for a in r.get("activities", []):
+            # Dedupe by activity id: a server that ignores or replays the
+            # watermark would otherwise make one answer look like ten.
+            key = a.get("id") or a.get("text")
+            if key in seen:
+                continue
+            seen.add(key)
+            if (a.get("from", {}).get("id") != "claude-fde"
+                    and a.get("type") == "message" and a.get("text")):
+                new.append(a)
+        if new:
+            said.extend(a["text"] for a in new)
+            quiet = 0
+        else:
+            quiet += 1
+            if said and quiet >= 2:
+                break
+
+    if not said:
+        sys.exit("agent returned nothing within the timeout — check the agent is "
+                 "published and the Direct Line channel is enabled")
+    print("\n\n".join(said))
+
+
+if __name__ == "__main__":
+    main()

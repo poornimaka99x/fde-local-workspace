@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# GitHub Copilot was removed from this ecosystem. This stub exists so that an old
+# script or muscle-memory fails loudly instead of silently reaching a CLI nothing
+# else here knows about. Your ~/.copilot configuration is untouched; mcp-sync no
+# longer writes to it, and nothing in this toolkit calls the copilot binary.
+cat >&2 <<'MSG'
+GitHub Copilot is not part of this FDE ecosystem.
+Use ask-ms-copilot for Microsoft 365 context.
+MSG
+exit 64

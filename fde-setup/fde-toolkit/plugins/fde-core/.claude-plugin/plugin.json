@@ -1,0 +1,7 @@
+{
+  "name": "fde-core",
+  "description": "Cross-repository toolkit for forward-deployed engineering work: repo onboarding, client context, architecture review agents and shared MCP servers.",
+  "version": "0.1.0",
+  "author": { "name": "Poornima" },
+  "license": "MIT"
+}

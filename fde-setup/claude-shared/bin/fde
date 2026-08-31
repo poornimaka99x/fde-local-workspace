@@ -1,0 +1,1437 @@
+#!/usr/bin/env python3
+"""fde — the local workflow controller for forward-deployed engineering runs.
+
+One run = one requirement taken from intake to publication. The controller owns
+three things the agents must not own themselves:
+
+  1. Roles.       Who does what is decided by the user, per run, before anything
+                  else happens. Identities are not roles; nothing is inherited
+                  from the previous run.
+  2. Approvals.   Codex may write only under a one-time, hash-bound, expiring
+                  approval. Anything leaving this machine — Jira, Confluence,
+                  SharePoint, Bitbucket, email, Teams — needs its own.
+  3. The record.  Every state change, invocation and approval is appended to the
+                  run's events.jsonl, so "what did the agents actually do" has a
+                  answer that does not depend on anyone's memory.
+
+Python 3, standard library only.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import hashlib
+import json
+import os
+import pathlib
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+
+# ---------------------------------------------------------------- locations --
+
+HOME = pathlib.Path(os.environ.get("HOME", pathlib.Path.home()))
+SHARED = pathlib.Path(os.environ.get("CLAUDE_SHARED", HOME / ".claude-shared"))
+RUNS = pathlib.Path(os.environ.get("FDE_RUNS_DIR", SHARED / "runs"))
+PROFILES_DIR = pathlib.Path(os.environ.get("CLAUDE_PROFILES_DIR", HOME / ".claude-profiles"))
+AGENTS_FILE = SHARED / "config" / "agents.json"
+MCP_SRC = SHARED / "mcp" / "mcp-servers.json"
+
+BEDROCK_AWS_PROFILE = "bedrock-dev"
+BEDROCK_AWS_REGION = "eu-west-1"
+ATLASSIAN_MCP_URL = "https://mcp.atlassian.com/v1/mcp/authv2"
+
+DEFAULT_APPROVAL_TTL_MIN = 30
+
+# Flags that must never appear anywhere in this toolkit.
+# One line on purpose: the exemption marker below covers exactly the line it is
+# on, and this list is the one honest place these strings are allowed to appear.
+FORBIDDEN_CODEX_FLAGS = ("--yolo", "danger-full-access", "--dangerously-bypass-approvals-and-sandbox")  # fde-safety-exempt: the list itself
+
+# ------------------------------------------------------------- state machine --
+
+STATES = [
+    "awaiting_roles",
+    "roles_confirmed",
+    "intake",
+    "research",
+    "solutioning",
+    "review",
+    "reconciliation",
+    "planning",
+    "awaiting_implementation_approval",
+    "implementation",
+    "verification",
+    "awaiting_publication_approval",
+    "complete",
+    "blocked",
+]
+
+LINEAR = [s for s in STATES if s != "blocked"]
+
+TRANSITIONS = {a: {b} for a, b in zip(LINEAR, LINEAR[1:])}
+TRANSITIONS.setdefault("complete", set())
+for _s in LINEAR:
+    TRANSITIONS[_s].add("blocked")          # anything can block
+TRANSITIONS["blocked"] = set(LINEAR)        # and unblock back to where it was
+
+# Which run state each pipeline stage belongs to, and where its output is filed.
+STAGE_STATE = {
+    "intake": "intake",
+    "research": "research",
+    "solutioning": "solutioning",
+    "review": "review",
+    "reconciliation": "reconciliation",
+    "planning": "planning",
+    "presentation": "planning",
+    "implementation": "implementation",
+    "verification": "verification",
+}
+
+STAGE_DIR = {
+    "intake": "research",
+    "research": "research",
+    "solutioning": "architecture",
+    "review": "review",
+    "reconciliation": "review",
+    "planning": "delivery-plan",
+    "presentation": "presentation",
+    "implementation": "implementation",
+    "verification": "implementation",
+}
+
+# The stage a role is allowed to act in.
+ROLE_STAGES = {
+    "orchestrator": {"intake", "reconciliation", "planning"},
+    "research": {"research", "intake"},
+    "solutioning": {"solutioning"},
+    "review": {"review"},
+    "deliveryPlanning": {"planning"},
+    "presentation": {"presentation"},
+    "implementation": {"implementation", "verification"},
+    "microsoftContext": {"intake", "research"},
+}
+
+MULTI_ROLES = {"research", "review"}
+
+ARTIFACTS = [
+    ("research", "research-brief.md"),
+    ("architecture", "architecture-options.md"),
+    ("architecture", "adr.md"),
+    ("review", "review.md"),
+    ("review", "reconciliation.md"),
+    ("presentation", "solution-presentation.pptx"),
+    ("delivery-plan", "development-plan.md"),
+    ("delivery-plan", "jira-plan.json"),
+    ("implementation", "implementation-task.md"),
+    ("implementation", "verification-report.md"),
+]
+
+PUBLICATION_TARGETS = ("jira", "confluence", "sharepoint", "bitbucket", "email", "teams")
+
+ARTIFACT_DIRS = ["research", "architecture", "review", "presentation", "delivery-plan", "implementation"]
+
+# ------------------------------------------------------------------ plumbing --
+
+
+class Fail(SystemExit):
+    def __init__(self, msg, code=1):
+        super().__init__(code)
+        self.msg = msg
+
+
+def die(msg, code=1):
+    sys.stdout.flush()
+    print(f"fde: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def now():
+    return _dt.datetime.now(_dt.timezone.utc).astimezone()
+
+
+def iso(ts=None):
+    return (ts or now()).isoformat(timespec="seconds")
+
+
+def parse_iso(s):
+    return _dt.datetime.fromisoformat(s)
+
+
+def slug(s, n=40):
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", (s or "").lower())).strip("-")[:n] or "run"
+
+
+def write_atomic(path: pathlib.Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp{os.getpid()}")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def write_json(path: pathlib.Path, data):
+    write_atomic(path, json.dumps(data, indent=2) + "\n")
+
+
+def read_json(path: pathlib.Path, default=None):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+
+def append_jsonl(path: pathlib.Path, record):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, sort_keys=True) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def read_jsonl(path: pathlib.Path):
+    out = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# -------------------------------------------------------------------- agents --
+
+
+def load_agents():
+    data = read_json(AGENTS_FILE)
+    if data is None:
+        die(f"no agent registry at {AGENTS_FILE} — is the toolkit installed?", 2)
+    if "agents" not in data:
+        die(f"{AGENTS_FILE} has no 'agents' key", 2)
+    for aid, a in data["agents"].items():
+        for banned in ("role", "defaultRole", "preferred", "default"):
+            if banned in a:
+                die(f"{AGENTS_FILE}: agent '{aid}' declares '{banned}'. "
+                    "Identities must not carry roles — roles are assigned per run.", 2)
+    return data
+
+
+def agent_label(agents, aid):
+    a = agents["agents"].get(aid)
+    return a.get("label", aid) if a else aid
+
+
+def agent_available(agents, aid):
+    """(available: bool, detail: str). Availability is about the local surface,
+    not about whether the identity is any good at the job."""
+    a = agents["agents"].get(aid)
+    if not a:
+        return False, "unknown identity"
+    kind = a.get("kind")
+    if kind == "claude":
+        p = a.get("profile", "")
+        d = PROFILES_DIR / p
+        if not d.is_dir():
+            return False, f"no profile dir at {d} — run claude-profile-new {p}"
+        return True, f"profile {p}"
+    if kind == "codex":
+        return (True, "codex CLI") if shutil.which("codex") else (False, "codex CLI not installed")
+    if kind == "gemini":
+        return (True, "gemini CLI") if shutil.which("gemini") else (False, "gemini CLI not installed")
+    if kind == "copilot-studio":
+        if directline_secret(quiet=True) or os.environ.get("COPILOT_TOKEN_ENDPOINT"):
+            return True, "Direct Line configured"
+        return False, "no Direct Line secret or token endpoint"
+    return False, f"unknown kind '{kind}'"
+
+
+def directline_secret(quiet=False):
+    """Keychain first, environment second. Never printed by anything that logs."""
+    if shutil.which("security"):
+        try:
+            r = subprocess.run(
+                ["security", "find-generic-password", "-a", os.environ.get("USER", ""),
+                 "-s", "fde-copilot-directline", "-w"],
+                capture_output=True, text=True, timeout=10)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return os.environ.get("COPILOT_DIRECTLINE_SECRET", "").strip()
+
+
+# ----------------------------------------------------------------- run store --
+
+
+class Run:
+    def __init__(self, run_id):
+        self.id = run_id
+        self.dir = RUNS / run_id
+        if not self.dir.is_dir():
+            die(f"no such run: {run_id}\n       try: fde list", 4)
+
+    # -- paths
+    @property
+    def manifest_path(self): return self.dir / "manifest.json"
+    @property
+    def roles_path(self): return self.dir / "roles.json"
+    @property
+    def events_path(self): return self.dir / "events.jsonl"
+    @property
+    def approvals_path(self): return self.dir / "approvals.jsonl"
+    @property
+    def tasks_dir(self): return self.dir / "tasks"
+    @property
+    def artifacts_dir(self): return self.dir / "artifacts"
+
+    # -- manifest
+    def manifest(self):
+        m = read_json(self.manifest_path)
+        if m is None:
+            die(f"run {self.id} has no manifest.json", 4)
+        return m
+
+    def save_manifest(self, m):
+        m["updatedAt"] = iso()
+        write_json(self.manifest_path, m)
+
+    @property
+    def state(self):
+        return self.manifest().get("state", "awaiting_roles")
+
+    # -- log
+    def event(self, kind, **fields):
+        append_jsonl(self.events_path, {"at": iso(), "event": kind, "runId": self.id, **fields})
+
+    def events(self):
+        return read_jsonl(self.events_path)
+
+    def approvals(self):
+        return read_jsonl(self.approvals_path)
+
+    # -- roles
+    def roles(self):
+        return read_json(self.roles_path)
+
+    def roles_confirmed(self):
+        r = self.roles()
+        return bool(r and r.get("confirmedAt"))
+
+    def assignees(self, role):
+        r = self.roles() or {}
+        v = (r.get("assignments") or {}).get(role)
+        if v in (None, "none", ""):
+            return []
+        return list(v) if isinstance(v, list) else [v]
+
+    def role_of(self, agent_id, stage=None):
+        """Which assigned role, if any, lets this identity act (in this stage)."""
+        r = self.roles() or {}
+        hits = []
+        for role in (r.get("assignments") or {}):
+            if agent_id in self.assignees(role):
+                if stage is None or stage in ROLE_STAGES.get(role, set()):
+                    hits.append(role)
+        return hits
+
+    # -- state
+    def set_state(self, new, reason=""):
+        if new not in STATES:
+            die(f"unknown state '{new}'. Known: {', '.join(STATES)}", 2)
+        m = self.manifest()
+        old = m.get("state")
+        if new == old:
+            return old
+        if new not in TRANSITIONS.get(old, set()):
+            die(f"illegal transition {old} -> {new}", 5)
+        if new == "blocked":
+            m["blockedFrom"] = old
+        if old == "blocked":
+            m.pop("blockedFrom", None)
+        m["state"] = new
+        self.save_manifest(m)
+        self.event("state", **{"from": old, "to": new, "reason": reason})
+        return old
+
+    def guard_roles(self, what):
+        if not self.roles_confirmed():
+            die(f"run {self.id} is in state '{self.state}'. Roles are not confirmed, so "
+                f"{what} is not permitted yet.\n       run: fde roles {self.id}", 6)
+
+
+def new_run(requirement: str) -> Run:
+    key = requirement.strip()
+    m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
+    jira_key = m.group(1) if m else None
+    stem = f"{now():%Y%m%d}-{slug(jira_key or key)}-{secrets.token_hex(2)}"
+    d = RUNS / stem
+    if d.exists():
+        die(f"run directory already exists: {d}", 1)
+    for sub in ["tasks", "inputs"] + [f"artifacts/{a}" for a in ARTIFACT_DIRS]:
+        (d / sub).mkdir(parents=True, exist_ok=True)
+    write_atomic(d / "requirement.md", (
+        f"# Requirement\n\n"
+        f"- captured: {iso()}\n"
+        f"- jira: {jira_key or '(none given)'}\n"
+        f"- source: given on the command line; nothing has been fetched\n\n"
+        f"---\n\n{key}\n"))
+    write_json(d / "manifest.json", {
+        "runId": stem,
+        "createdAt": iso(),
+        "updatedAt": iso(),
+        "state": "awaiting_roles",
+        "jiraKey": jira_key,
+        "requirement": key[:400],
+        "toolkit": "fde-core",
+    })
+    r = Run(stem)
+    r.event("run.created", jiraKey=jira_key)
+    r.event("note", note="Created in awaiting_roles. No connector, repository or "
+                         "client-context access is permitted until roles are confirmed.")
+    return r
+
+
+def list_runs():
+    if not RUNS.is_dir():
+        return []
+    out = []
+    for d in sorted(RUNS.iterdir()):
+        if d.is_dir() and (d / "manifest.json").exists():
+            out.append(read_json(d / "manifest.json", {}))
+    return out
+
+
+# ---------------------------------------------------------------- approvals --
+
+
+def approval_state(run: Run):
+    """Replay approvals.jsonl into {approvalId: record}, applying consumption."""
+    by_id = {}
+    for rec in run.approvals():
+        t = rec.get("type")
+        if t in ("codex-approval", "publication-approval"):
+            by_id[rec["approvalId"]] = dict(rec)
+        elif t in ("codex-approval-consumed", "publication-approval-consumed"):
+            a = by_id.get(rec.get("approvalId"))
+            if a is not None:
+                a["consumed"] = True
+                a["consumedAt"] = rec.get("at")
+        elif t == "approval-revoked":
+            a = by_id.get(rec.get("approvalId"))
+            if a is not None:
+                a["revoked"] = True
+    return by_id
+
+
+def approval_status(a, at=None):
+    at = at or now()
+    if a.get("revoked"):
+        return "revoked"
+    if a.get("consumed"):
+        return "consumed"
+    try:
+        if parse_iso(a["expiresAt"]) <= at:
+            return "expired"
+    except (KeyError, ValueError):
+        return "malformed"
+    return "valid"
+
+
+def require_typed_confirmation(expected: str):
+    print(f"\nType exactly:  {expected}")
+    print("(anything else cancels)")
+    try:
+        typed = sys.stdin.readline()
+    except KeyboardInterrupt:
+        typed = ""
+    if (typed or "").strip() != expected:
+        die("not approved — the confirmation phrase did not match. Nothing was recorded.", 7)
+
+
+# ------------------------------------------------------------------- doctor --
+
+OK, WARN, BAD = "ok", "warn", "bad"
+
+
+def _row(rows, name, status, detail="", required=False):
+    rows.append((name, status, detail, required))
+
+
+def check_claude_profile(name):
+    d = PROFILES_DIR / name
+    if not d.is_dir():
+        return WARN, "not created"
+    if (d / ".credentials.json").exists() or (d / "projects").is_dir():
+        return OK, "authenticated"
+    return WARN, "created, not signed in"
+
+
+def check_bedrock():
+    """One source of truth: the bedrock profile's settings.json. The shell
+    wrapper must not override it, and env.sh must not contradict it."""
+    d = PROFILES_DIR / "bedrock"
+    problems, notes = [], []
+    settings = read_json(d / "settings.json", {}) if d.is_dir() else None
+    if settings is None:
+        return WARN, "profile not created"
+    env = (settings or {}).get("env", {})
+    prof, region = env.get("AWS_PROFILE"), env.get("AWS_REGION")
+    if not prof or not region:
+        return WARN, f"settings.json has no AWS_PROFILE/AWS_REGION (expected {BEDROCK_AWS_PROFILE}/{BEDROCK_AWS_REGION})"
+    if prof != BEDROCK_AWS_PROFILE:
+        problems.append(f"settings AWS_PROFILE={prof}, expected {BEDROCK_AWS_PROFILE}")
+    if region != BEDROCK_AWS_REGION:
+        problems.append(f"settings AWS_REGION={region}, expected {BEDROCK_AWS_REGION}")
+
+    wrapper = SHARED / "shell" / "claude-profiles.sh"
+    if wrapper.exists():
+        txt = wrapper.read_text(encoding="utf-8", errors="replace")
+        body = txt.split("cc-bedrock()", 1)[-1].split("\n}", 1)[0] if "cc-bedrock()" in txt else ""
+        if "AWS_PROFILE" in body or "AWS_REGION" in body:
+            problems.append("claude-profiles.sh overrides AWS_PROFILE/AWS_REGION in cc-bedrock")
+    if not shutil.which("aws"):
+        notes.append("aws CLI not installed")
+    else:
+        try:
+            r = subprocess.run(["aws", "configure", "list-profiles"],
+                               capture_output=True, text=True, timeout=15)
+            if r.returncode == 0 and prof not in r.stdout.split():
+                problems.append(f"aws profile '{prof}' is not configured")
+        except (OSError, subprocess.SubprocessError):
+            notes.append("could not list aws profiles")
+    if problems:
+        return BAD, "; ".join(problems)
+    return OK, f"{prof} / {region}" + (f" ({'; '.join(notes)})" if notes else "")
+
+
+def check_atlassian():
+    src = read_json(MCP_SRC, {})
+    s = (src.get("servers") or {}).get("atlassian")
+    if not s:
+        return WARN, "no atlassian server in mcp-servers.json"
+    url = s.get("url", "")
+    if url != ATLASSIAN_MCP_URL:
+        return BAD, f"endpoint is {url or '(unset)'}, expected {ATLASSIAN_MCP_URL}"
+    if s.get("transport") != "http":
+        return BAD, f"transport is {s.get('transport')}, expected http"
+    return OK, "endpoint current — OAuth is verified inside a Claude session (/mcp)"
+
+
+def check_docx():
+    if shutil.which("pandoc"):
+        return OK, "pandoc"
+    try:
+        import docx  # noqa: F401
+        return OK, "python-docx"
+    except ImportError:
+        return BAD, "install pandoc, or: pip install python-docx --break-system-packages"
+
+
+def check_confluence():
+    base = os.environ.get("CONFLUENCE_BASE_URL", "")
+    email = os.environ.get("CONFLUENCE_EMAIL", "")
+    tok = os.environ.get("CONFLUENCE_API_TOKEN", "")
+    if base and email and tok:
+        return OK, f"{base} as {email}"
+    missing = [n for n, v in (("base url", base), ("email", email), ("token", tok)) if not v]
+    return WARN, "missing: " + ", ".join(missing)
+
+
+def check_runs_dir():
+    try:
+        RUNS.mkdir(parents=True, exist_ok=True)
+        probe = RUNS / f".probe-{os.getpid()}"
+        probe.write_text("x")
+        probe.unlink()
+        return OK, str(RUNS)
+    except OSError as e:
+        return BAD, f"{RUNS}: {e}"
+
+
+def _git(args, cwd):
+    try:
+        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
+                              text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def check_toolkit_source():
+    if not SHARED.is_dir():
+        return BAD, f"{SHARED} does not exist"
+    if not AGENTS_FILE.exists():
+        return BAD, f"no {AGENTS_FILE}"
+    try:
+        load_agents()
+    except SystemExit as e:
+        return BAD, getattr(e, "msg", "agents.json invalid")
+    r = _git(["status", "--porcelain"], SHARED)
+    if r is None or r.returncode != 0:
+        return WARN, f"{SHARED} (not a git repository)"
+    dirty = [l for l in r.stdout.splitlines() if l.strip()]
+    return (WARN, f"dirty — {len(dirty)} uncommitted change(s)") if dirty else (OK, "clean")
+
+
+def check_git_remote():
+    r = _git(["remote", "-v"], SHARED)
+    if r is None or r.returncode != 0:
+        return WARN, "not a git repository"
+    if not r.stdout.strip():
+        return WARN, "no remote — this machine is the only copy"
+    first = r.stdout.splitlines()[0].split()
+    return OK, first[1] if len(first) > 1 else "configured"
+
+
+SAFETY_EXEMPT = "fde-safety-exempt"
+
+
+def scan_for_bypass_flags(roots):
+    """Find sandbox-bypass flags anywhere they could reach a real invocation.
+
+    A line may opt out with the marker below, and only for the honest cases: the
+    list of flags this checker looks for, and the guards that refuse them. If you
+    find yourself adding the marker to a line that actually runs codex, stop."""
+    hits = []
+    for root in roots:
+        if not root.exists():
+            continue
+        files = [root] if root.is_file() else [q for q in root.rglob("*") if q.is_file()]
+        for q in files:
+            if q.suffix in (".png", ".jpg", ".jpeg", ".pdf", ".zip", ".pyc") or f"{os.sep}.git{os.sep}" in str(q):
+                continue
+            try:
+                txt = q.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for n, line in enumerate(txt.splitlines(), 1):
+                if SAFETY_EXEMPT in line:
+                    continue
+                for flag in FORBIDDEN_CODEX_FLAGS:
+                    if flag in line:
+                        hits.append(f"{q}:{n}: {flag}")
+    return hits
+
+
+def check_codex_safety():
+    """Nothing in this toolkit may ever reach for a sandbox bypass."""
+    hits = scan_for_bypass_flags([SHARED / "bin", SHARED / "fde-toolkit", SHARED / "shell"])
+    return (BAD, "; ".join(hits[:5])) if hits else (OK, "no sandbox-bypass flags present")
+
+
+def cmd_doctor(args):
+    rows = []
+    agents = None
+    try:
+        agents = load_agents()
+    except SystemExit:
+        pass
+
+    for prof, label in (("work", "Claude work"), ("msc", "Claude msc"), ("alt", "Claude alt")):
+        st, detail = check_claude_profile(prof)
+        _row(rows, label, st, detail)
+
+    st, detail = check_bedrock()
+    _row(rows, "Claude Bedrock", st, detail, required=True)
+
+    _row(rows, "Codex", *( (OK, shutil.which("codex")) if shutil.which("codex")
+                           else (WARN, "not installed — npm i -g @openai/codex") ))
+    _row(rows, "Gemini", *( (OK, shutil.which("gemini")) if shutil.which("gemini")
+                            else (WARN, "not installed — npm i -g @google/gemini-cli") ))
+
+    if directline_secret(quiet=True):
+        src = "macOS Keychain" if shutil.which("security") else "environment"
+        _row(rows, "Microsoft Copilot Studio", OK, f"Direct Line secret present ({src})")
+    elif os.environ.get("COPILOT_TOKEN_ENDPOINT"):
+        _row(rows, "Microsoft Copilot Studio", OK, "token endpoint configured")
+    else:
+        _row(rows, "Microsoft Copilot Studio", WARN,
+             "unconfigured — security add-generic-password -a \"$USER\" -s fde-copilot-directline -w")
+
+    _row(rows, "Atlassian MCP", *check_atlassian(), required=True)
+    _row(rows, "Confluence CLI", *check_confluence())
+    _row(rows, "DOCX intake", *check_docx())
+    _row(rows, "Run directory", *check_runs_dir(), required=True)
+    _row(rows, "Toolkit source", *check_toolkit_source(), required=True)
+    _row(rows, "Git remote", *check_git_remote())
+    _row(rows, "Codex flag safety", *check_codex_safety(), required=True)
+
+    if shutil.which("copilot"):
+        _row(rows, "GitHub Copilot CLI", WARN,
+             "installed but NOT part of this ecosystem — nothing here calls it")
+
+    mark = {OK: "ok", WARN: "--", BAD: "BROKEN"}
+    width = max(len(r[0]) for r in rows)
+    print()
+    for name, st, detail, required in rows:
+        tag = mark[st] + ("*" if required and st == BAD else "")
+        print(f"  {name:<{width}}  {tag:<7} {detail}")
+    broken = [r for r in rows if r[1] == BAD and r[3]]
+    warned = [r for r in rows if r[1] == WARN]
+    print()
+    print(f"  {len(rows)} checks — {len(broken)} required broken, {len(warned)} advisory")
+    if agents:
+        print(f"  {len(agents['agents'])} identities registered; roles are assigned per run, never here.")
+    print("  (no secret values are read or printed by this command)")
+    return 1 if broken else 0
+
+
+# ----------------------------------------------------------- the role prompt --
+
+ROLE_QUESTION = """Before I initialize this task, assign the roles.
+
+Available identities:
+- Claude: work
+- Claude: msc
+- Claude: alt
+- Claude Code: Bedrock
+- ChatGPT/Codex
+- Gemini
+- Microsoft Copilot
+
+Choose:
+- Orchestrator:
+- Researcher(s):
+- Solution architect:
+- Reviewer(s):
+- Delivery planner:
+- Presentation author:
+- Implementation agent:
+- Microsoft context source: include / exclude
+
+An identity may hold more than one role. Use "none" where a role is unnecessary.
+I will not initialize the task or access connected systems until you confirm."""
+
+ROLE_PROMPTS = [
+    ("orchestrator", "Orchestrator", False),
+    ("research", "Researcher(s)", True),
+    ("solutioning", "Solution architect", False),
+    ("review", "Reviewer(s)", True),
+    ("deliveryPlanning", "Delivery planner", False),
+    ("presentation", "Presentation author", False),
+    ("implementation", "Implementation agent", False),
+    ("microsoftContext", "Microsoft context source (identity, or none to exclude)", False),
+]
+
+ALIASES = {
+    "claude: work": "claude_work", "claude work": "claude_work", "work": "claude_work",
+    "claude: msc": "claude_msc", "claude msc": "claude_msc", "msc": "claude_msc",
+    "claude: alt": "claude_alt", "claude alt": "claude_alt", "alt": "claude_alt",
+    "claude code: bedrock": "claude_bedrock", "bedrock": "claude_bedrock",
+    "chatgpt/codex": "chatgpt_codex", "chatgpt": "chatgpt_codex", "codex": "chatgpt_codex",
+    "gemini": "gemini",
+    "microsoft copilot": "microsoft_copilot", "ms copilot": "microsoft_copilot",
+    "copilot": "microsoft_copilot", "m365 copilot": "microsoft_copilot",
+    "exclude": "none", "include": "microsoft_copilot",
+}
+
+
+def resolve_agent(agents, token):
+    t = (token or "").strip()
+    if t.lower() in ("", "none", "-", "n/a"):
+        return None
+    if t in agents["agents"]:
+        return t
+    a = ALIASES.get(t.lower())
+    if a == "none":
+        return None
+    if a:
+        return a
+    die(f"unknown identity '{token}'. Known: {', '.join(sorted(agents['agents']))}", 2)
+
+
+# -------------------------------------------------------------- run commands --
+
+
+def cmd_start(args):
+    req = " ".join(args.requirement).strip()
+    if not req:
+        die("give a Jira key or a one-line description of the requirement", 2)
+    run = new_run(req)
+    print(f"run    {run.id}")
+    print(f"dir    {run.dir}")
+    print(f"state  awaiting_roles\n")
+    print("Nothing has been read: no Jira, Confluence, SharePoint, email, repository")
+    print("or client context. That stays true until roles are confirmed.\n")
+    print("-" * 72)
+    print(ROLE_QUESTION)
+    print("-" * 72)
+    print(f"\nThen record the answer:  fde roles {run.id}")
+    return 0
+
+
+def cmd_list(args):
+    runs = list_runs()
+    if not runs:
+        print("no runs yet — fde start <jira-key-or-description>")
+        return 0
+    for m in runs:
+        print(f"  {m.get('runId','?'):<38} {m.get('state','?'):<34} {m.get('requirement','')[:40]}")
+    return 0
+
+
+def cmd_roles(args):
+    agents = load_agents()
+    run = Run(args.run_id)
+    if run.state not in ("awaiting_roles", "blocked") and not args.reassign:
+        die(f"run {run.id} already has confirmed roles (state {run.state}). "
+            "Pass --reassign to change them, or start a new run.", 5)
+
+    chosen = {}
+
+    if args.same_as:
+        # Valid only because the user said so explicitly on the command line.
+        prev = Run(args.same_as)
+        pr = prev.roles()
+        if not pr:
+            die(f"run {args.same_as} has no confirmed roles to copy", 4)
+        chosen = dict(pr["assignments"])
+        print(f"copying the role assignment the user explicitly named: {args.same_as}")
+    elif args.from_file:
+        data = read_json(pathlib.Path(args.from_file))
+        if not data:
+            die(f"cannot read role assignments from {args.from_file}", 2)
+        chosen = dict(data.get("assignments", data))
+    elif args.set:
+        for pair in args.set:
+            if "=" not in pair:
+                die(f"--set expects role=identity, got '{pair}'", 2)
+            role, val = pair.split("=", 1)
+            role = role.strip()
+            if role not in ROLE_STAGES:
+                die(f"unknown role '{role}'. Known: {', '.join(ROLE_STAGES)}", 2)
+            parts = [p for p in (v.strip() for v in val.split(",")) if p]
+            chosen[role] = parts if role in MULTI_ROLES else (parts[0] if parts else "none")
+    else:
+        if not sys.stdin.isatty():
+            print(ROLE_QUESTION)
+            die("\nno assignment given. Re-run with --set role=identity ... , "
+                "--from roles.json, or interactively from a terminal.", 2)
+        print(ROLE_QUESTION)
+        print()
+        for role, label, multi in ROLE_PROMPTS:
+            raw = input(f"  {label}: ").strip()
+            parts = [p for p in (v.strip() for v in raw.split(",")) if p]
+            chosen[role] = parts if multi else (parts[0] if parts else "none")
+
+    # Resolve, validate capability, check availability.
+    assignments, unavailable = {}, []
+    cap_of = agents.get("roleCapability", {})
+    for role, _label, multi in ROLE_PROMPTS:
+        raw = chosen.get(role, "none")
+        toks = raw if isinstance(raw, list) else [raw]
+        ids = [x for x in (resolve_agent(agents, t) for t in toks) if x]
+        for aid in ids:
+            need = cap_of.get(role)
+            caps = agents["agents"][aid].get("capabilities", [])
+            if need and need not in caps:
+                die(f"{agent_label(agents, aid)} cannot hold the '{role}' role — "
+                    f"it has no '{need}' capability. Choose another identity.", 2)
+            ok, detail = agent_available(agents, aid)
+            if not ok:
+                unavailable.append((role, aid, detail))
+        assignments[role] = (ids if multi else (ids[0] if ids else None)) if ids else ([] if multi else None)
+
+    if unavailable and not args.allow_unavailable:
+        print("\nStopping: an assigned identity is not available on this machine.\n")
+        for role, aid, detail in unavailable:
+            print(f"  {role:<18} {agent_label(agents, aid):<26} {detail}")
+        die("\n       Choose a replacement and re-run, or pass --allow-unavailable "
+            "if you will make it available before that stage runs.", 3)
+
+    if not assignments.get("orchestrator"):
+        die("a run needs an orchestrator — that role cannot be 'none'", 2)
+
+    write_json(run.roles_path, {"confirmedAt": iso(), "assignments": assignments})
+    run.event("roles.confirmed", assignments=assignments,
+              source=("same-as:" + args.same_as) if args.same_as else
+                     ("file:" + args.from_file) if args.from_file else
+                     ("flags" if args.set else "interactive"))
+    if run.state == "awaiting_roles":
+        run.set_state("roles_confirmed", "roles assigned by the user")
+
+    # Role-restricted connectors become available now, and only to the holder.
+    sync = SHARED / "bin" / "mcp-sync"
+    if sync.exists():
+        r = subprocess.run([sys.executable, str(sync), "--run", run.id],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            run.event("mcp.run-scoped", detail=r.stdout.strip()[:400])
+        else:
+            print(f"  (run-scoped MCP config not written: {r.stderr.strip()[:200]})", file=sys.stderr)
+
+    print(f"\nroles confirmed for {run.id}\n")
+    for role, label, _m in ROLE_PROMPTS:
+        v = assignments[role]
+        shown = ", ".join(agent_label(agents, x) for x in v) if isinstance(v, list) else (
+            agent_label(agents, v) if v else "none")
+        print(f"  {label:<48} {shown or 'none'}")
+    print(f"\nstate  {run.state}")
+    print(f"next   fde resume {run.id}")
+    return 0
+
+
+NEXT_ACTION = {
+    "awaiting_roles": "fde roles {id}                      — assign roles; nothing may be read before this",
+    "roles_confirmed": "fde resume {id} --advance intake     — begin intake with the assigned orchestrator",
+    "intake": "fde invoke {id} <agent> tasks/intake.md",
+    "research": "fde invoke {id} <agent> tasks/research.md",
+    "solutioning": "fde invoke {id} <agent> tasks/solutioning.md",
+    "review": "fde invoke {id} <agent> tasks/review.md",
+    "reconciliation": "orchestrator reconciles; write artifacts/review/reconciliation.md",
+    "planning": "write development-plan.md and jira-plan.json (preview only — no Jira issues yet)",
+    "awaiting_implementation_approval": "fde approve-codex {id} implementation --task-file <file> --repo <path>",
+    "implementation": "fde invoke {id} <agent> tasks/implementation.md --write",
+    "verification": "write artifacts/implementation/verification-report.md",
+    "awaiting_publication_approval": "fde approve-publish {id} <jira|confluence|sharepoint|bitbucket|email|teams>",
+    "complete": "nothing — run is closed",
+    "blocked": "fde resume {id} --unblock",
+}
+
+
+def artifact_report(run: Run):
+    out = []
+    for sub, name in ARTIFACTS:
+        p = run.artifacts_dir / sub / name
+        found = p.exists()
+        if not found and name.endswith(".pptx"):
+            alts = list((run.artifacts_dir / sub).glob("solution-presentation.*"))
+            found = bool(alts)
+            if found:
+                name = alts[0].name
+        out.append((f"{sub}/{name}", found))
+    out.append(("publication-manifest.json", (run.dir / "publication-manifest.json").exists()))
+    return out
+
+
+def cmd_status(args):
+    agents = load_agents()
+    run = Run(args.run_id)
+    m = run.manifest()
+    print(f"\nrun        {run.id}")
+    print(f"state      {m.get('state')}" + (f"  (blocked from {m['blockedFrom']})" if m.get("blockedFrom") else ""))
+    print(f"created    {m.get('createdAt')}")
+    print(f"jira       {m.get('jiraKey') or '(none)'}")
+    print(f"dir        {run.dir}")
+
+    r = run.roles()
+    print("\nroles")
+    if not r:
+        print("  none assigned — this run may not read Jira, Confluence, SharePoint,")
+        print("  email, repositories or client context yet.")
+    else:
+        print(f"  confirmed  {r['confirmedAt']}")
+        for role, label, _m in ROLE_PROMPTS:
+            v = r["assignments"].get(role)
+            shown = ", ".join(agent_label(agents, x) for x in v) if isinstance(v, list) else (
+                agent_label(agents, v) if v else "none")
+            print(f"  {label:<48} {shown or 'none'}")
+
+    print("\nartifacts")
+    for name, found in artifact_report(run):
+        print(f"  [{'x' if found else ' '}] {name}")
+
+    apps = approval_state(run)
+    print("\napprovals")
+    if not apps:
+        print("  none")
+    for aid, a in apps.items():
+        st = approval_status(a)
+        kind = "codex" if a["type"] == "codex-approval" else "publish"
+        what = a.get("stage") or a.get("target")
+        print(f"  {aid}  {kind:<8} {what:<16} {st:<9} expires {a.get('expiresAt')}")
+
+    ev = run.events()
+    print(f"\nevents ({len(ev)}) — last 6")
+    for e in ev[-6:]:
+        extra = e.get("to") or e.get("agent") or e.get("target") or e.get("note", "")
+        print(f"  {e['at']}  {e['event']:<22} {str(extra)[:60]}")
+
+    print(f"\nnext\n  {NEXT_ACTION.get(m.get('state'), '?').format(id=run.id)}\n")
+    return 0
+
+
+def cmd_resume(args):
+    run = Run(args.run_id)
+    m = run.manifest()
+    if args.block:
+        run.set_state("blocked", args.block)
+        print(f"{run.id} -> blocked: {args.block}")
+        return 0
+    if args.unblock:
+        if m.get("state") != "blocked":
+            die(f"run {run.id} is not blocked", 5)
+        back = m.get("blockedFrom") or "roles_confirmed"
+        run.set_state(back, "unblocked")
+        print(f"{run.id} -> {back}")
+        return 0
+    if args.advance:
+        if not run.roles_confirmed():
+            run.guard_roles("advancing the pipeline")
+        old = run.set_state(args.advance, args.reason or "advanced by the orchestrator")
+        print(f"{run.id}: {old} -> {args.advance}")
+        return 0
+
+    print(f"\nrun    {run.id}")
+    print(f"state  {m.get('state')}")
+    print(f"ask    {m.get('requirement','')[:200]}")
+    if not run.roles_confirmed():
+        print("\nRoles are not confirmed. Ask again — do not reuse the previous run's roles.\n")
+        print("-" * 72)
+        print(ROLE_QUESTION)
+        print("-" * 72)
+        print(f"\n  fde roles {run.id}")
+        return 0
+    done = [n for n, f in artifact_report(run) if f]
+    print(f"\ndone   {len(done)} artifact(s): {', '.join(done) or 'none yet'}")
+    print(f"\nnext\n  {NEXT_ACTION.get(m.get('state'), '?').format(id=run.id)}\n")
+    return 0
+
+
+def cmd_guard(args):
+    """Called by skills before touching anything external."""
+    run = Run(args.run_id)
+    run.guard_roles(args.activity)
+    if args.role:
+        who = run.assignees(args.role)
+        if not who:
+            die(f"no identity holds the '{args.role}' role in run {run.id}", 6)
+        print(" ".join(who))
+    else:
+        print("ok")
+    return 0
+
+
+# ------------------------------------------------------------- codex gating --
+
+
+def _resolve_task_file(run: Run, given: str) -> pathlib.Path:
+    p = pathlib.Path(given).expanduser()
+    if not p.is_absolute():
+        cand = run.dir / given
+        p = cand if cand.exists() else p.resolve()
+    if not p.is_file():
+        die(f"no task file at {p}", 2)
+    return p
+
+
+def _branch(repo: pathlib.Path):
+    r = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
+    if r is None or r.returncode != 0:
+        return "(not a git repository)"
+    out = r.stdout.strip()
+    wt = _git(["rev-parse", "--show-toplevel"], repo)
+    top = wt.stdout.strip() if wt and wt.returncode == 0 else str(repo)
+    return f"{out}  (worktree {top})"
+
+
+def cmd_approve_codex(args):
+    run = Run(args.run_id)
+    run.guard_roles("approving a Codex invocation")
+    stage = args.stage
+    if stage not in STAGE_STATE:
+        die(f"unknown stage '{stage}'. Known: {', '.join(STAGE_STATE)}", 2)
+    if "chatgpt_codex" not in run.assignees("implementation") and stage in ("implementation", "verification"):
+        die(f"Codex does not hold the implementation role in run {run.id}. "
+            "Assign it first, or approve a different agent's work.", 6)
+
+    task = _resolve_task_file(run, args.task_file)
+    digest = sha256_file(task)
+    repo = pathlib.Path(args.repo or os.getcwd()).expanduser().resolve()
+    if not repo.is_dir():
+        die(f"repository path is not a directory: {repo}", 2)
+    writable = pathlib.Path(args.writable_root or repo).expanduser().resolve()
+    try:
+        writable.relative_to(repo)
+    except ValueError:
+        die(f"writable root {writable} is outside the repository {repo}. "
+            "Widening the sandbox needs a different repository path, not a broader root.", 2)
+    body = task.read_text(encoding="utf-8", errors="replace")
+    summary = args.summary or next((l.strip() for l in body.splitlines() if l.strip()), "(empty task)")
+    ttl = int(args.ttl or DEFAULT_APPROVAL_TTL_MIN)
+    issued = now()
+    expires = issued + _dt.timedelta(minutes=ttl)
+
+    print()
+    print("=" * 72)
+    print("  CODEX WRITE APPROVAL REQUEST")
+    print("=" * 72)
+    print(f"  Run ID          {run.id}")
+    print(f"  Stage           {stage}")
+    print(f"  Repository      {repo}")
+    print(f"  Branch          {_branch(repo)}")
+    print(f"  Writable root   {writable}")
+    print(f"  Network         {'REQUESTED' if args.network else 'disabled'}")
+    print(f"  Task file       {task}")
+    print(f"  Task sha256     {digest}")
+    print(f"  Task summary    {summary[:200]}")
+    print(f"  Commands/tests  {args.commands or '(none declared)'}")
+    print(f"  Sandbox         workspace-write, --ask-for-approval never")
+    print(f"  Approval        one-time, expires {iso(expires)} ({ttl} min)")
+    print("-" * 72)
+    print("  This authorises exactly this task file, in this repository, once.")
+    print("  Any change to the task file invalidates it. Network access, another")
+    print("  repository or a broader writable root need a new approval.")
+    print("=" * 72)
+    if args.network:
+        print("\n  NOTE: network access is off by default and this toolkit does not")
+        print("  enable it. Approving here records the request; the sandbox still")
+        print("  runs without network. Do that step yourself if you truly need it.")
+
+    require_typed_confirmation(f"APPROVE CODEX {run.id}")
+
+    approval_id = secrets.token_hex(6)
+    append_jsonl(run.approvals_path, {
+        "type": "codex-approval",
+        "approvalId": approval_id,
+        "runId": run.id,
+        "stage": stage,
+        "taskFile": str(task),
+        "taskFileHash": digest,
+        "repositoryPath": str(repo),
+        "writableRoot": str(writable),
+        "network": bool(args.network),
+        "commands": args.commands or "",
+        "issuedAt": iso(issued),
+        "expiresAt": iso(expires),
+        "consumed": False,
+    })
+    run.event("approval.codex.granted", approvalId=approval_id, stage=stage,
+              repositoryPath=str(repo), taskFileHash=digest, expiresAt=iso(expires))
+    if stage == "implementation" and run.state == "awaiting_implementation_approval":
+        run.set_state("implementation", f"codex approval {approval_id}")
+    print(f"\napproved  {approval_id}  valid until {iso(expires)}  (one use)")
+    return 0
+
+
+def cmd_consume_approval(args):
+    """Internal. Called by ask-codex immediately before launching Codex."""
+    run = Run(args.run_id)
+    task = _resolve_task_file(run, args.task_file)
+    digest = sha256_file(task)
+    apps = approval_state(run)
+    candidates = [a for a in apps.values()
+                  if a["type"] == "codex-approval" and a.get("stage") == args.stage]
+    if not candidates:
+        run.event("approval.codex.denied", stage=args.stage, reason="no approval on record")
+        die(f"no Codex write approval on record for run {run.id} stage '{args.stage}'.\n"
+            f"       run: fde approve-codex {run.id} {args.stage} --task-file {args.task_file}", 7)
+
+    reasons = []
+    for a in sorted(candidates, key=lambda x: x["issuedAt"], reverse=True):
+        if a.get("taskFileHash") != digest:
+            reasons.append(f"{a['approvalId']}: task file changed since approval")
+            continue
+        st = approval_status(a)
+        if st != "valid":
+            reasons.append(f"{a['approvalId']}: approval {st}")
+            continue
+        # Consume BEFORE the process starts. A crash after this point costs one
+        # approval; the alternative costs an unbounded number of writes.
+        append_jsonl(run.approvals_path, {
+            "type": "codex-approval-consumed", "approvalId": a["approvalId"], "at": iso()})
+        run.event("approval.codex.consumed", approvalId=a["approvalId"], stage=args.stage,
+                  taskFileHash=digest)
+        print(json.dumps({
+            "approvalId": a["approvalId"],
+            "repositoryPath": a["repositoryPath"],
+            "writableRoot": a["writableRoot"],
+            "network": bool(a.get("network")),
+            "taskFile": str(task),
+        }))
+        return 0
+
+    run.event("approval.codex.denied", stage=args.stage, reason="; ".join(reasons))
+    die("Codex write refused. No usable approval:\n       " + "\n       ".join(reasons) +
+        f"\n       run: fde approve-codex {run.id} {args.stage} --task-file {args.task_file}", 7)
+
+
+# ---------------------------------------------------------- publish gating --
+
+
+def cmd_approve_publish(args):
+    run = Run(args.run_id)
+    run.guard_roles("approving a publication")
+    target = args.target.lower()
+    if target not in PUBLICATION_TARGETS:
+        die(f"unknown target '{target}'. Known: {', '.join(PUBLICATION_TARGETS)}", 2)
+    ttl = int(args.ttl or DEFAULT_APPROVAL_TTL_MIN)
+    issued = now()
+    expires = issued + _dt.timedelta(minutes=ttl)
+    items = []
+    if args.items:
+        p = _resolve_task_file(run, args.items)
+        items = [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    print()
+    print("=" * 72)
+    print("  PUBLICATION APPROVAL REQUEST — this writes outside your machine")
+    print("=" * 72)
+    print(f"  Run ID     {run.id}")
+    print(f"  Target     {target}")
+    print(f"  Summary    {args.summary or '(none given)'}")
+    if items:
+        print(f"  Items      {len(items)}")
+        for i in items[:12]:
+            print(f"             - {i[:80]}")
+        if len(items) > 12:
+            print(f"             ... and {len(items) - 12} more")
+    print(f"  Expires    {iso(expires)} ({ttl} min, one use)")
+    print("=" * 72)
+    print("  A plan existing is not a reason to create anything. This is the")
+    print("  step where other people start seeing your output.")
+
+    require_typed_confirmation(f"APPROVE PUBLISH {run.id}")
+
+    approval_id = secrets.token_hex(6)
+    append_jsonl(run.approvals_path, {
+        "type": "publication-approval",
+        "approvalId": approval_id,
+        "runId": run.id,
+        "target": target,
+        "summary": args.summary or "",
+        "items": items,
+        "issuedAt": iso(issued),
+        "expiresAt": iso(expires),
+        "consumed": False,
+    })
+    run.event("approval.publish.granted", approvalId=approval_id, target=target)
+
+    manifest_path = run.dir / "publication-manifest.json"
+    man = read_json(manifest_path, {"runId": run.id, "entries": []})
+    man["entries"].append({"approvalId": approval_id, "target": target,
+                           "summary": args.summary or "", "items": items,
+                           "approvedAt": iso(issued), "published": False})
+    write_json(manifest_path, man)
+    print(f"\napproved  {approval_id}  target {target}  valid until {iso(expires)}")
+    print(f"manifest  {manifest_path}")
+    return 0
+
+
+# ------------------------------------------------------------------- invoke --
+
+
+def _bin(name):
+    local = SHARED / "bin" / name
+    return str(local) if local.exists() else (shutil.which(name) or str(local))
+
+
+def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path, write: bool):
+    a = agents["agents"][agent_id]
+    kind = a.get("kind")
+    body = task.read_text(encoding="utf-8", errors="replace")
+    env = {}
+    if kind == "claude":
+        prof = a["profile"]
+        env["CLAUDE_CONFIG_DIR"] = str(PROFILES_DIR / prof)
+        env["CLAUDE_PROFILE"] = prof
+        if prof == "bedrock":
+            env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        return ["claude", "-p", body], env
+    if kind == "codex":
+        if write:
+            return [_bin("ask-codex"), "--write", "--run", run.id,
+                    "--stage", stage, "--task-file", str(task)], env
+        return [_bin("ask-codex"), "--read-only", "--task-file", str(task)], env
+    if kind == "gemini":
+        return [_bin("ask-gemini"), body], env
+    if kind == "copilot-studio":
+        return [_bin("ask-ms-copilot"), body], env
+    die(f"no invocation defined for kind '{kind}'", 2)
+
+
+def cmd_invoke(args):
+    agents = load_agents()
+    run = Run(args.run_id)
+    run.guard_roles("invoking an agent")
+
+    agent_id = resolve_agent(agents, args.agent_id)
+    if not agent_id:
+        die("give an identity to invoke", 2)
+    stage = args.stage or STAGE_STATE.get(run.state) or run.state
+    if stage not in STAGE_STATE:
+        die(f"run is in state '{run.state}', which is not a stage an agent runs. "
+            f"Pass --stage explicitly. Known: {', '.join(STAGE_STATE)}", 5)
+
+    held = run.role_of(agent_id, stage)
+    if not held:
+        any_role = run.role_of(agent_id)
+        if any_role:
+            die(f"{agent_label(agents, agent_id)} holds {', '.join(any_role)} in this run, "
+                f"which does not cover the '{stage}' stage.", 6)
+        die(f"{agent_label(agents, agent_id)} holds no role in run {run.id}. "
+            "Agents may only be invoked for roles assigned in that run.", 6)
+
+    a = agents["agents"][agent_id]
+    if args.write:
+        if a.get("kind") != "codex":
+            die(f"--write is only defined for Codex. {agent_label(agents, agent_id)} "
+                "does not take a write-mode invocation from this controller.", 2)
+        if stage not in ("implementation", "verification"):
+            die(f"write mode is not permitted in the '{stage}' stage", 6)
+    for forbidden in a.get("forbidden", []):
+        if forbidden in ("source-code-edit",) and stage in ("implementation", "verification"):
+            die(f"{agent_label(agents, agent_id)} must not act in the '{stage}' stage "
+                f"({forbidden} is forbidden for this identity).", 6)
+
+    task = _resolve_task_file(run, args.task_file)
+    argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write)
+
+    if any(f in " ".join(argv) for f in FORBIDDEN_CODEX_FLAGS):  # fde-safety-exempt: guard
+        die("refusing to run: the invocation contains a sandbox-bypass flag", 8)
+
+    if args.dry_run:
+        print(json.dumps({"argv": argv, "env": extra_env, "stage": stage,
+                          "agent": agent_id, "roles": held, "write": bool(args.write)}))
+        return 0
+
+    run.event("invoke.start", agent=agent_id, stage=stage, roles=held,
+              write=bool(args.write), taskFile=str(task), argv0=argv[0])
+    env = dict(os.environ, **extra_env)
+    started = now()
+    try:
+        proc = subprocess.run(argv, env=env, capture_output=True, text=True)
+    except OSError as e:
+        run.event("invoke.error", agent=agent_id, stage=stage, error=str(e))
+        die(f"could not run {argv[0]}: {e}", 127)
+
+    out_dir = run.artifacts_dir / STAGE_DIR.get(stage, stage)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{stage}-{agent_id}-{started:%Y%m%dT%H%M%S}.md"
+    write_atomic(out, (
+        f"# {stage} — {agent_label(agents, agent_id)}\n\n"
+        f"- run: {run.id}\n- stage: {stage}\n- roles held: {', '.join(held)}\n"
+        f"- mode: {'write (approved)' if args.write else 'read-only'}\n"
+        f"- started: {iso(started)}\n- exit: {proc.returncode}\n"
+        f"- task: {task}\n\n"
+        f"> Output of a separate agent with its own context. Evidence, not authority —\n"
+        f"> verify claims about the codebase against the codebase.\n\n"
+        f"---\n\n{proc.stdout.strip()}\n"
+        + (f"\n\n## stderr\n\n```\n{proc.stderr.strip()[:4000]}\n```\n" if proc.stderr.strip() else "")))
+    run.event("invoke.end", agent=agent_id, stage=stage, exit=proc.returncode, artifact=str(out))
+
+    sys.stdout.write(proc.stdout)
+    if proc.stderr.strip():
+        sys.stderr.write(proc.stderr)
+    print(f"\n[filed {out}]", file=sys.stderr)
+    return proc.returncode
+
+
+def cmd_log(args):
+    """Record an external tool call — Atlassian reads especially — in the run log."""
+    run = Run(args.run_id)
+    run.guard_roles(f"using {args.tool}")
+    run.event("tool", tool=args.tool, detail=args.detail or "", agent=args.agent or "")
+    print("logged")
+    return 0
+
+
+# --------------------------------------------------------------------- main --
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="fde", description=__doc__.splitlines()[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("doctor", help="report component status; nonzero if a required one is broken")
+    s.set_defaults(fn=cmd_doctor)
+
+    s = sub.add_parser("start", help="create a run; it begins in awaiting_roles")
+    s.add_argument("requirement", nargs="+")
+    s.set_defaults(fn=cmd_start)
+
+    s = sub.add_parser("list", help="list runs")
+    s.set_defaults(fn=cmd_list)
+
+    s = sub.add_parser("roles", help="assign this run's roles (asked fresh every run)")
+    s.add_argument("run_id")
+    s.add_argument("--set", action="append", metavar="ROLE=IDENTITY[,IDENTITY]")
+    s.add_argument("--from", dest="from_file", metavar="FILE")
+    s.add_argument("--same-as", metavar="RUN-ID",
+                   help="copy another run's roles — valid ONLY when the user explicitly said so")
+    s.add_argument("--reassign", action="store_true")
+    s.add_argument("--allow-unavailable", action="store_true")
+    s.set_defaults(fn=cmd_roles)
+
+    s = sub.add_parser("status", help="state, roles, artifacts, approvals, next action")
+    s.add_argument("run_id")
+    s.set_defaults(fn=cmd_status)
+
+    s = sub.add_parser("resume", help="where the run is, and move it on")
+    s.add_argument("run_id")
+    s.add_argument("--advance", metavar="STATE")
+    s.add_argument("--reason", default="")
+    s.add_argument("--block", metavar="REASON")
+    s.add_argument("--unblock", action="store_true")
+    s.set_defaults(fn=cmd_resume)
+
+    s = sub.add_parser("guard", help="fail unless roles are confirmed (call before any connector use)")
+    s.add_argument("run_id")
+    s.add_argument("--activity", default="this activity")
+    s.add_argument("--role", help="also print who holds this role")
+    s.set_defaults(fn=cmd_guard)
+
+    s = sub.add_parser("approve-codex", help="one-time, hash-bound approval for a Codex write")
+    s.add_argument("run_id")
+    s.add_argument("stage")
+    s.add_argument("--task-file", required=True)
+    s.add_argument("--repo", help="repository path (default: cwd)")
+    s.add_argument("--writable-root", help="must be inside --repo (default: the repo)")
+    s.add_argument("--network", action="store_true", help="record that network was requested")
+    s.add_argument("--commands", help="commands or tests Codex may run")
+    s.add_argument("--summary")
+    s.add_argument("--ttl", type=int, default=DEFAULT_APPROVAL_TTL_MIN, metavar="MINUTES")
+    s.set_defaults(fn=cmd_approve_codex)
+
+    s = sub.add_parser("approve-publish", help="approve a write to Jira, Confluence, SharePoint, Bitbucket, email or Teams")
+    s.add_argument("run_id")
+    s.add_argument("target")
+    s.add_argument("--summary")
+    s.add_argument("--items", help="file listing what would be created, one per line")
+    s.add_argument("--ttl", type=int, default=DEFAULT_APPROVAL_TTL_MIN, metavar="MINUTES")
+    s.set_defaults(fn=cmd_approve_publish)
+
+    s = sub.add_parser("invoke", help="run an assigned identity for a stage")
+    s.add_argument("run_id")
+    s.add_argument("agent_id")
+    s.add_argument("task_file")
+    s.add_argument("--stage")
+    s.add_argument("--write", action="store_true", help="Codex only, and only with a live approval")
+    s.add_argument("--dry-run", action="store_true")
+    s.set_defaults(fn=cmd_invoke)
+
+    s = sub.add_parser("log", help="record an external tool call in the run's events.jsonl")
+    s.add_argument("run_id")
+    s.add_argument("--tool", required=True)
+    s.add_argument("--detail")
+    s.add_argument("--agent")
+    s.set_defaults(fn=cmd_log)
+
+    s = sub.add_parser("_consume-approval", help=argparse.SUPPRESS)
+    s.add_argument("run_id")
+    s.add_argument("stage")
+    s.add_argument("--task-file", required=True)
+    s.set_defaults(fn=cmd_consume_approval)
+
+    args = p.parse_args(argv)
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

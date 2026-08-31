@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# ask-codex — the only sanctioned way to reach the ChatGPT-authenticated Codex CLI.
+#
+# Two modes, and they are not interchangeable:
+#
+#   ask-codex --read-only "is this migration reversible?"
+#   ask-codex --read-only --task-file tasks/review.md
+#   ask-codex --write --run <run-id> --stage <stage> --task-file <file>
+#
+# Read-only is authorised by the run's role assignment: if the user gave Codex a
+# read-only role, it may read within that stage. Write is not. Every write-capable
+# invocation needs an explicit, just-in-time approval from the user, granted with
+#   fde approve-codex <run-id> <stage> --task-file <file> --repo <path>
+# and consumed here, once, immediately before the process starts.
+#
+# Codex's sandbox decides what it CAN touch; its approval policy decides when it
+# asks mid-run. Because we invoke it non-interactively, mid-run prompts would
+# hang forever — so the gate is outer (this script + fde) and the sandbox is
+# bounded (workspace-write, network off). --ask-for-approval never is safe only
+# in that combination, and only because the exact task was approved.
+#
+# There is no bypass flag here and there must never be one.
+set -uo pipefail
+
+die() { printf 'ask-codex: %s\n' "$*" >&2; exit 1; }
+
+command -v codex >/dev/null || die "codex CLI not installed: npm i -g @openai/codex"
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FDE="$here/fde"; [[ -x "$FDE" ]] || FDE="$(command -v fde || true)"
+
+mode=""; run=""; stage=""; task_file=""; prompt=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --read-only) mode="read"; shift ;;
+    --write)     mode="write"; shift ;;
+    --run)       run="${2:-}"; shift 2 ;;
+    --stage)     stage="${2:-}"; shift 2 ;;
+    --task-file) task_file="${2:-}"; shift 2 ;;
+    --yolo|--dangerously-bypass-approvals-and-sandbox|--sandbox) # fde-safety-exempt: refusal, not an invocation
+      die "refusing: '$1' is not available through this toolkit. Sandbox and approval
+            policy are decided here, not by the caller." ;;
+    -h|--help)   sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --)          shift; prompt="$prompt $*"; break ;;
+    *)           prompt="$prompt $1"; shift ;;
+  esac
+done
+prompt="${prompt# }"
+[[ -z "$mode" ]] && mode="read"   # bare `ask-codex "..."` stays read-only
+
+# ---------------------------------------------------------------- read-only --
+if [[ "$mode" == "read" ]]; then
+  if [[ -n "$task_file" ]]; then
+    [[ -f "$task_file" ]] || die "no task file at $task_file"
+    prompt="$(cat "$task_file")"
+  fi
+  [[ -n "${prompt// }" ]] || die "nothing to ask"
+  exec codex exec \
+    --sandbox read-only \
+    --ask-for-approval never \
+    --skip-git-repo-check \
+    "$prompt"
+fi
+
+# -------------------------------------------------------------------- write --
+[[ -n "$run" && -n "$stage" && -n "$task_file" ]] || die \
+"write mode needs --run, --stage and --task-file. A free-text --write prompt is
+            no longer accepted: the approval is bound to the exact bytes of a task file.
+              fde approve-codex <run-id> <stage> --task-file <file> --repo <path>"
+[[ -n "$FDE" && -x "$FDE" ]] || die "cannot find the fde controller; write mode is unavailable"
+[[ -f "$task_file" ]] || die "no task file at $task_file"
+
+# Verify, then consume, the one-time approval. This re-hashes the task file, so
+# an edit since approval fails here — the approval is not widened, it is refused.
+grant="$("$FDE" _consume-approval "$run" "$stage" --task-file "$task_file")" || exit 7
+
+read -r repo writable network approval_id <<<"$(
+  printf '%s' "$grant" | python3 -c '
+import json,sys
+g = json.load(sys.stdin)
+print(g["repositoryPath"], g["writableRoot"], str(bool(g["network"])).lower(), g["approvalId"])
+')" || die "could not read the approval grant"
+
+[[ -d "$writable" ]] || die "approved writable root no longer exists: $writable"
+
+printf 'ask-codex: approval %s consumed — workspace-write in %s, network off\n' \
+  "$approval_id" "$writable" >&2
+if [[ "$network" == "true" ]]; then
+  printf 'ask-codex: network was requested at approval time but is NOT enabled.\n' >&2
+  printf '           Re-approve a narrower task, or do that step yourself.\n' >&2
+fi
+
+cd "$writable" || die "cannot enter $writable"
+
+# workspace-write bounds writes to this directory tree; network stays disabled.
+exec codex exec \
+  --sandbox workspace-write \
+  --ask-for-approval never \
+  --skip-git-repo-check \
+  "$(cat "$task_file")"

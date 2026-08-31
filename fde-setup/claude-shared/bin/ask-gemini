@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Ask Gemini CLI a question headlessly. Reads extra context from stdin if piped.
+#   ask-gemini "summarise the auth flow in this repo"
+#   git diff | ask-gemini "what would break in production?"
+# Lane: bulk reading, long context, and web-grounded research (Claude on Bedrock
+# has no WebSearch, so this is the research fallback there).
+set -uo pipefail
+command -v gemini >/dev/null || { echo "gemini CLI not installed: npm i -g @google/gemini-cli" >&2; exit 127; }
+model="${GEMINI_MODEL:-flash}"
+if [[ -p /dev/stdin ]]; then
+  gemini -p "$*" -m "$model" --approval-mode=default
+else
+  gemini -p "$*" -m "$model" --approval-mode=default </dev/null
+fi
+rc=$?
+# 0 ok | 1 API error | 42 bad input | 53 turn limit
+[[ $rc -eq 53 ]] && echo "(gemini hit its turn limit — narrow the question)" >&2
+exit $rc

@@ -1,0 +1,69 @@
+{
+  "_comment": "Identities, not roles. Nothing here says who does what — that is decided per run, by the user, in the run's roles.json. Do not add 'role', 'defaultRole' or a preferred agent to this file.",
+  "roles": [
+    "orchestrator",
+    "research",
+    "solutioning",
+    "review",
+    "deliveryPlanning",
+    "presentation",
+    "implementation",
+    "microsoftContext"
+  ],
+  "agents": {
+    "claude_work": {
+      "label": "Claude: work",
+      "kind": "claude",
+      "profile": "work",
+      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"]
+    },
+    "claude_msc": {
+      "label": "Claude: msc",
+      "kind": "claude",
+      "profile": "msc",
+      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"]
+    },
+    "claude_alt": {
+      "label": "Claude: alt",
+      "kind": "claude",
+      "profile": "alt",
+      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"]
+    },
+    "claude_bedrock": {
+      "label": "Claude Code: Bedrock",
+      "kind": "claude",
+      "profile": "bedrock",
+      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"],
+      "note": "No WebSearch on Bedrock. If this identity holds the research role, give it a second researcher or expect local-only evidence."
+    },
+    "chatgpt_codex": {
+      "label": "ChatGPT/Codex",
+      "kind": "codex",
+      "capabilities": ["research", "solutioning", "review", "implementation"],
+      "write_requires_approval": true,
+      "surface": "ChatGPT-authenticated Codex CLI (codex exec). This toolkit does not automate the ChatGPT web interface."
+    },
+    "gemini": {
+      "label": "Gemini",
+      "kind": "gemini",
+      "capabilities": ["research", "review"]
+    },
+    "microsoft_copilot": {
+      "label": "Microsoft Copilot",
+      "kind": "copilot-studio",
+      "capabilities": ["microsoft-context", "sharepoint", "outlook", "teams", "notebook-context"],
+      "surface": "Microsoft 365 Copilot / Copilot Studio agent over Direct Line. Not GitHub Copilot.",
+      "forbidden": ["source-code-edit", "git", "bitbucket", "jira-write"]
+    }
+  },
+  "roleCapability": {
+    "orchestrator": "orchestration",
+    "research": "research",
+    "solutioning": "solutioning",
+    "review": "review",
+    "deliveryPlanning": "orchestration",
+    "presentation": "solutioning",
+    "implementation": "implementation",
+    "microsoftContext": "microsoft-context"
+  }
+}
