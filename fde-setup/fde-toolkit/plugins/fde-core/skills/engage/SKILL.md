@@ -1,7 +1,7 @@
 ---
 name: engage
 description: Scope and run a piece of forward-deployed engineering work — the user says in plain English what they want done, you propose a plan of stages, they assign the roles, and only then does anything get read. Covers research, solution architecture, adversarial review, reconciliation, presentation, delivery planning, implementation and publication, in whatever combination the user actually asked for. Use when asked to work up a solution, analyse an epic, research something, get work validated, build a deck, produce a Jira breakdown, or take a requirement through to a delivered change.
-argument-hint: "<jira-key | requirement | run-id>"
+argument-hint: "[jira-key | requirement | run-id] — omit to start a new run"
 allowed-tools: Read, Grep, Glob, Bash, Write, Task
 ---
 
@@ -27,6 +27,37 @@ fde roles <run-id> --set role=identity # who does the rest — asked fresh every
 fde status <run-id>                    # plan, roles, artifacts, approvals, next
 fde resume <run-id> --next             # advance to whatever the plan says is next
 ```
+
+---
+
+## How this runs
+
+**The user talks; you run the commands.** Everything below is a conversation you
+hold with them — you call `fde` yourself to record what they decide. Do not ask
+them to type `fde plan` or `fde roles`. If you find yourself printing a command
+for the user to run, you have handed back the work this skill exists to do.
+
+Two exceptions, and they are the only two: `APPROVE CODEX <run-id>` and
+`APPROVE PUBLISH <run-id>` at stages 8 and 10. Those are typed by the user,
+verbatim. They must never be inferred from "yes", "go ahead", or anything else
+said in passing — a literal string the user typed is the whole point of the gate.
+
+**Entry.** You are invoked one of two ways:
+
+- *with nothing, or with a requirement or a Jira key* — a new run. Run
+  `fde start` yourself and go to -3. This is the normal case; the user should
+  never have to create a run by hand.
+- *with a run-id* — the run exists. Run `fde status <run-id>`, say in one line
+  where it is and what is next, and pick up there.
+
+**Scoping reads nothing, so it needs no connectors.** Stages -3 to -1 can be held
+in any Claude session. The Atlassian connector only reaches the orchestrator
+after roles are confirmed and `mcp-sync --run <run-id>` has written the run's
+config — and that config has to be passed at launch. So a new run is two
+conversations: scope here, then hand over (see the end of -1) and run it there.
+That restart is not friction to design around. It is "read nothing before roles
+are confirmed" enforced by the process boundary rather than by your good
+intentions, and it is the strongest guarantee in the toolkit.
 
 ---
 
@@ -177,6 +208,38 @@ Before any connector call:
 ```bash
 fde guard <run-id> --activity "reading the Jira epic"
 ```
+
+### Hand over to the run session
+
+Roles are confirmed, so the connector may now be wired up — and this scoping
+session's job is done. Wire it, then stop:
+
+```bash
+mcp-sync --run <run-id>
+```
+
+Tell them the run is scoped, summarise the plan and the assignments in a couple
+of lines, and give them the one command that starts it:
+
+```
+Run <run-id> is scoped and assigned. Start it with:
+
+  CLAUDE_CONFIG_DIR=~/.claude-profiles/<profile> \
+    claude --mcp-config ~/.claude-shared/runs/<run-id>/mcp/claude-<profile>.mcp.json
+
+then: /engage <run-id>
+```
+
+`<profile>` is the orchestrator's profile — `mcp-sync` prints the file it wrote,
+so use that name rather than guessing.
+
+**Then stop.** Do not read the epic, the client engagement file, or anything else
+in this session. Reaching this line without having read anything is the boundary
+working.
+
+If you are *already* in the run-scoped session — you were invoked with a run-id,
+or the config was in place before you started — there is no handover. Carry
+straight on to intake.
 
 ## The stages themselves
 

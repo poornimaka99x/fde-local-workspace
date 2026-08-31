@@ -94,39 +94,70 @@ npm i -g @openai/codex @google/gemini-cli
 
 ## 4. Your first run (10 min)
 
-Four questions, in this order. Each one reads nothing.
-
-**Who orchestrates?**
-
-```bash
-fde start
-```
-
-It prints a run id and asks. The orchestrator is the identity that will read your
-request and propose what the run should actually do — so it comes before the ask.
+You do not drive this with commands. You start a Claude session, say what you
+want in a sentence, and answer four questions.
 
 ```bash
-fde orchestrator <run-id> bedrock
+cc-bedrock      # or cc-work / cc-msc / cc-alt — any identity can scope a run
 ```
 
-`work`, `msc`, `alt`, `bedrock` and `codex` can all orchestrate. Gemini and
-Microsoft Copilot cannot — Gemini is a one-shot headless call with no session
-state, Copilot is a chat endpoint — but either can still research or review.
+```
+/engage MAX-142 same-day refunds — research it, get it validated, and give me slides
+```
 
-**What do you want done?**
+`/engage` creates the run and asks you, in order:
+
+1. **Who orchestrates?** `work`, `msc`, `alt`, `bedrock` or `codex`. Gemini and
+   Microsoft Copilot cannot — Gemini is a one-shot headless call with no session
+   state, Copilot is a chat endpoint — but either can still research or review.
+2. **Is this the ask?** It reads your sentence back before acting on it.
+3. **Is this the plan?** It proposes the stages your sentence implies and shows
+   what it is *not* doing. Most work is a slice, not all ten stages.
+4. **Who does the rest?** Narrowed to the roles this plan needs — a research-only
+   run never asks you for an implementation agent.
+
+Answer in plain English. It runs the `fde` calls behind each answer and holds the
+record; you never type `fde plan` or `fde roles` yourself.
+
+Nothing has been read at this point. Not Jira, not your client file, nothing.
+That is deliberate, and it is why the session then hands you over.
+
+### The handover
+
+Once roles are confirmed, `/engage` wires up the Atlassian connector for the
+orchestrator you chose and gives you the line that starts the actual run:
 
 ```bash
-fde request <run-id> "MAX-142 same-day refunds — research it, get it validated, and give me slides"
+CLAUDE_CONFIG_DIR=~/.claude-profiles/bedrock \
+  claude --mcp-config ~/.claude-shared/runs/<run-id>/mcp/claude-bedrock.mcp.json
 ```
 
-**What does that mean in stages?** The orchestrator proposes; you confirm:
+```
+/engage <run-id>
+```
+
+**The restart is the design, not a rough edge.** The Atlassian connector is in
+nobody's global config, so it does not exist for any identity until you have said
+who holds which role in this run. A process that *cannot* reach Jira is a stronger
+promise than an agent that has been told not to.
+
+From there it works the stages you agreed to, and it will **stop and ask you** if
+research turns up a gap that would change the design. That is it working, not
+failing.
+
+### Watching and steering it
+
+Ask in the session — "where is this?", "what's next?", "park it, I need to check
+with the PO" — and it runs the right command. The CLI is there for when you want
+to look from outside, or from another terminal:
 
 ```bash
-fde plan <run-id> --stages intake,research,review,presentation \
-  --intent "research it, get it validated, present it"
+fde status <run-id>            # plan, roles, artifacts, approvals, next step
+fde list                       # all runs
+fde shapes                     # the named plan shapes
 ```
 
-Not every job is the full pipeline. `fde shapes` lists the common ones:
+Named shapes are a shortcut when you already know the slice you want:
 
 ```
 research          intake → research
@@ -138,54 +169,25 @@ build             intake → implementation → verification
 full              all ten stages
 ```
 
-Combine them: `fde start -o bedrock "MAX-88" --shape presentation+delivery-plan`.
+Say "use the presentation and delivery-plan shapes" and it will — or skip the
+questions entirely:
+
+```bash
+fde start -o bedrock "MAX-88" --shape presentation+delivery-plan
+```
 
 `fde` warns if you skip a stage's usual input — a deck with no research behind it,
 say. Advisory, not a block; sometimes the input is in your head.
 
-**Who does the rest?** The question shrinks to fit the plan — a research-only run
-never asks you for an implementation agent:
-
-```bash
-fde roles <run-id> --set research=work --set review=codex \
-  --set presentation=work --set microsoftContext=none
-```
-
-Codex on review is where it earns its keep: a different model family arguing with
-your work, read-only, no approval needed. Research goes to a subscription profile
-because **Bedrock has no WebSearch**.
-
-Then run it. Start the orchestrator's session with the run-scoped Atlassian
-config — that connector is deliberately not in anyone's global config, so this is
-how it reaches the identity you chose:
-
-```bash
-CLAUDE_CONFIG_DIR=~/.claude-profiles/bedrock \
-  claude --mcp-config ~/.claude-shared/runs/<run-id>/mcp/claude-bedrock.mcp.json
-```
-
-```
-/engage <run-id>
-```
-
-Watch it from another terminal:
-
-```bash
-fde status <run-id>            # plan, roles, artifacts, approvals, next step
-fde resume <run-id> --next     # advance to whatever the plan says is next
-fde list                       # all runs
-```
-
-`/engage` will **stop and ask you** if research finds a gap that would change the
-design. That is it working, not failing.
-
 **Start a second task and all four questions come again.** Nothing is inherited.
-Only you typing `--same-as <run-id>` reuses an assignment.
+Only you saying "same roles as <run-id>" reuses an assignment.
 
 ## 5. When you want Codex to write code (5 min)
 
+This is one of only two places you type rather than talk, and that is the point.
 Giving Codex the implementation role authorises nothing on its own. The write is
-a separate, deliberate step:
+a separate, deliberate step, and the approval string is not something an agent can
+hear you say by accident:
 
 ```bash
 fde approve-codex <run-id> implementation \
@@ -215,8 +217,8 @@ toolkit.
 
 ## 6. When you want it in Jira or Confluence (3 min)
 
-`jira-plan.json` is a **preview**. A plan existing is not a reason to create
-anything.
+The other typed approval. `jira-plan.json` is a **preview** — a plan existing is
+not a reason to create anything.
 
 ```bash
 fde approve-publish <run-id> jira --summary "8 stories under MAX-142"
@@ -232,20 +234,31 @@ One target, one approval. Approving Jira says nothing about Confluence.
 
 ## Cheat sheet
 
+Most of this `/engage` runs for you. It is listed so you can look from outside —
+and for the two approvals, which are always yours to type.
+
 ```bash
+/engage "<what you want>"            start a run — the four questions, in chat
+/engage <run-id>                    pick an existing run back up
+APPROVE CODEX <run-id>              yours to type; never inferred
+APPROVE PUBLISH <run-id>            yours to type; never inferred
+
 fde doctor                          what's configured, what's broken
+fde status <run-id>                 plan, roles, artifacts, approvals, next
+fde list                            all runs
+fde shapes                          the named plan shapes
+mcp-sync --run <run-id>             wire the connector once roles are confirmed
+
+                                    /engage runs these for you; here for reference
 fde start                           new run; stops to ask who orchestrates
 fde orchestrator <run-id> <who>     the first decision
 fde request <run-id> "..."          the ask, in your own words
-fde shapes                          the named plan shapes
 fde plan <run-id> --stages a,b,c    what this run will actually do
 fde plan <run-id> --add solutioning widen it later (forwards only)
 fde roles <run-id> --set r=identity the rest; asked fresh every run
-fde status <run-id>                 plan, roles, artifacts, approvals, next
 fde resume <run-id> --next          advance to whatever the plan says is next
 fde resume <run-id> --block "..."   park it with a reason
 fde resume <run-id> --unblock       back to where it was
-fde list                            all runs
 
 cc-work  cc-msc  cc-alt  cc-bedrock    the four identities
 cc-which                               which one is active
