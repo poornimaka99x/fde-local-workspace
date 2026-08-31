@@ -1,67 +1,158 @@
 ---
 name: engage
-description: Run the full solutioning pipeline for a requirement or Jira epic — role assignment, intake, research, solution architecture, adversarial review, reconciliation, presentation, development plan, implementation and publication — with the user assigning roles before anything is read and approving every write. Use when asked to work up a solution, analyse an epic, produce an architecture proposal, or take a business requirement through to a delivered change.
-argument-hint: "<jira-key | requirement | confluence-page-id>"
+description: Scope and run a piece of forward-deployed engineering work — the user says in plain English what they want done, you propose a plan of stages, they assign the roles, and only then does anything get read. Covers research, solution architecture, adversarial review, reconciliation, presentation, delivery planning, implementation and publication, in whatever combination the user actually asked for. Use when asked to work up a solution, analyse an epic, research something, get work validated, build a deck, produce a Jira breakdown, or take a requirement through to a delivered change.
+argument-hint: "<jira-key | requirement | run-id>"
 allowed-tools: Read, Grep, Glob, Bash, Write, Task
 ---
 
 # Engage
 
-The orchestration pipeline. You coordinate; the assigned identities work. Keep
-your own context for the engagement and the reconciliation — do not do the
-research yourself, or by stage three you will have no room left to think.
+You coordinate; the assigned identities work. Keep your own context for the
+engagement and the reconciliation — do not do the research yourself, or by stage
+three you will have no room left to think.
 
-Every stage is recorded by the `fde` controller. Use it rather than remembering:
+**Most work is a slice of the pipeline, not all of it.** "Research this and get
+it validated" is a real ask. So is "slides and a Jira breakdown". Running either
+of those through all ten stages produces nine artifacts nobody wanted. Your first
+job is to find out which slice this is.
+
+The `fde` controller holds the record. Use it rather than remembering:
 
 ```bash
-fde start <jira-key-or-description>    # creates the run; state: awaiting_roles
-fde status <run-id>                    # state, roles, artifacts, approvals
-fde resume <run-id> --advance <state>  # move the pipeline on
+fde start                              # creates the run; state: awaiting_orchestrator
+fde orchestrator <run-id> <identity>   # the first decision — who interprets the ask
+fde request <run-id> "<what you want>" # the ask, in the user's own words
+fde plan <run-id> --stages a,b,c       # what this run will actually do
+fde roles <run-id> --set role=identity # who does the rest — asked fresh every run
+fde status <run-id>                    # plan, roles, artifacts, approvals, next
+fde resume <run-id> --next             # advance to whatever the plan says is next
 ```
 
 ---
 
-## -1. Assign roles — before anything else
+## -3. Who orchestrates — the first decision
 
-**This stage comes first. Nothing may be read before it completes.**
+Before the ask, before anything. The orchestrator is the identity that reads the
+user's sentence and proposes what the run should do, so choosing it is not a
+detail to fill in afterwards.
+
+Put this to them:
+
+```
+Who orchestrates this run?
+
+  Claude: work          Claude: msc          Claude: alt
+  Claude Code: Bedrock  ChatGPT/Codex
+```
+
+Gemini and Microsoft Copilot cannot: Gemini is a one-shot headless call with no
+session state, and Copilot is a chat endpoint over the Microsoft estate. Both can
+still hold research, review or context roles. `fde orchestrator` refuses them and
+says why.
+
+```bash
+fde orchestrator <run-id> codex
+```
+
+Short names work: `work`, `msc`, `alt`, `bedrock`, `codex`.
+
+**Do not pick on their behalf, and do not carry the last run's choice over.** If
+you are already running as one of these identities, that is not a reason to
+assume you are this run's orchestrator — say which you are and ask.
+
+## -2. The ask, and the plan it implies
+
+Now take the request:
+
+```bash
+fde request <run-id> "<their words, verbatim>"
+```
+
+**Most work is a slice of the pipeline, not all of it.** "Research this and get
+it validated" is a real ask. So is "slides and a Jira breakdown". Running either
+through all ten stages produces nine artifacts nobody wanted.
+
+Map their sentence onto stages. The ten available:
+
+| stage | what it produces |
+|---|---|
+| `intake` | what the ask is; client context; the PO's own words |
+| `research` | `research-brief.md` — evidence, prior art, gaps |
+| `solutioning` | `architecture-options.md`, `adr.md` |
+| `review` | `review.md` — someone whose job is to find what is wrong |
+| `reconciliation` | `reconciliation.md` — which objections stand, and why |
+| `presentation` | `solution-presentation.pptx` |
+| `planning` | `development-plan.md`, `jira-plan.json` (a preview) |
+| `implementation` | code, behind a one-time approval |
+| `verification` | `verification-report.md` |
+| `publication` | the step where other people start seeing it |
+
+How to read them:
+
+- "research X" → `intake, research`
+- "research X and get it validated" → `intake, research, review`
+- "...and present it" → add `presentation`
+- "work up a solution" / "I need an ADR" → `intake, research, solutioning, review, reconciliation`
+- "slides and a Jira breakdown" → `intake, presentation, planning`
+- "just review this design" → `intake, review`
+- "build it" → `intake, implementation, verification`
+- "the full thing" / a bare Jira key with no other steer → `full`
+
+`fde shapes` lists the named shortcuts; `--shape presentation+delivery-plan`
+combines them.
+
+**Include `intake` unless they have already given you everything.** It is cheap
+and it is what stops the output sounding generic.
+
+**Then show them the plan and wait.** Not a paraphrase — the actual list, what is
+being skipped, and which roles it will need:
+
+```
+Proposed plan — 4 stages:
+  intake  →  research  →  adversarial review  →  presentation
+
+Not doing: solution architecture, reconciliation, development plan,
+           implementation, verification, publication
+
+Roles still to assign: researcher(s), reviewer(s), presentation author
+(no delivery planner or implementation agent — this run does not go there)
+
+Confirm?
+```
+
+On confirmation, record it verbatim:
+
+```bash
+fde plan <run-id> --stages intake,research,review,presentation \
+  --intent "research MAX-142, get it validated, present it"
+```
+
+`fde` will warn if a stage's usual input is missing — a presentation with no
+research behind it, say. That is advisory. Relay the warning, say where you
+intend to get that input instead, and carry on if they still want it.
+
+If they later say "actually, I do want an ADR", widen it:
+`fde plan <run-id> --add solutioning`. You cannot add a stage the run has already
+gone past; that is a new run.
+
+## -1. Assign roles — before anything is read
 
 Identities are not roles. "Claude: work", "ChatGPT/Codex", "Gemini" and
 "Microsoft Copilot" are *who is in the room*; what each of them does is decided
 by the user, for this run, every run.
 
-Run `fde start`, then put this question to the user verbatim:
-
-```
-Before I initialize this task, assign the roles.
-
-Available identities:
-- Claude: work
-- Claude: msc
-- Claude: alt
-- Claude Code: Bedrock
-- ChatGPT/Codex
-- Gemini
-- Microsoft Copilot
-
-Choose:
-- Orchestrator:
-- Researcher(s):
-- Solution architect:
-- Reviewer(s):
-- Delivery planner:
-- Presentation author:
-- Implementation agent:
-- Microsoft context source: include / exclude
-
-An identity may hold more than one role. Use "none" where a role is unnecessary.
-I will not initialize the task or access connected systems until you confirm.
-```
+`fde plan` prints the role question already narrowed to the roles this plan
+needs, with the orchestrator shown as already chosen. Put it to the user
+verbatim — a research-only run has no implementation agent to assign, and asking
+for one invites an answer that means nothing.
 
 Record the answer:
 
 ```bash
 fde roles <run-id> --set orchestrator=claude_alt --set research=claude_work,gemini ...
 ```
+
+Short names work: `work`, `msc`, `alt`, `bedrock`, `codex`, `gemini`.
 
 Rules, and they are not negotiable:
 
@@ -70,12 +161,14 @@ Rules, and they are not negotiable:
 - **Do not carry roles over from the previous run.** A new run asks again. Only
   the user saying "same as the previous task" makes `--same-as <run-id>` valid.
 - **Read nothing until roles are confirmed.** No Jira, no Confluence, no
-  SharePoint, no email, no repository, no client context file. Creating the
-  empty run record is allowed; initialising the task is not.
+  SharePoint, no email, no repository, no client context file. Creating the run,
+  choosing an orchestrator and scoping the work are allowed — none of them reads
+  anything, and the user's own sentence is not a connector. Initialising the task
+  is not allowed.
 - **If an assigned identity is unavailable, stop and ask for a replacement.**
   `fde roles` refuses and names what is missing. Do not silently substitute.
-- **Agents may only be invoked for roles they hold in this run.** `fde invoke`
-  enforces it; do not work around it with a direct CLI call.
+- **Agents may only be invoked for roles they hold in this run**, and only for
+  stages in this run's plan. `fde invoke` enforces both.
 - Assignments live in the run's `roles.json` and nowhere else. Nothing is written
   back to `agents.json`.
 
@@ -84,6 +177,13 @@ Before any connector call:
 ```bash
 fde guard <run-id> --activity "reading the Jira epic"
 ```
+
+## The stages themselves
+
+**Do only the stages in the plan.** `fde status <run-id>` shows which those are
+and which one is next; `fde resume <run-id> --next` moves you on. A stage below
+that is not in this run's plan does not happen, however natural it feels — if it
+turns out to be needed, widen the plan explicitly and say why.
 
 ## 0. Intake
 
@@ -133,8 +233,8 @@ Write the decision up as `artifacts/architecture/adr.md`.
 
 ## 5. Presentation → `artifacts/presentation/solution-presentation.pptx`
 
-Dispatch the assigned presentation author. If no identity holds that role, say
-so and skip it rather than doing it yourself by default.
+Dispatch the assigned presentation author. If this stage is in the plan but no
+identity holds the role, stop and ask — do not quietly write the deck yourself.
 
 ## 6. Development plan → `artifacts/delivery-plan/development-plan.md`
 ##    and the Jira preview → `artifacts/delivery-plan/jira-plan.json`
@@ -207,6 +307,13 @@ Only what was approved, only to the approved target. Then
 - **Nothing is read before roles are confirmed; nothing is written outside this
   machine without a publication approval.** Those two sentences are the whole
   design. Everything else is detail.
+- **Do what was asked, not the whole pipeline.** A plan is a promise about scope.
+  Producing an unasked-for ADR is not generosity, it is noise in someone's
+  Confluence space and an hour of your context spent badly.
+- The approval gates are not stages you can plan around. If `implementation` is
+  in the plan, `awaiting_implementation_approval` precedes it and the run will
+  not enter implementation without the approval that gate exists for. Same for
+  publication.
 - Report disagreement between stages rather than smoothing it. Where the reviewer
   and the architect disagreed and you picked a side, say that you picked.
 - If an assigned identity could not run — a CLI missing, a service unreachable —

@@ -67,45 +67,63 @@ not exist — that is why the wrapper is now three lines.
 
 ## Running a piece of work
 
-```bash
-fde start MAX-142            # creates a run in state awaiting_roles
-```
-
-It reads nothing. It prints the role question and stops. You answer it:
+Four questions, in order, none of which reads anything:
 
 ```bash
-fde roles <run-id> \
-  --set orchestrator=claude_alt \
-  --set research=claude_work,gemini \
-  --set solutioning=chatgpt_codex \
-  --set review=claude_msc \
-  --set deliveryPlanning=claude_alt \
-  --set presentation=claude_work \
-  --set implementation=chatgpt_codex \
-  --set microsoftContext=microsoft_copilot
+fde start                                    # 1. who orchestrates?
+fde orchestrator <run-id> bedrock            #    work | msc | alt | bedrock | codex
+fde request <run-id> "MAX-142 — research it, validate it, give me slides"
+fde plan <run-id> --stages intake,research,review,presentation   # 2. what does that mean?
+fde roles <run-id> --set research=work --set review=codex \
+                   --set presentation=work --set microsoftContext=none
 ```
+
+**The orchestrator comes first** because it is the identity that reads your
+sentence and proposes what the run should do. Any Claude profile or Codex can
+hold it; Gemini and Microsoft Copilot cannot — Gemini is a one-shot headless call
+with no session state and Copilot is a chat endpoint over the Microsoft estate,
+so neither can hold a run together. Both can still research or review.
+
+**A run is a slice of the pipeline, not all of it.** "Research this and get it
+validated" is a real ask; so is "slides and a Jira breakdown". The plan decides
+which of the ten stages this run does, and everything downstream follows it —
+the role question shrinks to fit, `fde status` shows only the artifacts in scope,
+and `fde invoke` refuses a stage that is not in the plan. `fde shapes` lists the
+common ones:
+
+```
+research          intake → research
+research-to-adr   intake → research → solution architecture → review → reconciliation
+review-only       intake → adversarial review
+presentation      intake → presentation
+delivery-plan     intake → development plan
+build             intake → implementation → verification
+full              all ten stages
+```
+
+Skipping a stage's usual input warns rather than blocks — sometimes the input is
+in your head or in a Confluence page. Widening a plan later works forwards
+(`fde plan <run-id> --add solutioning`); going backwards is a new run.
+
+Approval gates are not stages you can plan around. If `implementation` is in the
+plan, `awaiting_implementation_approval` precedes it and the run will not enter
+implementation without the approval that gate exists for. Same for publication.
 
 Any identity may hold any role it has the capability for; one identity may hold
-several; `none` is a valid answer. If something you assigned is not available on
-this machine, `fde roles` stops and tells you what is missing rather than
-substituting. The assignment lives in that run's `roles.json` — a new run asks
-again, from scratch.
+several; `none` is valid. If something you assigned is not available on this
+machine, `fde roles` stops and says what is missing rather than substituting.
+The assignment lives in that run's `roles.json` — a new run asks again, from
+scratch.
 
-Then `/engage` runs the pipeline:
+Then `/engage <run-id>` runs it, with `fde status <run-id>` showing state,
+artifacts, approvals and what is next, and `fde resume <run-id> --next` moving it
+along.
 
-```
-roles → intake → research → solution architecture → adversarial review
-→ reconciliation → presentation → development plan → implementation-agent
-selection → implementation approval → implementation → verification
-→ publication approval → publish
-```
-
-with `fde status <run-id>` showing state, artifacts, approvals and what is next.
-
-Artifacts land under the run: `research-brief.md`, `architecture-options.md`,
-`adr.md`, `review.md`, `reconciliation.md`, `solution-presentation.pptx`,
-`development-plan.md`, `jira-plan.json`, `implementation-task.md`,
-`verification-report.md`, `publication-manifest.json`.
+Artifacts land under the run, and only the ones the plan calls for:
+`research-brief.md`, `architecture-options.md`, `adr.md`, `review.md`,
+`reconciliation.md`, `solution-presentation.pptx`, `development-plan.md`,
+`jira-plan.json`, `implementation-task.md`, `verification-report.md`,
+`publication-manifest.json`.
 
 `jira-plan.json` is a preview. A plan existing is not a reason to create
 anything.

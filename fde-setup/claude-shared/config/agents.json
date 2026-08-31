@@ -1,5 +1,5 @@
 {
-  "_comment": "Identities, not roles. Nothing here says who does what — that is decided per run, by the user, in the run's roles.json. Do not add 'role', 'defaultRole' or a preferred agent to this file.",
+  "_comment": "Identities, not roles. Nothing here says who does what \u2014 that is decided per run, by the user, in the run's roles.json. Do not add 'role', 'defaultRole' or a preferred agent to this file.",
   "roles": [
     "orchestrator",
     "research",
@@ -15,45 +15,91 @@
       "label": "Claude: work",
       "kind": "claude",
       "profile": "work",
-      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"]
+      "capabilities": [
+        "orchestration",
+        "research",
+        "solutioning",
+        "review",
+        "implementation"
+      ]
     },
     "claude_msc": {
       "label": "Claude: msc",
       "kind": "claude",
       "profile": "msc",
-      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"]
+      "capabilities": [
+        "orchestration",
+        "research",
+        "solutioning",
+        "review",
+        "implementation"
+      ]
     },
     "claude_alt": {
       "label": "Claude: alt",
       "kind": "claude",
       "profile": "alt",
-      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"]
+      "capabilities": [
+        "orchestration",
+        "research",
+        "solutioning",
+        "review",
+        "implementation"
+      ]
     },
     "claude_bedrock": {
       "label": "Claude Code: Bedrock",
       "kind": "claude",
       "profile": "bedrock",
-      "capabilities": ["orchestration", "research", "solutioning", "review", "implementation"],
+      "capabilities": [
+        "orchestration",
+        "research",
+        "solutioning",
+        "review",
+        "implementation"
+      ],
       "note": "No WebSearch on Bedrock. If this identity holds the research role, give it a second researcher or expect local-only evidence."
     },
     "chatgpt_codex": {
       "label": "ChatGPT/Codex",
       "kind": "codex",
-      "capabilities": ["research", "solutioning", "review", "implementation"],
+      "capabilities": [
+        "orchestration",
+        "research",
+        "solutioning",
+        "review",
+        "implementation"
+      ],
       "write_requires_approval": true,
       "surface": "ChatGPT-authenticated Codex CLI (codex exec). This toolkit does not automate the ChatGPT web interface."
     },
     "gemini": {
       "label": "Gemini",
       "kind": "gemini",
-      "capabilities": ["research", "review"]
+      "capabilities": [
+        "research",
+        "review"
+      ],
+      "note": "One-shot headless invocation with no session state, so it cannot hold a run together. Research and review only."
     },
     "microsoft_copilot": {
       "label": "Microsoft Copilot",
       "kind": "copilot-studio",
-      "capabilities": ["microsoft-context", "sharepoint", "outlook", "teams", "notebook-context"],
+      "capabilities": [
+        "microsoft-context",
+        "sharepoint",
+        "outlook",
+        "teams",
+        "notebook-context"
+      ],
       "surface": "Microsoft 365 Copilot / Copilot Studio agent over Direct Line. Not GitHub Copilot.",
-      "forbidden": ["source-code-edit", "git", "bitbucket", "jira-write"]
+      "forbidden": [
+        "source-code-edit",
+        "git",
+        "bitbucket",
+        "jira-write",
+        "orchestration"
+      ]
     }
   },
   "roleCapability": {

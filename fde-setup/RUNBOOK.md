@@ -223,34 +223,39 @@ anything.
 ## Phase 6 — run the pipeline (15 min)
 
 ```bash
-fde start MAX-142
+fde start
 ```
 
-It creates the run and stops in `awaiting_roles`. Nothing has been read: no Jira,
-no Confluence, no SharePoint, no repository, no client context. Assign the roles:
+It creates the run and stops in `awaiting_orchestrator`. Nothing has been read:
+no Jira, no Confluence, no SharePoint, no repository, no client context.
 
 ```bash
+fde orchestrator <run-id> bedrock
+fde request <run-id> "MAX-142 same-day refunds — research it, validate it, slides"
+fde plan <run-id> --stages intake,research,review,presentation
 fde roles <run-id> \
-  --set orchestrator=claude_bedrock \
   --set research=claude_work,gemini \
-  --set solutioning=chatgpt_codex \
-  --set review=claude_msc \
-  --set deliveryPlanning=claude_bedrock \
+  --set review=chatgpt_codex \
   --set presentation=claude_work \
-  --set implementation=chatgpt_codex \
-  --set microsoftContext=microsoft_copilot
+  --set microsoftContext=none
 ```
+
+The plan decides everything downstream: the role question only asks for roles the
+plan needs, `fde status` shows only the artifacts in scope, and `fde invoke`
+refuses a stage that is not in it. `fde shapes` lists the common shapes;
+`fde start -o bedrock "MAX-88" --shape presentation+delivery-plan` does the first
+three steps at once.
 
 Then in the orchestrator's session:
 
 ```
-/engage MAX-142
+/engage <run-id>
 ```
 
 It will **stop and ask you** if the researcher finds a gap that would change the
 design. That is the pipeline working, not failing.
 
-Track it with `fde status <run-id>`.
+Track it with `fde status <run-id>`, advance it with `fde resume <run-id> --next`.
 
 **Start a second task and it asks for roles again.** It will not reuse these.
 Only you saying "same as the previous task" makes `--same-as <run-id>` valid.

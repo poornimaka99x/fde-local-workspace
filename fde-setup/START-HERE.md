@@ -94,75 +94,93 @@ npm i -g @openai/codex @google/gemini-cli
 
 ## 4. Your first run (10 min)
 
-```bash
-fde start MAX-142
-```
+Four questions, in this order. Each one reads nothing.
 
-It prints a run id and the role question, and stops. **Nothing has been read** —
-no Jira, no Confluence, no SharePoint, no repo, no client context. That is the
-point of the stop.
-
-Assign the roles. Use the identity ids on the left:
-
-| id | who |
-|---|---|
-| `claude_work` | Claude: work |
-| `claude_msc` | Claude: msc |
-| `claude_alt` | Claude: alt |
-| `claude_bedrock` | Claude Code: Bedrock |
-| `chatgpt_codex` | ChatGPT/Codex |
-| `gemini` | Gemini |
-| `microsoft_copilot` | Microsoft Copilot |
-
-A sensible first shape — orchestrate on Bedrock because that is the Maxeda
-account, research on a subscription profile because **Bedrock has no WebSearch**:
+**Who orchestrates?**
 
 ```bash
-fde roles <run-id> \
-  --set orchestrator=claude_bedrock \
-  --set research=claude_work \
-  --set solutioning=claude_work \
-  --set review=claude_msc \
-  --set deliveryPlanning=claude_bedrock \
-  --set presentation=claude_work \
-  --set implementation=none \
-  --set microsoftContext=none
+fde start
 ```
 
-`none` is a real answer. Leave implementation off until you actually want code
-written. Add `gemini` or `chatgpt_codex` once they are installed —
-`--set research=claude_work,gemini` gives you two researchers.
+It prints a run id and asks. The orchestrator is the identity that will read your
+request and propose what the run should actually do — so it comes before the ask.
 
-If you would rather be asked question by question, run `fde roles <run-id>` with
-no flags in a terminal.
+```bash
+fde orchestrator <run-id> bedrock
+```
 
-Then run the pipeline. Start the orchestrator's session **with the run-scoped
-Atlassian config** — that connector is deliberately not in anyone's global
-config, so this is how it gets wired to the identity you chose:
+`work`, `msc`, `alt`, `bedrock` and `codex` can all orchestrate. Gemini and
+Microsoft Copilot cannot — Gemini is a one-shot headless call with no session
+state, Copilot is a chat endpoint — but either can still research or review.
+
+**What do you want done?**
+
+```bash
+fde request <run-id> "MAX-142 same-day refunds — research it, get it validated, and give me slides"
+```
+
+**What does that mean in stages?** The orchestrator proposes; you confirm:
+
+```bash
+fde plan <run-id> --stages intake,research,review,presentation \
+  --intent "research it, get it validated, present it"
+```
+
+Not every job is the full pipeline. `fde shapes` lists the common ones:
+
+```
+research          intake → research
+research-to-adr   intake → research → solution architecture → review → reconciliation
+review-only       intake → adversarial review
+presentation      intake → presentation
+delivery-plan     intake → development plan
+build             intake → implementation → verification
+full              all ten stages
+```
+
+Combine them: `fde start -o bedrock "MAX-88" --shape presentation+delivery-plan`.
+
+`fde` warns if you skip a stage's usual input — a deck with no research behind it,
+say. Advisory, not a block; sometimes the input is in your head.
+
+**Who does the rest?** The question shrinks to fit the plan — a research-only run
+never asks you for an implementation agent:
+
+```bash
+fde roles <run-id> --set research=work --set review=codex \
+  --set presentation=work --set microsoftContext=none
+```
+
+Codex on review is where it earns its keep: a different model family arguing with
+your work, read-only, no approval needed. Research goes to a subscription profile
+because **Bedrock has no WebSearch**.
+
+Then run it. Start the orchestrator's session with the run-scoped Atlassian
+config — that connector is deliberately not in anyone's global config, so this is
+how it reaches the identity you chose:
 
 ```bash
 CLAUDE_CONFIG_DIR=~/.claude-profiles/bedrock \
   claude --mcp-config ~/.claude-shared/runs/<run-id>/mcp/claude-bedrock.mcp.json
 ```
 
-Inside that session:
-
 ```
-/engage MAX-142
+/engage <run-id>
 ```
 
-From another terminal, watch it:
+Watch it from another terminal:
 
 ```bash
-fde status <run-id>       # state, artifacts, approvals, what's next
-fde list                  # all runs
+fde status <run-id>            # plan, roles, artifacts, approvals, next step
+fde resume <run-id> --next     # advance to whatever the plan says is next
+fde list                       # all runs
 ```
 
 `/engage` will **stop and ask you** if research finds a gap that would change the
 design. That is it working, not failing.
 
-**Start a second task and it asks for roles again.** It will not reuse these.
-Only you typing `--same-as <run-id>` makes that happen.
+**Start a second task and all four questions come again.** Nothing is inherited.
+Only you typing `--same-as <run-id>` reuses an assignment.
 
 ## 5. When you want Codex to write code (5 min)
 
@@ -216,10 +234,15 @@ One target, one approval. Approving Jira says nothing about Confluence.
 
 ```bash
 fde doctor                          what's configured, what's broken
-fde start <key-or-description>      new run; stops for roles
-fde roles <run-id> --set r=identity assign; asked fresh every run
-fde status <run-id>                 state, artifacts, approvals, next step
-fde resume <run-id>                 where am I, what now
+fde start                           new run; stops to ask who orchestrates
+fde orchestrator <run-id> <who>     the first decision
+fde request <run-id> "..."          the ask, in your own words
+fde shapes                          the named plan shapes
+fde plan <run-id> --stages a,b,c    what this run will actually do
+fde plan <run-id> --add solutioning widen it later (forwards only)
+fde roles <run-id> --set r=identity the rest; asked fresh every run
+fde status <run-id>                 plan, roles, artifacts, approvals, next
+fde resume <run-id> --next          advance to whatever the plan says is next
 fde resume <run-id> --block "..."   park it with a reason
 fde resume <run-id> --unblock       back to where it was
 fde list                            all runs
@@ -242,7 +265,14 @@ directory is gitignored and belongs to this machine.
 
 | What you see | What it means | What to do |
 |---|---|---|
+| `has no orchestrator yet` | the first decision hasn't been made | `fde orchestrator <run-id> <who>` |
+| `cannot orchestrate` | Gemini and MS Copilot can't hold a run together | pick a Claude profile or Codex |
+| `has no stated ask yet` | you planned before saying what you want | `fde request <run-id> "..."` |
+| `no confirmed plan` | the run hasn't been scoped | `fde plan <run-id> --stages ...` |
 | `roles are not confirmed` | you tried to read or run something before assigning roles | `fde roles <run-id>` |
+| `not a role this run needs` | that role isn't in the plan | `fde plan <run-id> --add <stage>` first |
+| `not in this run's plan` | that stage isn't in scope | widen the plan, or don't do it |
+| `already been passed` | you can widen a plan forwards, not backwards | new run for that work |
 | `holds no role in run` | that identity was not assigned anything here | assign it, or use one that was |
 | `does not cover the 'X' stage` | assigned, but to a different role | check `fde status <run-id>` |
 | `Choose a replacement` | you assigned something not installed on this Mac | install it, pick another, or `--allow-unavailable` if you'll fix it before that stage |

@@ -52,7 +52,14 @@ FORBIDDEN_CODEX_FLAGS = ("--yolo", "danger-full-access", "--dangerously-bypass-a
 
 # ------------------------------------------------------------- state machine --
 
+# Every state a run CAN be in. Which of them a given run actually visits is
+# decided by its plan. Most real work is a slice of the full pipeline — research
+# that needs validating and presenting; a presentation plus a Jira breakdown —
+# and marching such a job through eleven irrelevant states is how a tool starts
+# getting worked around instead of used.
 STATES = [
+    "awaiting_orchestrator",
+    "awaiting_plan",
     "awaiting_roles",
     "roles_confirmed",
     "intake",
@@ -60,34 +67,115 @@ STATES = [
     "solutioning",
     "review",
     "reconciliation",
+    "presentation",
     "planning",
     "awaiting_implementation_approval",
     "implementation",
     "verification",
     "awaiting_publication_approval",
+    "publication",
     "complete",
     "blocked",
 ]
 
-LINEAR = [s for s in STATES if s != "blocked"]
+# You pick the orchestrator first, before you even state the ask. It is the
+# identity that will read your sentence and propose what the run should do, so
+# choosing it is not a detail to fill in later — it is the first decision.
+PRELUDE = ["awaiting_orchestrator", "awaiting_plan", "awaiting_roles", "roles_confirmed"]
 
-TRANSITIONS = {a: {b} for a, b in zip(LINEAR, LINEAR[1:])}
-TRANSITIONS.setdefault("complete", set())
-for _s in LINEAR:
-    TRANSITIONS[_s].add("blocked")          # anything can block
-TRANSITIONS["blocked"] = set(LINEAR)        # and unblock back to where it was
+# The work stages, in the only order they can sensibly run. A plan is a subset of
+# this list; it never reorders it.
+STAGE_ORDER = [
+    "intake",
+    "research",
+    "solutioning",
+    "review",
+    "reconciliation",
+    "presentation",
+    "planning",
+    "implementation",
+    "verification",
+    "publication",
+]
 
-# Which run state each pipeline stage belongs to, and where its output is filed.
-STAGE_STATE = {
+STAGE_LABEL = {
     "intake": "intake",
     "research": "research",
-    "solutioning": "solutioning",
-    "review": "review",
+    "solutioning": "solution architecture",
+    "review": "adversarial review",
     "reconciliation": "reconciliation",
-    "planning": "planning",
-    "presentation": "planning",
+    "presentation": "presentation",
+    "planning": "development plan",
     "implementation": "implementation",
     "verification": "verification",
+    "publication": "publication",
+}
+
+# A gate state is inserted automatically before the stage it guards, and only
+# when that stage is in the plan. You cannot plan your way past an approval.
+STAGE_GATE = {
+    "implementation": "awaiting_implementation_approval",
+    "publication": "awaiting_publication_approval",
+}
+
+GATE_STATES = {gate: stage for stage, gate in STAGE_GATE.items()}
+
+# Shorthand for the shapes that come up often. Free text is the normal way in —
+# these exist so a shape you run every week does not need re-describing.
+SHAPES = {
+    "research": ["intake", "research"],
+    "research-to-adr": ["intake", "research", "solutioning", "review", "reconciliation"],
+    "review-only": ["intake", "review"],
+    "presentation": ["intake", "presentation"],
+    "delivery-plan": ["intake", "planning"],
+    "build": ["intake", "implementation", "verification"],
+    "full": list(STAGE_ORDER),
+}
+
+# Which role a stage needs filled. An identity may hold several roles, so if you
+# want the orchestrator to also write the delivery plan, assign it both.
+STAGE_ROLES = {
+    "intake": ["orchestrator"],
+    "research": ["research"],
+    "solutioning": ["solutioning"],
+    "review": ["review"],
+    "reconciliation": ["orchestrator"],
+    "presentation": ["presentation"],
+    "planning": ["deliveryPlanning"],
+    "implementation": ["implementation"],
+    "verification": ["implementation"],
+    "publication": ["orchestrator"],
+}
+
+# Optional role, offered only when the run reads context at all.
+OPTIONAL_ROLES = {"microsoftContext": {"intake", "research"}}
+
+# What a stage normally feeds on — any one of these is enough. Advisory: fde says
+# what is missing and then does what you asked. Reviewing raw research without an
+# architecture in between is a real thing to want, not a mistake.
+STAGE_PREREQ = {
+    "research": ["intake"],
+    "solutioning": ["research"],
+    "review": ["solutioning", "research"],
+    "reconciliation": ["review"],
+    "presentation": ["reconciliation", "solutioning", "research"],
+    "planning": ["reconciliation", "solutioning", "research"],
+    "implementation": ["planning", "solutioning"],
+    "verification": ["implementation"],
+    "publication": [],
+}
+
+STAGE_ARTIFACTS = {
+    "intake": [],
+    "research": [("research", "research-brief.md")],
+    "solutioning": [("architecture", "architecture-options.md"), ("architecture", "adr.md")],
+    "review": [("review", "review.md")],
+    "reconciliation": [("review", "reconciliation.md")],
+    "presentation": [("presentation", "solution-presentation.pptx")],
+    "planning": [("delivery-plan", "development-plan.md"), ("delivery-plan", "jira-plan.json")],
+    "implementation": [("implementation", "implementation-task.md")],
+    "verification": [("implementation", "verification-report.md")],
+    "publication": [(".", "publication-manifest.json")],
 }
 
 STAGE_DIR = {
@@ -96,42 +184,82 @@ STAGE_DIR = {
     "solutioning": "architecture",
     "review": "review",
     "reconciliation": "review",
-    "planning": "delivery-plan",
     "presentation": "presentation",
+    "planning": "delivery-plan",
     "implementation": "implementation",
     "verification": "implementation",
+    "publication": "delivery-plan",
 }
 
-# The stage a role is allowed to act in.
-ROLE_STAGES = {
-    "orchestrator": {"intake", "reconciliation", "planning"},
-    "research": {"research", "intake"},
-    "solutioning": {"solutioning"},
-    "review": {"review"},
-    "deliveryPlanning": {"planning"},
-    "presentation": {"presentation"},
-    "implementation": {"implementation", "verification"},
-    "microsoftContext": {"intake", "research"},
-}
+# Derived: which stages a role may act in. Built from STAGE_ROLES so the two can
+# never drift apart.
+ROLE_STAGES = {}
+for _stage, _roles in STAGE_ROLES.items():
+    for _r in _roles:
+        ROLE_STAGES.setdefault(_r, set()).add(_stage)
+for _r, _stages in OPTIONAL_ROLES.items():
+    ROLE_STAGES.setdefault(_r, set()).update(_stages)
+
+ALL_ROLES = list(STAGE_ROLES) and [
+    "orchestrator", "research", "solutioning", "review",
+    "deliveryPlanning", "presentation", "implementation", "microsoftContext",
+]
 
 MULTI_ROLES = {"research", "review"}
-
-ARTIFACTS = [
-    ("research", "research-brief.md"),
-    ("architecture", "architecture-options.md"),
-    ("architecture", "adr.md"),
-    ("review", "review.md"),
-    ("review", "reconciliation.md"),
-    ("presentation", "solution-presentation.pptx"),
-    ("delivery-plan", "development-plan.md"),
-    ("delivery-plan", "jira-plan.json"),
-    ("implementation", "implementation-task.md"),
-    ("implementation", "verification-report.md"),
-]
 
 PUBLICATION_TARGETS = ("jira", "confluence", "sharepoint", "bitbucket", "email", "teams")
 
 ARTIFACT_DIRS = ["research", "architecture", "review", "presentation", "delivery-plan", "implementation"]
+
+
+def expand_stages(stages):
+    """A plan, in canonical order, with its approval gates inserted."""
+    chosen = [s for s in STAGE_ORDER if s in set(stages)]
+    out = []
+    for s in chosen:
+        if s in STAGE_GATE:
+            out.append(STAGE_GATE[s])
+        out.append(s)
+    return chosen, out
+
+
+def state_sequence(stages):
+    _chosen, expanded = expand_stages(stages)
+    return PRELUDE + expanded + ["complete"]
+
+
+def transitions_for(stages):
+    seq = state_sequence(stages)
+    tr = {a: {b} for a, b in zip(seq, seq[1:])}
+    tr.setdefault("complete", set())
+    for s in seq:
+        tr[s].add("blocked")
+    tr["blocked"] = set(seq)
+    return tr
+
+
+def roles_needed(stages):
+    """Which roles this plan actually requires, in the canonical display order."""
+    need = {"orchestrator"}
+    for s in stages:
+        need.update(STAGE_ROLES.get(s, []))
+    for r, when in OPTIONAL_ROLES.items():
+        if when & set(stages):
+            need.add(r)
+    return [r for r in ALL_ROLES if r in need]
+
+
+def prereq_warnings(run_stages):
+    """Advisory only. Names what a stage normally feeds on when the plan omits it."""
+    have = set(run_stages)
+    out = []
+    for s in run_stages:
+        feeders = STAGE_PREREQ.get(s, [])
+        if feeders and not (have & set(feeders)):
+            out.append(f"{STAGE_LABEL[s]} normally follows "
+                       f"{' or '.join(STAGE_LABEL[f] for f in feeders)}, which this plan skips — "
+                       f"supply that input yourself or expect thin output")
+    return out
 
 # ------------------------------------------------------------------ plumbing --
 
@@ -290,6 +418,8 @@ class Run:
     @property
     def roles_path(self): return self.dir / "roles.json"
     @property
+    def plan_path(self): return self.dir / "plan.json"
+    @property
     def events_path(self): return self.dir / "events.jsonl"
     @property
     def approvals_path(self): return self.dir / "approvals.jsonl"
@@ -323,13 +453,65 @@ class Run:
     def approvals(self):
         return read_jsonl(self.approvals_path)
 
+    def write_requirement(self, text):
+        m = self.manifest()
+        write_atomic(self.dir / "requirement.md", (
+            f"# Requirement\n\n"
+            f"- captured: {iso()}\n"
+            f"- jira: {m.get('jiraKey') or '(none given)'}\n"
+            f"- source: given by the user; nothing has been fetched\n\n"
+            f"---\n\n{text}\n"))
+        m["requirement"] = text[:400]
+        km = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", text.strip())
+        if km and not m.get("jiraKey"):
+            m["jiraKey"] = km.group(1)
+        self.save_manifest(m)
+
+    def orchestrator(self):
+        who = self.assignees("orchestrator")
+        return who[0] if who else None
+
+    def guard_orchestrator(self, what):
+        if not self.orchestrator():
+            die(f"run {self.id} has no orchestrator yet, so {what} is not permitted.\n"
+                f"       run: fde orchestrator {self.id} <identity>", 6)
+
+    # -- plan
+    def plan(self):
+        return read_json(self.plan_path)
+
+    def planned(self):
+        p = self.plan()
+        return bool(p and p.get("confirmedAt"))
+
+    def stages(self):
+        """This run's stages. A run created before plans existed is a full one."""
+        p = self.plan()
+        if p and p.get("stages"):
+            return [s for s in STAGE_ORDER if s in set(p["stages"])]
+        return list(STAGE_ORDER)
+
+    def skipped(self):
+        return [s for s in STAGE_ORDER if s not in set(self.stages())]
+
+    def sequence(self):
+        return state_sequence(self.stages())
+
+    def roles_needed(self):
+        return roles_needed(self.stages())
+
+    def plan_line(self):
+        return "  →  ".join(STAGE_LABEL[s] for s in self.stages())
+
     # -- roles
     def roles(self):
         return read_json(self.roles_path)
 
     def roles_confirmed(self):
-        r = self.roles()
-        return bool(r and r.get("confirmedAt"))
+        s = self.state
+        if s == "blocked":
+            s = self.manifest().get("blockedFrom") or "awaiting_orchestrator"
+        return s not in ("awaiting_orchestrator", "awaiting_plan", "awaiting_roles")
 
     def assignees(self, role):
         r = self.roles() or {}
@@ -356,8 +538,13 @@ class Run:
         old = m.get("state")
         if new == old:
             return old
-        if new not in TRANSITIONS.get(old, set()):
-            die(f"illegal transition {old} -> {new}", 5)
+        if old in GATE_STATES and new == GATE_STATES[old]:
+            self.check_gate(old, new)
+        if new not in transitions_for(self.stages()).get(old, set()):
+            nxt = self.next_state(old)
+            hint = f" Next in this run's plan is '{nxt}'." if nxt else ""
+            die(f"illegal transition {old} -> {new}.{hint}\n"
+                f"       This run's plan: {self.plan_line()}", 5)
         if new == "blocked":
             m["blockedFrom"] = old
         if old == "blocked":
@@ -367,40 +554,83 @@ class Run:
         self.event("state", **{"from": old, "to": new, "reason": reason})
         return old
 
+    def check_gate(self, gate, stage):
+        """Leaving an approval gate requires the approval that gate exists for."""
+        apps = approval_state(self)
+        if gate == "awaiting_implementation_approval":
+            live = [a for a in apps.values()
+                    if a["type"] == "codex-approval"
+                    and approval_status(a) in ("valid", "consumed")]
+            if live:
+                return
+            if "chatgpt_codex" in self.assignees("implementation"):
+                die(f"run {self.id} cannot enter implementation: Codex holds that role "
+                    f"and no write approval has been granted.\n"
+                    f"       run: fde approve-codex {self.id} implementation "
+                    f"--task-file <file> --repo <path>", 7)
+            # A Claude identity implements inside a session you are sitting in, so
+            # the approval is you, in that session, turn by turn. Say so out loud
+            # rather than pretending a gate was cleared.
+            self.event("approval.implementation.not-required",
+                       reason="implementer is not Codex; work happens interactively "
+                              "under the user's own supervision")
+            return
+        if gate == "awaiting_publication_approval":
+            live = [a for a in apps.values()
+                    if a["type"] == "publication-approval"
+                    and approval_status(a) in ("valid", "consumed")]
+            if not live:
+                die(f"run {self.id} cannot publish: nothing has been approved for "
+                    f"publication.\n"
+                    f"       run: fde approve-publish {self.id} "
+                    f"<jira|confluence|sharepoint|bitbucket|email|teams>", 7)
+
+    def next_state(self, current=None):
+        seq = self.sequence()
+        cur = current or self.state
+        if cur == "blocked":
+            cur = self.manifest().get("blockedFrom") or seq[0]
+        try:
+            return seq[seq.index(cur) + 1]
+        except (ValueError, IndexError):
+            return None
+
+    def guard_plan(self, what):
+        if not self.planned():
+            die(f"run {self.id} has no confirmed plan, so {what} is not permitted yet.\n"
+                f"       run: fde plan {self.id} --stages <stages>   (or --shape <name>)", 6)
+
     def guard_roles(self, what):
         if not self.roles_confirmed():
             die(f"run {self.id} is in state '{self.state}'. Roles are not confirmed, so "
                 f"{what} is not permitted yet.\n       run: fde roles {self.id}", 6)
 
 
-def new_run(requirement: str) -> Run:
-    key = requirement.strip()
+def new_run(requirement: str = "") -> Run:
+    key = (requirement or "").strip()
     m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
     jira_key = m.group(1) if m else None
-    stem = f"{now():%Y%m%d}-{slug(jira_key or key)}-{secrets.token_hex(2)}"
+    stem = f"{now():%Y%m%d}-{slug(jira_key or key or 'run')}-{secrets.token_hex(2)}"
     d = RUNS / stem
     if d.exists():
         die(f"run directory already exists: {d}", 1)
     for sub in ["tasks", "inputs"] + [f"artifacts/{a}" for a in ARTIFACT_DIRS]:
         (d / sub).mkdir(parents=True, exist_ok=True)
-    write_atomic(d / "requirement.md", (
-        f"# Requirement\n\n"
-        f"- captured: {iso()}\n"
-        f"- jira: {jira_key or '(none given)'}\n"
-        f"- source: given on the command line; nothing has been fetched\n\n"
-        f"---\n\n{key}\n"))
     write_json(d / "manifest.json", {
         "runId": stem,
         "createdAt": iso(),
         "updatedAt": iso(),
-        "state": "awaiting_roles",
+        "state": "awaiting_orchestrator",
         "jiraKey": jira_key,
         "requirement": key[:400],
         "toolkit": "fde-core",
     })
     r = Run(stem)
-    r.event("run.created", jiraKey=jira_key)
-    r.event("note", note="Created in awaiting_roles. No connector, repository or "
+    if key:
+        r.write_requirement(key)
+    r.event("run.created", jiraKey=jira_key, hasRequirement=bool(key))
+    r.event("note", note="Created in awaiting_orchestrator. Choosing an orchestrator and "
+                         "scoping the work read nothing; no connector, repository or "
                          "client-context access is permitted until roles are confirmed.")
     return r
 
@@ -691,29 +921,21 @@ def cmd_doctor(args):
 
 # ----------------------------------------------------------- the role prompt --
 
-ROLE_QUESTION = """Before I initialize this task, assign the roles.
+AGENT_LABELS = {
+    "claude_work": "Claude: work", "claude_msc": "Claude: msc",
+    "claude_alt": "Claude: alt", "claude_bedrock": "Claude Code: Bedrock",
+    "chatgpt_codex": "ChatGPT/Codex", "gemini": "Gemini",
+    "microsoft_copilot": "Microsoft Copilot",
+}
 
-Available identities:
+IDENTITY_MENU = """Available identities:
 - Claude: work
 - Claude: msc
 - Claude: alt
 - Claude Code: Bedrock
 - ChatGPT/Codex
 - Gemini
-- Microsoft Copilot
-
-Choose:
-- Orchestrator:
-- Researcher(s):
-- Solution architect:
-- Reviewer(s):
-- Delivery planner:
-- Presentation author:
-- Implementation agent:
-- Microsoft context source: include / exclude
-
-An identity may hold more than one role. Use "none" where a role is unnecessary.
-I will not initialize the task or access connected systems until you confirm."""
+- Microsoft Copilot"""
 
 ROLE_PROMPTS = [
     ("orchestrator", "Orchestrator", False),
@@ -723,8 +945,80 @@ ROLE_PROMPTS = [
     ("deliveryPlanning", "Delivery planner", False),
     ("presentation", "Presentation author", False),
     ("implementation", "Implementation agent", False),
-    ("microsoftContext", "Microsoft context source (identity, or none to exclude)", False),
+    ("microsoftContext", "Microsoft context source", False),
 ]
+
+# The one line that is a choice rather than a name.
+ROLE_LINE_SUFFIX = {"microsoftContext": ": include / exclude"}
+
+PROMPT_LABEL = {r: l for r, l, _m in ROLE_PROMPTS}
+
+
+def role_question(run=None, stages=None):
+    """The role question, narrowed to the roles this run's plan actually needs.
+
+    A research-only run has no implementation agent to assign, and asking for one
+    invites an answer that means nothing. The wording is otherwise unchanged."""
+    stages = list(stages if stages is not None else (run.stages() if run else STAGE_ORDER))
+    need = roles_needed(stages)
+    lines = ["Before I initialize this task, assign the roles.", ""]
+    if run is not None or stages != STAGE_ORDER:
+        chosen = "  →  ".join(STAGE_LABEL[s] for s in stages)
+        lines += [f"Plan for this run: {chosen}"]
+        skipped = [s for s in STAGE_ORDER if s not in set(stages)]
+        if skipped:
+            lines += [f"Not doing: {', '.join(STAGE_LABEL[s] for s in skipped)}"]
+        lines += [""]
+    fixed = run.orchestrator() if run is not None else None
+    lines += [IDENTITY_MENU, "", "Choose:"]
+    for role, label, _multi in ROLE_PROMPTS:
+        if role not in need:
+            continue
+        if role == "orchestrator" and fixed:
+            lines.append(f"- {label}: {AGENT_LABELS.get(fixed, fixed)}  (already chosen)")
+            continue
+        lines.append(f"- {label}{ROLE_LINE_SUFFIX.get(role, ':')}")
+    lines += [
+        "",
+        'An identity may hold more than one role. Use "none" where a role is unnecessary.',
+        "I will not initialize the task or access connected systems until you confirm.",
+    ]
+    return "\n".join(lines)
+
+
+ORCHESTRATOR_QUESTION = """Who orchestrates this run?
+
+The orchestrator reads your request, proposes what the run should actually do,
+and holds the engagement together. Pick it before you state the ask — it is the
+identity that will interpret the ask.
+
+  Claude: work          Claude: msc          Claude: alt
+  Claude Code: Bedrock  ChatGPT/Codex
+
+Gemini and Microsoft Copilot cannot orchestrate: Gemini is a one-shot headless
+call with no session state, and Copilot is a chat endpoint over the Microsoft
+estate. Either can still hold research, review or context roles.
+
+Nothing is read by choosing. Nothing is read until roles are confirmed."""
+
+
+PLAN_QUESTION = """What do you want done for this requirement?
+
+Say it however you like — "research this and get it reviewed", "just the slides
+and a Jira breakdown", "the full thing". The stages available are:
+
+  intake                what the ask actually is; loads client context
+  research              evidence, prior art, gaps
+  solution architecture options with their costs, and an ADR
+  adversarial review    someone whose job is to find what is wrong
+  reconciliation        deciding which objections stand, and saying so
+  presentation          slides for the stakeholder conversation
+  development plan      breakdown, estimates, and a Jira preview (not Jira issues)
+  implementation        code, behind a one-time approval
+  verification          build, tests, a read of the diff
+  publication           the step where other people start seeing it
+
+Nothing is read until roles are confirmed, and roles come after this."""
 
 ALIASES = {
     "claude: work": "claude_work", "claude work": "claude_work", "work": "claude_work",
@@ -737,6 +1031,45 @@ ALIASES = {
     "copilot": "microsoft_copilot", "m365 copilot": "microsoft_copilot",
     "exclude": "none", "include": "microsoft_copilot",
 }
+
+# Stage names people actually type, mapped to the canonical ones.
+STAGE_ALIASES = {
+    "context": "intake", "load": "intake", "scope": "intake",
+    "research": "research", "discovery": "research", "investigate": "research",
+    "architecture": "solutioning", "solution": "solutioning", "design": "solutioning",
+    "adr": "solutioning", "solutioning": "solutioning",
+    "review": "review", "critique": "review", "validate": "review", "validation": "review",
+    "reconcile": "reconciliation", "reconciliation": "reconciliation",
+    "presentation": "presentation", "present": "presentation", "slides": "presentation",
+    "deck": "presentation",
+    "plan": "planning", "planning": "planning", "delivery": "planning",
+    "breakdown": "planning", "jira": "planning", "development-plan": "planning",
+    "implementation": "implementation", "implement": "implementation", "build": "implementation",
+    "code": "implementation",
+    "verification": "verification", "verify": "verification", "test": "verification",
+    "publication": "publication", "publish": "publication",
+}
+
+
+def resolve_stage(token):
+    s = (token or "").strip().lower().replace("_", "-").replace(" ", "-")
+    if s in STAGE_ORDER:
+        return s
+    if s in STAGE_ALIASES:
+        return STAGE_ALIASES[s]
+    die(f"unknown stage '{token}'. Known: {', '.join(STAGE_ORDER)}\n"
+        f"       shapes: {', '.join(SHAPES)}", 2)
+
+
+def resolve_shape(name):
+    """A shape name, or several joined with '+'."""
+    stages = []
+    for part in str(name).split("+"):
+        part = part.strip().lower()
+        if part not in SHAPES:
+            die(f"unknown shape '{part}'. Known: {', '.join(SHAPES)}", 2)
+        stages += SHAPES[part]
+    return [s for s in STAGE_ORDER if s in set(stages)]
 
 
 def resolve_agent(agents, token):
@@ -757,39 +1090,254 @@ def resolve_agent(agents, token):
 
 
 def cmd_start(args):
-    req = " ".join(args.requirement).strip()
-    if not req:
-        die("give a Jira key or a one-line description of the requirement", 2)
+    req = " ".join(args.requirement or []).strip()
     run = new_run(req)
     print(f"run    {run.id}")
     print(f"dir    {run.dir}")
-    print(f"state  awaiting_roles\n")
+    print(f"state  awaiting_orchestrator\n")
     print("Nothing has been read: no Jira, Confluence, SharePoint, email, repository")
     print("or client context. That stays true until roles are confirmed.\n")
+
+    if args.orchestrator:
+        return _set_orchestrator(run, args.orchestrator, shape=args.shape)
+
     print("-" * 72)
-    print(ROLE_QUESTION)
+    print(ORCHESTRATOR_QUESTION)
     print("-" * 72)
-    print(f"\nThen record the answer:  fde roles {run.id}")
+    print(f"\n  fde orchestrator {run.id} <identity>        (work | msc | alt | bedrock | codex)")
+    if not req:
+        print(f"\nYou can state the ask now or after choosing:")
+        print(f"  fde request {run.id} \"<what you want>\"")
+    return 0
+
+
+def _set_orchestrator(run, token, shape=None):
+    agents = load_agents()
+    aid = resolve_agent(agents, token)
+    if not aid:
+        die("give an identity to orchestrate this run", 2)
+    a = agents["agents"][aid]
+    if "orchestration" not in a.get("capabilities", []):
+        die(f"{agent_label(agents, aid)} cannot orchestrate — it has no 'orchestration' "
+            f"capability.\n       Candidates: "
+            + ", ".join(agent_label(agents, k) for k, v in agents["agents"].items()
+                        if "orchestration" in v.get("capabilities", [])), 2)
+    ok, detail = agent_available(agents, aid)
+    if not ok:
+        die(f"{agent_label(agents, aid)} is not available on this machine: {detail}\n"
+            f"       Choose another orchestrator.", 3)
+
+    doc = run.roles() or {}
+    existing = doc.get("assignments", {})
+    existing["orchestrator"] = aid
+    doc["assignments"] = existing
+    doc["orchestratorChosenAt"] = iso()
+    write_json(run.roles_path, doc)
+    run.event("orchestrator.chosen", agent=aid)
+    if run.state == "awaiting_orchestrator":
+        run.set_state("awaiting_plan", f"orchestrator: {aid}")
+
+    print(f"orchestrator  {agent_label(agents, aid)}")
+
+    if shape:
+        return _record_plan(run, resolve_shape(shape), intent=f"--shape {shape}", source="shape")
+
+    if not (run.dir / "requirement.md").exists():
+        print(f"\nNow state the ask:\n  fde request {run.id} \"<what you want done>\"")
+        return 0
+
+    print(f"\nask    {run.manifest().get('requirement', '')[:200]}\n")
+    print("-" * 72)
+    print(PLAN_QUESTION)
+    print("-" * 72)
+    print(f"\nHave {agent_label(agents, aid)} propose a plan, then record it:")
+    print(f"  fde plan {run.id} --stages <stages>       (or --shape <name>)")
+    return 0
+
+
+def cmd_orchestrator(args):
+    run = Run(args.run_id)
+    if not args.identity:
+        agents = load_agents()
+        cur = run.orchestrator()
+        if cur:
+            print(f"orchestrator  {agent_label(agents, cur)}")
+            return 0
+        print(ORCHESTRATOR_QUESTION)
+        print(f"\n  fde orchestrator {run.id} <identity>")
+        return 0
+    if run.orchestrator() and not args.reassign:
+        die(f"run {run.id} is already orchestrated by "
+            f"{agent_label(load_agents(), run.orchestrator())}. "
+            "Pass --reassign to change it.", 5)
+    return _set_orchestrator(run, args.identity, shape=args.shape)
+
+
+def cmd_request(args):
+    run = Run(args.run_id)
+    text = " ".join(args.text).strip()
+    if not text:
+        die("say what you want done", 2)
+    run.guard_orchestrator("recording the request")
+    run.write_requirement(text)
+    run.event("request.recorded", chars=len(text))
+    agents = load_agents()
+    print(f"run    {run.id}")
+    print(f"ask    {text[:200]}\n")
+    print("-" * 72)
+    print(PLAN_QUESTION)
+    print("-" * 72)
+    print(f"\nHave {agent_label(agents, run.orchestrator())} propose a plan, then record it:")
+    print(f"  fde plan {run.id} --stages <stages>       (or --shape <name>)")
     return 0
 
 
 def cmd_list(args):
     runs = list_runs()
     if not runs:
-        print("no runs yet — fde start <jira-key-or-description>")
+        print("no runs yet — fde start")
         return 0
     for m in runs:
-        print(f"  {m.get('runId','?'):<38} {m.get('state','?'):<34} {m.get('requirement','')[:40]}")
+        print(f"  {m.get('runId','?'):<38} {m.get('state','?'):<26} "
+              f"{(m.get('requirement') or '(not stated)')[:40]}")
+    return 0
+
+
+def _record_plan(run, stages, intent="", source="flags", amend=False):
+    stages = [s for s in STAGE_ORDER if s in set(stages)]
+    if not stages:
+        die("a plan needs at least one stage", 2)
+    warnings = prereq_warnings(stages)
+
+    plan = {
+        "confirmedAt": iso(),
+        "intent": intent,
+        "stages": stages,
+        "skipped": [s for s in STAGE_ORDER if s not in set(stages)],
+        "rolesNeeded": roles_needed(stages),
+        "warnings": warnings,
+        "source": source,
+    }
+    write_json(run.plan_path, plan)
+    run.event("plan.amended" if amend else "plan.confirmed",
+              stages=stages, intent=intent[:200], source=source)
+
+    print(f"plan   {run.plan_line()}")
+    if plan["skipped"]:
+        print(f"skip   {', '.join(STAGE_LABEL[s] for s in plan['skipped'])}")
+    for w in warnings:
+        print(f"note   {w}")
+
+    if run.state == "awaiting_plan":
+        run.set_state("awaiting_roles", "plan confirmed by the user")
+    elif run.state == "awaiting_orchestrator":
+        die("choose an orchestrator first", 6)
+
+    missing = [r for r in plan["rolesNeeded"] if not run.assignees(r)]
+    if run.planned() and run.roles_confirmed() and not missing:
+        print(f"\nstate  {run.state}")
+        print(f"next   fde resume {run.id}")
+        return 0
+
+    print()
+    print("-" * 72)
+    print(role_question(run, stages=stages))
+    print("-" * 72)
+    print(f"\nThen:  fde roles {run.id} {role_set_hint(run)}")
+    return 0
+
+
+def cmd_plan(args):
+    run = Run(args.run_id)
+    if args.stages or args.shape or args.add or args.remove:
+        run.guard_orchestrator("scoping the run")
+        if not (run.dir / "requirement.md").exists():
+            die(f"run {run.id} has no stated ask yet.\n"
+                f'       run: fde request {run.id} "<what you want done>"', 6)
+
+    if args.show or not (args.stages or args.shape or args.add or args.remove):
+        plan = run.plan()
+        if not plan:
+            print(f"run {run.id} has no plan yet.\n")
+            print(PLAN_QUESTION)
+            print(f"\n  fde plan {run.id} --stages research,review,presentation")
+            print(f"  fde plan {run.id} --shape research")
+            return 0
+        print(f"\nrun    {run.id}")
+        print(f"intent {plan.get('intent') or '(none recorded)'}")
+        print(f"plan   {run.plan_line()}")
+        if plan["skipped"]:
+            print(f"skip   {', '.join(STAGE_LABEL[s] for s in plan['skipped'])}")
+        print(f"roles  {', '.join(plan['rolesNeeded'])}")
+        for w in plan.get("warnings", []):
+            print(f"note   {w}")
+        print()
+        return 0
+
+    amend = run.planned()
+    if args.shape:
+        stages = resolve_shape(args.shape)
+    elif args.stages:
+        stages = []
+        for chunk in args.stages:
+            stages += [resolve_stage(x) for x in chunk.split(",") if x.strip()]
+    else:
+        stages = list(run.stages()) if amend else []
+
+    for x in (args.add or []):
+        for one in x.split(","):
+            if one.strip():
+                stages.append(resolve_stage(one))
+    for x in (args.remove or []):
+        for one in x.split(","):
+            if one.strip():
+                s = resolve_stage(one)
+                stages = [y for y in stages if y != s]
+
+    stages = [s for s in STAGE_ORDER if s in set(stages)]
+
+    if amend and run.state not in ("awaiting_plan", "awaiting_roles", "roles_confirmed"):
+        seq = run.sequence()
+        pos = seq.index(run.state) if run.state in seq else 0
+        gone_by = [s for s in stages
+                   if s not in run.stages()
+                   and s in state_sequence(stages)
+                   and state_sequence(stages).index(s) < pos]
+        if gone_by:
+            die(f"this run is already at '{run.state}'; it cannot go back and do "
+                f"{', '.join(STAGE_LABEL[s] for s in gone_by)}.\n"
+                f"       Do that work out of band, or start a fresh run for it.", 5)
+        for s in set(run.stages()) - set(stages):
+            if s in seq and seq.index(s) <= pos:
+                die(f"'{STAGE_LABEL[s]}' has already been passed and cannot be removed "
+                    f"from the plan.", 5)
+
+    return _record_plan(run, stages, intent=args.intent or "", 
+                        source="shape" if args.shape else "flags", amend=amend)
+
+
+def cmd_shapes(args):
+    print("\nNamed shapes — shorthand for the plans that come up often.\n")
+    width = max(len(s) for s in SHAPES)
+    for name, stages in SHAPES.items():
+        chain = "  →  ".join(STAGE_LABEL[s] for s in stages)
+        print(f"  {name:<{width}}  {chain}")
+    print("\nCombine them with '+':  fde start MAX-1 --shape presentation+delivery-plan")
+    print("Or name stages directly: fde plan <run-id> --stages research,review,presentation")
+    print(f"\nStages: {', '.join(STAGE_ORDER)}\n")
     return 0
 
 
 def cmd_roles(args):
     agents = load_agents()
     run = Run(args.run_id)
-    if run.state not in ("awaiting_roles", "blocked") and not args.reassign:
+    run.guard_plan("assigning roles")
+    if run.state not in ("awaiting_roles", "roles_confirmed", "blocked") and not args.reassign:
         die(f"run {run.id} already has confirmed roles (state {run.state}). "
             "Pass --reassign to change them, or start a new run.", 5)
 
+    needed = run.roles_needed()
+    prompts = [(r, l, m) for r, l, m in ROLE_PROMPTS if r in needed]
     chosen = {}
 
     if args.same_as:
@@ -798,7 +1346,7 @@ def cmd_roles(args):
         pr = prev.roles()
         if not pr:
             die(f"run {args.same_as} has no confirmed roles to copy", 4)
-        chosen = dict(pr["assignments"])
+        chosen = {k: v for k, v in pr["assignments"].items() if k in needed}
         print(f"copying the role assignment the user explicitly named: {args.same_as}")
     elif args.from_file:
         data = read_json(pathlib.Path(args.from_file))
@@ -811,29 +1359,39 @@ def cmd_roles(args):
                 die(f"--set expects role=identity, got '{pair}'", 2)
             role, val = pair.split("=", 1)
             role = role.strip()
-            if role not in ROLE_STAGES:
-                die(f"unknown role '{role}'. Known: {', '.join(ROLE_STAGES)}", 2)
+            if role not in ALL_ROLES:
+                die(f"unknown role '{role}'. Known: {', '.join(ALL_ROLES)}", 2)
+            if role not in needed:
+                die(f"'{role}' is not a role this run needs — its plan is "
+                    f"{run.plan_line()}.\n"
+                    f"       Roles needed: {', '.join(needed)}\n"
+                    f"       To widen the run: fde plan {run.id} --add <stage>", 2)
             parts = [p for p in (v.strip() for v in val.split(",")) if p]
             chosen[role] = parts if role in MULTI_ROLES else (parts[0] if parts else "none")
     else:
         if not sys.stdin.isatty():
-            print(ROLE_QUESTION)
+            print(role_question(run))
             die("\nno assignment given. Re-run with --set role=identity ... , "
                 "--from roles.json, or interactively from a terminal.", 2)
-        print(ROLE_QUESTION)
+        print(role_question(run))
         print()
-        for role, label, multi in ROLE_PROMPTS:
-            raw = input(f"  {label}: ").strip()
+        already = (run.roles() or {}).get("assignments", {})
+        for role, label, multi in prompts:
+            if already.get(role):
+                continue
+            raw = input(f"  {label}{ROLE_LINE_SUFFIX.get(role, '')}: ").strip()
             parts = [p for p in (v.strip() for v in raw.split(",")) if p]
             chosen[role] = parts if multi else (parts[0] if parts else "none")
 
     # Resolve, validate capability, check availability.
     assignments, unavailable = {}, []
     cap_of = agents.get("roleCapability", {})
-    for role, _label, multi in ROLE_PROMPTS:
-        raw = chosen.get(role, "none")
+    for role, _label, multi in prompts:
+        if role not in chosen:
+            continue
+        raw = chosen[role]
         toks = raw if isinstance(raw, list) else [raw]
-        ids = [x for x in (resolve_agent(agents, t) for t in toks) if x]
+        ids = [x for x in (resolve_agent(agents, tk) for tk in toks) if x]
         for aid in ids:
             need = cap_of.get(role)
             caps = agents["agents"][aid].get("capabilities", [])
@@ -852,10 +1410,29 @@ def cmd_roles(args):
         die("\n       Choose a replacement and re-run, or pass --allow-unavailable "
             "if you will make it available before that stage runs.", 3)
 
-    if not assignments.get("orchestrator"):
-        die("a run needs an orchestrator — that role cannot be 'none'", 2)
+    existing_now = (run.roles() or {}).get("assignments", {})
+    if not (assignments.get("orchestrator") or existing_now.get("orchestrator")):
+        die(f"a run needs an orchestrator — that role cannot be 'none'.\n"
+            f"       run: fde orchestrator {run.id} <identity>", 2)
 
-    write_json(run.roles_path, {"confirmedAt": iso(), "assignments": assignments})
+    merged = dict(existing_now)
+    merged.update({k: v for k, v in assignments.items() if v})
+    missing = [r for r in needed
+               if r not in OPTIONAL_ROLES
+               and not (merged.get(r) if isinstance(merged.get(r), list)
+                        else [merged.get(r)] if merged.get(r) else [])]
+    if missing and not args.allow_unassigned:
+        die(f"this run's plan needs {', '.join(missing)}, which you left unassigned.\n"
+            f"       Plan: {run.plan_line()}\n"
+            f"       Either assign them, drop the stage "
+            f"(fde plan {run.id} --remove <stage>), or pass --allow-unassigned.", 2)
+
+    doc = run.roles() or {}
+    existing = doc.get("assignments", {})
+    existing.update(assignments)
+    doc["assignments"] = existing
+    doc["confirmedAt"] = iso()
+    write_json(run.roles_path, doc)
     run.event("roles.confirmed", assignments=assignments,
               source=("same-as:" + args.same_as) if args.same_as else
                      ("file:" + args.from_file) if args.from_file else
@@ -873,47 +1450,85 @@ def cmd_roles(args):
         else:
             print(f"  (run-scoped MCP config not written: {r.stderr.strip()[:200]})", file=sys.stderr)
 
-    print(f"\nroles confirmed for {run.id}\n")
-    for role, label, _m in ROLE_PROMPTS:
-        v = assignments[role]
+    print(f"\nroles confirmed for {run.id}")
+    print(f"plan   {run.plan_line()}\n")
+    for role, label, _m in prompts:
+        v = existing.get(role)
         shown = ", ".join(agent_label(agents, x) for x in v) if isinstance(v, list) else (
             agent_label(agents, v) if v else "none")
-        print(f"  {label:<48} {shown or 'none'}")
+        print(f"  {label:<28} {shown or 'none'}")
     print(f"\nstate  {run.state}")
     print(f"next   fde resume {run.id}")
     return 0
 
 
-NEXT_ACTION = {
-    "awaiting_roles": "fde roles {id}                      — assign roles; nothing may be read before this",
-    "roles_confirmed": "fde resume {id} --advance intake     — begin intake with the assigned orchestrator",
+STAGE_HINT = {
     "intake": "fde invoke {id} <agent> tasks/intake.md",
     "research": "fde invoke {id} <agent> tasks/research.md",
     "solutioning": "fde invoke {id} <agent> tasks/solutioning.md",
     "review": "fde invoke {id} <agent> tasks/review.md",
-    "reconciliation": "orchestrator reconciles; write artifacts/review/reconciliation.md",
+    "reconciliation": "orchestrator reconciles → artifacts/review/reconciliation.md",
+    "presentation": "presentation author builds artifacts/presentation/solution-presentation.pptx",
     "planning": "write development-plan.md and jira-plan.json (preview only — no Jira issues yet)",
-    "awaiting_implementation_approval": "fde approve-codex {id} implementation --task-file <file> --repo <path>",
-    "implementation": "fde invoke {id} <agent> tasks/implementation.md --write",
+    "implementation": "fde invoke {id} <agent> artifacts/implementation/implementation-task.md --write",
     "verification": "write artifacts/implementation/verification-report.md",
-    "awaiting_publication_approval": "fde approve-publish {id} <jira|confluence|sharepoint|bitbucket|email|teams>",
-    "complete": "nothing — run is closed",
-    "blocked": "fde resume {id} --unblock",
+    "publication": "publish only what was approved, then: fde resume {id} --advance complete",
+    "awaiting_implementation_approval":
+        "fde approve-codex {id} implementation --task-file <file> --repo <path>",
+    "awaiting_publication_approval":
+        "fde approve-publish {id} <jira|confluence|sharepoint|bitbucket|email|teams>",
 }
 
 
-def artifact_report(run: Run):
+def next_action(run):
+    state = run.state
+    if state == "awaiting_orchestrator":
+        return f"fde orchestrator {run.id} <identity>   — work | msc | alt | bedrock | codex"
+    if state == "awaiting_plan":
+        if not (run.dir / "requirement.md").exists():
+            return f'fde request {run.id} "<what you want done>"'
+        return f"fde plan {run.id} --stages <stages>   — scope the work; reads nothing"
+    if state == "awaiting_roles":
+        return f"fde roles {run.id} {role_set_hint(run)}"
+    if state == "blocked":
+        return f"fde resume {run.id} --unblock"
+    if state == "complete":
+        return "nothing — run is closed"
+    if state == "roles_confirmed":
+        nxt = run.next_state()
+        return f"fde resume {run.id} --advance {nxt}" if nxt else "nothing left in this plan"
+    hint = STAGE_HINT.get(state)
+    if hint:
+        return hint.format(id=run.id)
+    return f"fde resume {run.id} --advance {run.next_state() or 'complete'}"
+
+
+def role_set_hint(run):
+    """The --set flags still outstanding. The orchestrator was chosen first, so it
+    is not among them."""
+    have = (run.roles() or {}).get("assignments", {})
     out = []
-    for sub, name in ARTIFACTS:
-        p = run.artifacts_dir / sub / name
-        found = p.exists()
-        if not found and name.endswith(".pptx"):
-            alts = list((run.artifacts_dir / sub).glob("solution-presentation.*"))
-            found = bool(alts)
-            if found:
-                name = alts[0].name
-        out.append((f"{sub}/{name}", found))
-    out.append(("publication-manifest.json", (run.dir / "publication-manifest.json").exists()))
+    for r in run.roles_needed():
+        if have.get(r):
+            continue
+        out.append(f"--set {r}=" + ("none" if r in OPTIONAL_ROLES else "<identity>"))
+    return " ".join(out)
+
+
+def artifact_report(run):
+    """Only the artifacts this run's plan is actually going to produce."""
+    out = []
+    for stage in run.stages():
+        for sub, name in STAGE_ARTIFACTS.get(stage, []):
+            base = run.dir if sub == "." else run.artifacts_dir / sub
+            path = base / name
+            found = path.exists()
+            if not found and name.endswith(".pptx"):
+                alts = list(base.glob("solution-presentation.*"))
+                if alts:
+                    found, name = True, alts[0].name
+            label = name if sub == "." else f"{sub}/{name}"
+            out.append((stage, label, found))
     return out
 
 
@@ -926,6 +1541,28 @@ def cmd_status(args):
     print(f"created    {m.get('createdAt')}")
     print(f"jira       {m.get('jiraKey') or '(none)'}")
     print(f"dir        {run.dir}")
+    _who = run.orchestrator()
+    print(f"orchestr.  {agent_label(agents, _who) if _who else '(not chosen yet)'}")
+
+    plan = run.plan()
+    print("\nplan")
+    if not plan:
+        print("  none — this run has not been scoped yet")
+        print(f"  fde plan {run.id} --stages <stages>")
+    else:
+        if plan.get("intent"):
+            print(f"  asked for  {plan['intent'][:200]}")
+        seq = run.sequence()
+        here = m.get("state")
+        pos = seq.index(here) if here in seq else -1
+        for s in run.stages():
+            mark = "done" if here in seq and seq.index(s) < pos else (
+                "now " if s == here else "    ")
+            print(f"  [{mark}] {STAGE_LABEL[s]}")
+        if plan.get("skipped"):
+            print(f"  not doing: {', '.join(STAGE_LABEL[s] for s in plan['skipped'])}")
+        for w in plan.get("warnings", []):
+            print(f"  note: {w}")
 
     r = run.roles()
     print("\nroles")
@@ -933,15 +1570,20 @@ def cmd_status(args):
         print("  none assigned — this run may not read Jira, Confluence, SharePoint,")
         print("  email, repositories or client context yet.")
     else:
-        print(f"  confirmed  {r['confirmedAt']}")
+        print(f"  confirmed  {r.get('confirmedAt') or '(orchestrator only, so far)'}")
         for role, label, _m in ROLE_PROMPTS:
+            if role not in run.roles_needed():
+                continue
             v = r["assignments"].get(role)
             shown = ", ".join(agent_label(agents, x) for x in v) if isinstance(v, list) else (
                 agent_label(agents, v) if v else "none")
-            print(f"  {label:<48} {shown or 'none'}")
+            print(f"  {label:<28} {shown or 'none'}")
 
+    report = artifact_report(run)
     print("\nartifacts")
-    for name, found in artifact_report(run):
+    if not report:
+        print("  none expected from this plan")
+    for _stage, name, found in report:
         print(f"  [{'x' if found else ' '}] {name}")
 
     apps = approval_state(run)
@@ -960,7 +1602,7 @@ def cmd_status(args):
         extra = e.get("to") or e.get("agent") or e.get("target") or e.get("note", "")
         print(f"  {e['at']}  {e['event']:<22} {str(extra)[:60]}")
 
-    print(f"\nnext\n  {NEXT_ACTION.get(m.get('state'), '?').format(id=run.id)}\n")
+    print(f"\nnext\n  {next_action(run)}\n")
     return 0
 
 
@@ -978,26 +1620,46 @@ def cmd_resume(args):
         run.set_state(back, "unblocked")
         print(f"{run.id} -> {back}")
         return 0
-    if args.advance:
+    if args.advance or args.next:
         if not run.roles_confirmed():
             run.guard_roles("advancing the pipeline")
-        old = run.set_state(args.advance, args.reason or "advanced by the orchestrator")
-        print(f"{run.id}: {old} -> {args.advance}")
+        target = args.advance or run.next_state()
+        if not target:
+            die(f"run {run.id} has nothing after '{run.state}' in its plan", 5)
+        old = run.set_state(target, args.reason or "advanced by the orchestrator")
+        print(f"{run.id}: {old} -> {target}")
         return 0
 
     print(f"\nrun    {run.id}")
     print(f"state  {m.get('state')}")
-    print(f"ask    {m.get('requirement','')[:200]}")
+    print(f"ask    {m.get('requirement','') or '(not stated yet)'}"[:220])
+    agents = load_agents()
+    who = run.orchestrator()
+    print(f"orch   {agent_label(agents, who) if who else '(not chosen yet)'}")
+    if not who:
+        print("\n" + "-" * 72)
+        print(ORCHESTRATOR_QUESTION)
+        print("-" * 72)
+        print(f"\n  {next_action(run)}")
+        return 0
+    if not run.planned():
+        print("\nThis run has not been scoped yet.\n")
+        print("-" * 72)
+        print(PLAN_QUESTION)
+        print("-" * 72)
+        print(f"\n  fde plan {run.id} --stages <stages>")
+        return 0
+    print(f"plan   {run.plan_line()}")
     if not run.roles_confirmed():
         print("\nRoles are not confirmed. Ask again — do not reuse the previous run's roles.\n")
         print("-" * 72)
-        print(ROLE_QUESTION)
+        print(role_question(run))
         print("-" * 72)
-        print(f"\n  fde roles {run.id}")
+        print(f"\n  {next_action(run)}")
         return 0
-    done = [n for n, f in artifact_report(run) if f]
+    done = [n for _s, n, f in artifact_report(run) if f]
     print(f"\ndone   {len(done)} artifact(s): {', '.join(done) or 'none yet'}")
-    print(f"\nnext\n  {NEXT_ACTION.get(m.get('state'), '?').format(id=run.id)}\n")
+    print(f"\nnext\n  {next_action(run)}\n")
     return 0
 
 
@@ -1042,8 +1704,11 @@ def cmd_approve_codex(args):
     run = Run(args.run_id)
     run.guard_roles("approving a Codex invocation")
     stage = args.stage
-    if stage not in STAGE_STATE:
-        die(f"unknown stage '{stage}'. Known: {', '.join(STAGE_STATE)}", 2)
+    if stage not in STAGE_ORDER:
+        die(f"unknown stage '{stage}'. Known: {', '.join(STAGE_ORDER)}", 2)
+    if stage not in run.stages():
+        die(f"'{STAGE_LABEL[stage]}' is not in this run's plan ({run.plan_line()}).\n"
+            f"       Widen it first: fde plan {run.id} --add {stage}", 5)
     if "chatgpt_codex" not in run.assignees("implementation") and stage in ("implementation", "verification"):
         die(f"Codex does not hold the implementation role in run {run.id}. "
             "Assign it first, or approve a different agent's work.", 6)
@@ -1216,6 +1881,8 @@ def cmd_approve_publish(args):
                            "summary": args.summary or "", "items": items,
                            "approvedAt": iso(issued), "published": False})
     write_json(manifest_path, man)
+    if run.state == "awaiting_publication_approval":
+        run.set_state("publication", f"publication approval {approval_id}")
     print(f"\napproved  {approval_id}  target {target}  valid until {iso(expires)}")
     print(f"manifest  {manifest_path}")
     return 0
@@ -1256,15 +1923,22 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
 def cmd_invoke(args):
     agents = load_agents()
     run = Run(args.run_id)
+    run.guard_plan("invoking an agent")
     run.guard_roles("invoking an agent")
 
     agent_id = resolve_agent(agents, args.agent_id)
     if not agent_id:
         die("give an identity to invoke", 2)
-    stage = args.stage or STAGE_STATE.get(run.state) or run.state
-    if stage not in STAGE_STATE:
-        die(f"run is in state '{run.state}', which is not a stage an agent runs. "
-            f"Pass --stage explicitly. Known: {', '.join(STAGE_STATE)}", 5)
+    stage = args.stage or (run.state if run.state in STAGE_ORDER else None)
+    if not stage:
+        die(f"run is in state '{run.state}', which is not a stage an agent runs.\n"
+            f"       This run's plan: {run.plan_line()}\n"
+            f"       Next: {next_action(run)}", 5)
+    if stage not in STAGE_ORDER:
+        die(f"unknown stage '{stage}'. Known: {', '.join(STAGE_ORDER)}", 2)
+    if stage not in run.stages():
+        die(f"'{STAGE_LABEL[stage]}' is not in this run's plan ({run.plan_line()}).\n"
+            f"       Widen it first: fde plan {run.id} --add {stage}", 5)
 
     held = run.role_of(agent_id, stage)
     if not held:
@@ -1349,9 +2023,36 @@ def main(argv=None):
     s = sub.add_parser("doctor", help="report component status; nonzero if a required one is broken")
     s.set_defaults(fn=cmd_doctor)
 
-    s = sub.add_parser("start", help="create a run; it begins in awaiting_roles")
-    s.add_argument("requirement", nargs="+")
+    s = sub.add_parser("start", help="create a run; it begins in awaiting_orchestrator")
+    s.add_argument("requirement", nargs="*", help="the ask, if you want to state it now")
+    s.add_argument("--orchestrator", "-o", help="work | msc | alt | bedrock | codex")
+    s.add_argument("--shape", help="skip the plan question with a named shape (see: fde shapes)")
     s.set_defaults(fn=cmd_start)
+
+    s = sub.add_parser("orchestrator", help="choose who orchestrates this run — the first decision")
+    s.add_argument("run_id")
+    s.add_argument("identity", nargs="?")
+    s.add_argument("--shape")
+    s.add_argument("--reassign", action="store_true")
+    s.set_defaults(fn=cmd_orchestrator)
+
+    s = sub.add_parser("request", help="state what you want done, in your own words")
+    s.add_argument("run_id")
+    s.add_argument("text", nargs="+")
+    s.set_defaults(fn=cmd_request)
+
+    s = sub.add_parser("plan", help="scope the run — which stages it will actually do")
+    s.add_argument("run_id")
+    s.add_argument("--stages", action="append", metavar="a,b,c")
+    s.add_argument("--shape", metavar="NAME[+NAME]")
+    s.add_argument("--add", action="append", metavar="STAGE")
+    s.add_argument("--remove", action="append", metavar="STAGE")
+    s.add_argument("--intent", help="the sentence this plan came from, recorded verbatim")
+    s.add_argument("--show", action="store_true")
+    s.set_defaults(fn=cmd_plan)
+
+    s = sub.add_parser("shapes", help="the named plan shapes and what they contain")
+    s.set_defaults(fn=cmd_shapes)
 
     s = sub.add_parser("list", help="list runs")
     s.set_defaults(fn=cmd_list)
@@ -1364,6 +2065,8 @@ def main(argv=None):
                    help="copy another run's roles — valid ONLY when the user explicitly said so")
     s.add_argument("--reassign", action="store_true")
     s.add_argument("--allow-unavailable", action="store_true")
+    s.add_argument("--allow-unassigned", action="store_true",
+                   help="proceed with a role the plan needs left empty")
     s.set_defaults(fn=cmd_roles)
 
     s = sub.add_parser("status", help="state, roles, artifacts, approvals, next action")
@@ -1373,6 +2076,7 @@ def main(argv=None):
     s = sub.add_parser("resume", help="where the run is, and move it on")
     s.add_argument("run_id")
     s.add_argument("--advance", metavar="STATE")
+    s.add_argument("--next", action="store_true", help="advance to whatever this plan says is next")
     s.add_argument("--reason", default="")
     s.add_argument("--block", metavar="REASON")
     s.add_argument("--unblock", action="store_true")
