@@ -94,27 +94,26 @@ npm i -g @openai/codex @google/gemini-cli
 
 ## 4. Your first run (10 min)
 
-You do not drive this with commands. You start a Claude session, say what you
-want in a sentence, and answer four questions.
+You do not drive this with controller commands. Start the orchestrator launcher,
+choose the Claude identity, give it the request in a sentence, and make the
+decisions in chat.
 
 ```bash
-cc-bedrock      # or cc-work / cc-msc / cc-alt — any identity can scope a run
+fde-start                         # choose work, msc, alt or bedrock
+# or: fde-start --orchestrator bedrock
 ```
 
-```
-/engage MAX-142 same-day refunds — research it, get it validated, and give me slides
-```
+The orchestrator asks for the request, then:
 
-`/engage` creates the run and asks you, in order:
-
-1. **Who orchestrates?** `work`, `msc`, `alt`, `bedrock` or `codex`. Gemini and
-   Microsoft Copilot cannot — Gemini is a one-shot headless call with no session
-   state, Copilot is a chat endpoint — but either can still research or review.
-2. **Is this the ask?** It reads your sentence back before acting on it.
-3. **Is this the plan?** It proposes the stages your sentence implies and shows
+1. **Is this the ask?** It reads your sentence back before acting on it.
+2. **Is this the plan?** It proposes the stages your sentence implies and shows
    what it is *not* doing. Most work is a slice, not the full lifecycle.
-4. **Who does the rest?** Narrowed to the roles this plan needs — a research-only
-   run never asks you for an implementation agent.
+3. **Who should do each job?** It shows the required specialist roles, why each
+   is needed and every eligible account identity. A research-only run never asks
+   you for an implementation agent. Accounts have no fixed roles.
+4. **Do you approve the combined result?** It shows one summary of the request,
+   plan, deliverables, assignments, access and remaining hard gates. Type the
+   exact phrase `APPROVE PLAN <run-id>` only when it is correct.
 
 Answer in plain English. It runs the `fde` calls behind each answer and holds the
 record; you never type `fde plan` or `fde roles` yourself.
@@ -124,26 +123,16 @@ That is deliberate, and it is why the session then hands you over.
 
 ### The handover
 
-Once roles are confirmed, `/engage` wires up the Atlassian connector for the
-orchestrator you chose and gives you the line that starts the actual run:
-
-```bash
-CLAUDE_CONFIG_DIR=~/.claude-profiles/bedrock \
-  claude --mcp-config ~/.claude-shared/runs/<run-id>/mcp/claude-bedrock.mcp.json
-```
-
-```
-/engage <run-id>
-```
-
-**The restart is the design, not a rough edge.** The Atlassian connector is in
-nobody's global config, so it does not exist for any identity until you have said
-who holds which role in this run. A process that *cannot* reach Jira is a stronger
-promise than an agent that has been told not to.
+After approval the orchestrator asks you to type `/exit`. Do that once.
+`fde-start` then resumes the same conversation automatically, this time with the
+run-scoped connectors. The Atlassian connector is in nobody's global config, so
+it cannot be used during scoping and appears only after combined approval.
 
 From there it works the stages you agreed to, and it will **stop and ask you** if
-research turns up a gap that would change the design. That is it working, not
-failing.
+anything material is ambiguous. Within clear approved scope it uses the normal
+configured tool surface without asking for each routine operation. Codex coding,
+deployment, publication, destructive actions and scope expansion still require
+their specific approvals.
 
 ### Watching and steering it
 
@@ -173,12 +162,9 @@ operate           intake → observability
 full              all twelve stages
 ```
 
-Say "use the presentation and delivery-plan shapes" and it will — or skip the
-questions entirely:
-
-```bash
-fde start -o bedrock "MAX-88" --shape presentation+delivery-plan
-```
+Say "use the presentation and delivery-plan shapes" in the orchestrator chat.
+It still shows the resulting plan and roles for approval; a named shape is a
+planning shortcut, not an approval shortcut.
 
 `fde` warns if you skip a stage's usual input — a deck with no research behind it,
 say. Advisory, not a block; sometimes the input is in your head.
@@ -242,8 +228,10 @@ Most of this `/engage` runs for you. It is listed so you can look from outside �
 and for the two approvals, which are always yours to type.
 
 ```bash
-/engage "<what you want>"            start a run — the four questions, in chat
-/engage <run-id>                    pick an existing run back up
+fde-start                           start a run and orchestrator chat
+fde-start -o bedrock                choose the orchestrator directly
+fde-start --resume <run-id>         resume an unfinished launcher session
+APPROVE PLAN <run-id>               approve the combined plan and role selection
 APPROVE CODEX <run-id>              yours to type; never inferred
 APPROVE PUBLISH <run-id>            yours to type; never inferred
 
@@ -258,8 +246,11 @@ fde start                           new run; stops to ask who orchestrates
 fde orchestrator <run-id> <who>     the first decision
 fde request <run-id> "..."          the ask, in your own words
 fde plan <run-id> --stages a,b,c    what this run will actually do
+fde plan <run-id> --preview ...     calculate without changing run state
+fde plan <run-id> --require-approval record a chat-proposed plan
 fde plan <run-id> --add solutioning widen it later (forwards only)
 fde roles <run-id> --set r=identity the rest; asked fresh every run
+fde approve-plan <run-id>           exact combined approval gate
 fde resume <run-id> --next          advance to whatever the plan says is next
 fde resume <run-id> --block "..."   park it with a reason
 fde resume <run-id> --unblock       back to where it was

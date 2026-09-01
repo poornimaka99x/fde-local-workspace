@@ -12,16 +12,25 @@ as a list of commands for them to execute.
 2. Ask who orchestrates. Candidates are the three Claude profiles, Claude Code
    on Bedrock and ChatGPT/Codex. Do not choose because the current session uses
    that identity.
-3. Record the request verbatim with `fde request`.
-4. Propose the smallest stage slice that produces the requested outcome. Show
-   included stages, skipped stages and roles needed, then wait for confirmation.
-5. Record the plan with `fde plan` or an appropriate `fde shapes` shortcut.
-6. Put the controller's narrowed role question to the user. An identity may hold
-   several roles; optional specialists may be `none`. Do not recommend defaults.
-7. Record assignments with `fde roles`. Stop if an assigned identity is
-   unavailable; ask for a replacement rather than silently substituting.
+3. Ask for the request in chat and record it verbatim with `fde request`.
+4. Propose the smallest stage slice that produces the requested outcome. Use
+   `fde plan --preview` if useful; previewing must not write plan state.
+5. Show one table containing each required role, why it is needed, the focused
+   specialist agent/method it will use, and all eligible account identities.
+   Specialist agents are methods; account identities are selected by the user.
+6. Let the user select the identity for every required role. One identity may
+   hold several roles and optional specialists may be `none`. Do not turn an
+   orchestrator recommendation into an assignment.
+7. Show a combined summary: request, included stages, skipped stages,
+   deliverables, role assignments, access needed and explicit approval gates.
+   Resolve every ambiguity before asking for approval.
+8. Ask the user to type `APPROVE PLAN <run-id>` exactly. General agreement is
+   not approval. If anything changes, show the revised summary and ask again.
+9. Only after the exact phrase, record the plan with `--require-approval`, save
+   the role selections, and pass the same phrase to `fde approve-plan`. The
+   controller then confirms roles and creates run-scoped connector config.
 
-Nothing in this sequence authorizes connector/repository access. The user's own
+Nothing before step 9 authorizes connector/repository access. The user's own
 request is input; it is not permission to fetch the referenced Jira item.
 
 ## Stage selection
@@ -59,7 +68,8 @@ where the missing input will come from.
 
 ## Run-scoped handoff
 
-After roles are confirmed, `mcp-sync --run <run-id>` creates role-restricted MCP
-configuration. If a fresh Claude session is needed, launch the orchestrator with
-that generated config and `FDE_RUN_ID=<run-id>` so SessionStart prints a bounded
-brief. End the scoping session without fetching data.
+`fde-start` maintains a Claude session ID across the process boundary. After
+combined approval, tell the user to type `/exit`; the launcher resumes the same
+conversation with the generated role-restricted MCP configuration and
+`FDE_RUN_ID=<run-id>`. End the scoping process without fetching data. When the
+launcher is not in use, provide the generated manual launch command instead.

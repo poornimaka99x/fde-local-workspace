@@ -127,6 +127,59 @@ class FdeV03ControllerTest(unittest.TestCase):
         self.assertIn("adversarial review", shapes.stdout)
         self.assertIn("verification", shapes.stdout)
 
+    def test_combined_plan_and_roles_require_exact_approval(self):
+        start = self.run_fde("start")
+        run_id = next(
+            line.split()[1] for line in start.stdout.splitlines()
+            if line.startswith("run ")
+        )
+        self.run_fde("orchestrator", run_id, "work")
+        self.run_fde("request", run_id, "research the returns journey")
+
+        preview = self.run_fde(
+            "plan", run_id, "--preview", "--stages", "intake,research",
+        )
+        self.assertIn("preview only", preview.stdout)
+        self.assertFalse((self.shared / "runs" / run_id / "plan.json").exists())
+
+        self.run_fde(
+            "plan", run_id, "--require-approval", "--stages", "intake,research",
+        )
+        self.run_fde(
+            "roles", run_id,
+            "--set", "research=work",
+            "--set", "productManagement=none",
+            "--set", "microsoftContext=none",
+        )
+        run_dir = self.shared / "runs" / run_id
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        roles = json.loads((run_dir / "roles.json").read_text())
+        self.assertEqual(manifest["state"], "awaiting_roles")
+        self.assertIn("selectedAt", roles)
+        self.assertNotIn("confirmedAt", roles)
+        blocked = self.run_fde(
+            "guard", run_id, "--activity", "reading Jira", expected=6,
+        )
+        self.assertIn("not confirmed", blocked.stderr)
+
+        refused = self.run_fde(
+            "approve-plan", run_id, input_text="yes\n", expected=8,
+        )
+        self.assertIn("nothing was approved", refused.stderr)
+        approved = self.run_fde(
+            "approve-plan", run_id,
+            input_text=f"APPROVE PLAN {run_id}\n",
+        )
+        self.assertIn("request research the returns journey", approved.stdout)
+        self.assertIn("research/research-brief.md", approved.stdout)
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        plan = json.loads((run_dir / "plan.json").read_text())
+        roles = json.loads((run_dir / "roles.json").read_text())
+        self.assertEqual(manifest["state"], "roles_confirmed")
+        self.assertIn("executionApprovedAt", plan)
+        self.assertIn("confirmedAt", roles)
+        self.run_fde("guard", run_id, "--activity", "reading Jira")
+
     def test_lesson_is_unreviewed_and_rejects_obvious_secrets(self):
         run_id = self.new_release_run()
         self.run_fde(

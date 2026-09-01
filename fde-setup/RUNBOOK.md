@@ -81,18 +81,15 @@ problem you can debug in minutes.
 `https://mcp.atlassian.com/v1/mcp/authv2` over HTTP. It is deliberately **not**
 in anyone's global config: it is role-scoped, so it reaches whichever identity
 you make orchestrator for a run, written by `mcp-sync --run <run-id>` when you
-confirm roles. There is no permanently privileged account because there is no
-permanent orchestrator.
+approve the combined plan and roles. There is no permanently privileged account
+because there is no permanent orchestrator.
 
-To use it: start a run, assign roles, then start the orchestrator's profile with
-the run-scoped config:
+To use it, start the interactive workflow and approve its combined proposal:
 
 ```bash
-fde start MAX-142
-fde roles <run-id> --set orchestrator=claude_bedrock ...
-CLAUDE_CONFIG_DIR=~/.claude-profiles/bedrock \
-  claude --mcp-config ~/.claude-shared/runs/<run-id>/mcp/claude-bedrock.mcp.json
-/mcp        # atlassian should appear and authenticate
+fde-start --orchestrator bedrock
+# give the request, select roles, type APPROVE PLAN <run-id>, then /exit
+# the same conversation resumes with Atlassian available
 ```
 
 Expect an OAuth consent screen; on a corporate site your admin may have to
@@ -103,9 +100,9 @@ the site linked to your organisation — check your own tenant. Even so, keep
 local git as the primary interface to repositories; the connector is for work
 items and pages.
 
-Reads are fine once roles are confirmed. **Writes are not**: Jira, Confluence and
-Bitbucket writes need `fde approve-publish <run-id> <target>`, every time. Every
-Atlassian call is logged to the run's `events.jsonl`.
+Reads are fine once the combined proposal is approved. **Writes are not**: Jira,
+Confluence and Bitbucket writes need `fde approve-publish <run-id> <target>`,
+every time. Every Atlassian call is logged to the run's `events.jsonl`.
 
 **Check:** in the orchestrator's session, ask it to find a Jira epic by key.
 
@@ -223,34 +220,30 @@ anything.
 ## Phase 6 — run the pipeline (15 min)
 
 ```bash
-fde start
+fde-start
+# or: fde-start --orchestrator bedrock
 ```
 
-It creates the run and stops in `awaiting_orchestrator`. Nothing has been read:
-no Jira, no Confluence, no SharePoint, no repository, no client context.
+Choose the orchestrator, then state the request in the chat. It proposes the
+smallest suitable plan and the specialist roles it needs. Select an account
+identity for every required role; identities have no fixed role between runs.
+The orchestrator shows one combined summary. Type
+`APPROVE PLAN <run-id>` exactly to approve the plan and assignments together.
+Before that approval it must not read Jira, Confluence, SharePoint, a repository
+or client context.
 
-```bash
-fde orchestrator <run-id> bedrock
-fde request <run-id> "MAX-142 same-day refunds — research it, validate it, slides"
-fde plan <run-id> --stages intake,research,review,presentation
-fde roles <run-id> \
-  --set research=claude_work,gemini \
-  --set review=chatgpt_codex \
-  --set presentation=claude_work \
-  --set microsoftContext=none
-```
+When the orchestrator asks, type `/exit`. The launcher resumes the same Claude
+session with the generated run-scoped MCP configuration. It then uses its normal
+configured tools autonomously inside the approved plan and asks you whenever
+intent, scope, target, authority, destructive effect or acceptance criteria are
+ambiguous. The separate Codex-write, deployment, publication, destructive and
+scope-expansion gates remain in force.
 
 The plan decides everything downstream: the role question only asks for roles the
 plan needs, `fde status` shows only the artifacts in scope, and `fde invoke`
-refuses a stage that is not in it. `fde shapes` lists the common shapes;
-`fde start -o bedrock "MAX-88" --shape presentation+delivery-plan` does the first
-three steps at once.
-
-Then in the orchestrator's session:
-
-```
-/engage <run-id>
-```
+refuses a stage that is not in it. `fde shapes` lists the common shapes. The
+controller commands remain available for automation and troubleshooting, but
+`fde-start` is the normal interactive entry point.
 
 It will **stop and ask you** if the researcher finds a gap that would change the
 design. That is the pipeline working, not failing.

@@ -18,11 +18,11 @@ run `./install.sh`, and `./install.sh --update` when it changes.
 reviews and who implements is decided by *you*, at the start of every run, and
 is never inherited from the last one.
 
-**Nothing crosses a boundary without you.** Nothing is read until roles are
-confirmed; Codex writes only under a one-time approval bound to the exact bytes
-of one task file; and anything that leaves this machine — Jira, Confluence,
-SharePoint, GitHub, Bitbucket, deployment, email or Teams — needs its own
-publication approval.
+**Nothing crosses a boundary without you.** Nothing is read until you approve
+the combined plan and role assignment; Codex writes only under a one-time
+approval bound to the exact bytes of one task file; and anything that leaves
+this machine — Jira, Confluence, SharePoint, GitHub, Bitbucket, deployment,
+email or Teams — needs its own publication approval.
 
 ## The four layers
 
@@ -68,22 +68,35 @@ not exist — that is why the wrapper is now three lines.
 
 ## Running a piece of work
 
-Four questions, in order, none of which reads anything:
+Start one continuous orchestrator conversation:
 
 ```bash
-fde start                                    # 1. who orchestrates?
-fde orchestrator <run-id> bedrock            #    work | msc | alt | bedrock | codex
-fde request <run-id> "MAX-142 — research it, validate it, give me slides"
-fde plan <run-id> --stages intake,research,review,presentation   # 2. what does that mean?
-fde roles <run-id> --set research=work --set review=codex \
-                   --set presentation=work --set microsoftContext=none
+fde-start                                    # asks which Claude profile orchestrates
+fde-start --orchestrator bedrock             # or select it directly
 ```
+
+Give the request in chat. The orchestrator proposes the smallest suitable plan
+and a table of required specialist roles, explains why each role is needed, and
+shows the eligible account identities. You select the identities. It then shows
+one combined summary of the request, stages, deliverables, roles, access and
+retained approval gates. Only the exact phrase it gives you —
+`APPROVE PLAN <run-id>` — confirms both plan and roles.
+
+When prompted, type `/exit`. `fde-start` resumes the same Claude conversation
+with the run-scoped connectors enabled. Within the approved scope the
+orchestrator can use its normal configured tools autonomously. It must stop and
+ask when intent, target, authority, destructive effect, acceptance criteria or
+required evidence is ambiguous. Codex writes, deployments, external
+publication, destructive actions and scope expansion retain their explicit
+gates.
 
 **The orchestrator comes first** because it is the identity that reads your
 sentence and proposes what the run should do. Any Claude profile or Codex can
 hold it; Gemini and Microsoft Copilot cannot — Gemini is a one-shot headless call
 with no session state and Copilot is a chat endpoint over the Microsoft estate,
-so neither can hold a run together. Both can still research or review.
+so neither can hold a run together. Both can still research or review. The
+continuous `fde-start` launcher currently supports Claude profiles; a Codex-led
+run can still be created and driven with the controller commands.
 
 **A run is a slice of the pipeline, not all of it.** "Research this and get it
 validated" is a real ask; so is "slides and a Jira breakdown". The plan decides
@@ -168,7 +181,8 @@ Codex CLI     ~/.codex/config.toml        TOML, [mcp_servers.<name>]
 Each server declares who gets it. `["claude","gemini","codex"]` is global.
 `["role:orchestrator"]` is **not**: that server stays out of every global config
 and is written per run, for whichever identity holds the role, by
-`mcp-sync --run <run-id>` — which `fde roles` calls for you. Atlassian is
+`mcp-sync --run <run-id>` — which the combined approval flow calls for you.
+Atlassian is
 role-scoped for exactly this reason: there is no permanently privileged
 orchestrator account, because there is no permanent orchestrator.
 

@@ -552,7 +552,7 @@ class Run:
 
     def planned(self):
         p = self.plan()
-        return bool(p and p.get("confirmedAt"))
+        return bool(p and (p.get("confirmedAt") or p.get("proposedAt")))
 
     def stages(self):
         """This run's stages. A run created before plans existed is a full one."""
@@ -581,7 +581,12 @@ class Run:
         s = self.state
         if s == "blocked":
             s = self.manifest().get("blockedFrom") or "awaiting_orchestrator"
-        return s not in ("awaiting_orchestrator", "awaiting_plan", "awaiting_roles")
+        if s in ("awaiting_orchestrator", "awaiting_plan", "awaiting_roles"):
+            return False
+        plan = self.plan() or {}
+        if plan.get("approvalRequired") and not plan.get("executionApprovedAt"):
+            return False
+        return True
 
     def assignees(self, role):
         r = self.roles() or {}
@@ -1331,23 +1336,28 @@ def cmd_list(args):
     return 0
 
 
-def _record_plan(run, stages, intent="", source="flags", amend=False):
+def _record_plan(run, stages, intent="", source="flags", amend=False,
+                 approval_required=False):
     stages = [s for s in STAGE_ORDER if s in set(stages)]
     if not stages:
         die("a plan needs at least one stage", 2)
     warnings = prereq_warnings(stages)
 
+    stamp = iso()
     plan = {
-        "confirmedAt": iso(),
         "intent": intent,
         "stages": stages,
         "skipped": [s for s in STAGE_ORDER if s not in set(stages)],
         "rolesNeeded": roles_needed(stages),
         "warnings": warnings,
         "source": source,
+        "approvalRequired": bool(approval_required),
     }
+    plan["proposedAt" if approval_required else "confirmedAt"] = stamp
     write_json(run.plan_path, plan)
-    run.event("plan.amended" if amend else "plan.confirmed",
+    event = "plan.amended" if amend else (
+        "plan.proposed" if approval_required else "plan.confirmed")
+    run.event(event,
               stages=stages, intent=intent[:200], source=source)
 
     print(f"plan   {run.plan_line()}")
@@ -1357,7 +1367,9 @@ def _record_plan(run, stages, intent="", source="flags", amend=False):
         print(f"note   {w}")
 
     if run.state == "awaiting_plan":
-        run.set_state("awaiting_roles", "plan confirmed by the user")
+        reason = "plan proposed; awaiting roles and combined approval" if approval_required \
+            else "plan confirmed by the user"
+        run.set_state("awaiting_roles", reason)
     elif run.state == "awaiting_orchestrator":
         die("choose an orchestrator first", 6)
 
@@ -1440,8 +1452,21 @@ def cmd_plan(args):
                 die(f"'{STAGE_LABEL[s]}' has already been passed and cannot be removed "
                     f"from the plan.", 5)
 
-    return _record_plan(run, stages, intent=args.intent or "", 
-                        source="shape" if args.shape else "flags", amend=amend)
+    if args.preview:
+        print(f"plan   {'  →  '.join(STAGE_LABEL[s] for s in stages)}")
+        skipped = [s for s in STAGE_ORDER if s not in set(stages)]
+        if skipped:
+            print(f"skip   {', '.join(STAGE_LABEL[s] for s in skipped)}")
+        for warning in prereq_warnings(stages):
+            print(f"note   {warning}")
+        print("\n" + role_question(run, stages=stages))
+        print("\npreview only — no plan or role assignment was written")
+        return 0
+
+    return _record_plan(run, stages, intent=args.intent or "",
+                        source="shape" if args.shape else "flags", amend=amend,
+                        approval_required=(args.require_approval or bool(
+                            amend and (run.plan() or {}).get("approvalRequired"))))
 
 
 def cmd_shapes(args):
@@ -1454,6 +1479,31 @@ def cmd_shapes(args):
     print("Or name stages directly: fde plan <run-id> --stages research,review,presentation")
     print(f"\nStages: {', '.join(STAGE_ORDER)}\n")
     return 0
+
+
+def _missing_required_roles(run, assignments):
+    return [
+        role for role in run.roles_needed()
+        if role not in OPTIONAL_ROLES
+        and not (assignments.get(role) if isinstance(assignments.get(role), list)
+                 else [assignments.get(role)] if assignments.get(role) else [])
+    ]
+
+
+def _sync_run_mcp(run):
+    """Generate role-scoped connector config only after combined approval."""
+    sync = SHARED / "bin" / "mcp-sync"
+    if not sync.exists():
+        return
+    result = subprocess.run(
+        [sys.executable, str(sync), "--run", run.id],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        run.event("mcp.run-scoped", detail=result.stdout.strip()[:400])
+    else:
+        print(f"  (run-scoped MCP config not written: "
+              f"{result.stderr.strip()[:200]})", file=sys.stderr)
 
 
 def cmd_roles(args):
@@ -1545,10 +1595,7 @@ def cmd_roles(args):
 
     merged = dict(existing_now)
     merged.update({k: v for k, v in assignments.items() if v})
-    missing = [r for r in needed
-               if r not in OPTIONAL_ROLES
-               and not (merged.get(r) if isinstance(merged.get(r), list)
-                        else [merged.get(r)] if merged.get(r) else [])]
+    missing = _missing_required_roles(run, merged)
     if missing and not args.allow_unassigned:
         die(f"this run's plan needs {', '.join(missing)}, which you left unassigned.\n"
             f"       Plan: {run.plan_line()}\n"
@@ -1559,26 +1606,26 @@ def cmd_roles(args):
     existing = doc.get("assignments", {})
     existing.update(assignments)
     doc["assignments"] = existing
-    doc["confirmedAt"] = iso()
+    approval_required = bool((run.plan() or {}).get("approvalRequired"))
+    if approval_required:
+        doc.pop("confirmedAt", None)
+        doc["selectedAt"] = iso()
+    else:
+        doc["confirmedAt"] = iso()
     write_json(run.roles_path, doc)
-    run.event("roles.confirmed", assignments=assignments,
+    run.event("roles.selected" if approval_required else "roles.confirmed",
+              assignments=assignments,
               source=("same-as:" + args.same_as) if args.same_as else
                      ("file:" + args.from_file) if args.from_file else
                      ("flags" if args.set else "interactive"))
-    if run.state == "awaiting_roles":
+    if run.state == "awaiting_roles" and not approval_required:
         run.set_state("roles_confirmed", "roles assigned by the user")
 
-    # Role-restricted connectors become available now, and only to the holder.
-    sync = SHARED / "bin" / "mcp-sync"
-    if sync.exists():
-        r = subprocess.run([sys.executable, str(sync), "--run", run.id],
-                           capture_output=True, text=True)
-        if r.returncode == 0:
-            run.event("mcp.run-scoped", detail=r.stdout.strip()[:400])
-        else:
-            print(f"  (run-scoped MCP config not written: {r.stderr.strip()[:200]})", file=sys.stderr)
+    if not approval_required:
+        _sync_run_mcp(run)
 
-    print(f"\nroles confirmed for {run.id}")
+    verb = "selected" if approval_required else "confirmed"
+    print(f"\nroles {verb} for {run.id}")
     print(f"plan   {run.plan_line()}\n")
     for role, label, _m in prompts:
         v = existing.get(role)
@@ -1586,7 +1633,73 @@ def cmd_roles(args):
             agent_label(agents, v) if v else "none")
         print(f"  {label:<28} {shown or 'none'}")
     print(f"\nstate  {run.state}")
-    print(f"next   fde resume {run.id}")
+    if approval_required:
+        print("access blocked  no connector, repository or execution access yet")
+        print(f"next   fde approve-plan {run.id}")
+    else:
+        print(f"next   fde resume {run.id}")
+    return 0
+
+
+def cmd_approve_plan(args):
+    """Approve the exact proposed plan and selected role assignment together."""
+    run = Run(args.run_id)
+    plan = run.plan() or {}
+    roles = run.roles() or {}
+    if not plan.get("approvalRequired"):
+        die(f"run {run.id} does not require a separate combined plan approval", 5)
+    if plan.get("executionApprovedAt"):
+        die(f"run {run.id}'s plan is already approved", 5)
+    assignments = roles.get("assignments") or {}
+    missing = _missing_required_roles(run, assignments)
+    if missing:
+        die(f"cannot approve: required roles are not selected: {', '.join(missing)}", 2)
+
+    agents = load_agents()
+    print("\nCombined execution proposal")
+    print(f"  run     {run.id}")
+    print(f"  request {run.manifest().get('requirement') or '(not recorded)'}")
+    print(f"  plan    {run.plan_line()}")
+    if plan.get("skipped"):
+        print(f"  skips   {', '.join(STAGE_LABEL[s] for s in plan['skipped'])}")
+    deliverables = []
+    for stage in run.stages():
+        for directory, filename in STAGE_ARTIFACTS.get(stage, []):
+            deliverables.append(filename if directory == "." else
+                                f"{directory}/{filename}")
+    print(f"  outputs {', '.join(deliverables) if deliverables else '(no file artifact required)'}")
+    print("  roles")
+    for role, label, _multi in ROLE_PROMPTS:
+        if role not in run.roles_needed():
+            continue
+        value = assignments.get(role)
+        shown = ", ".join(agent_label(agents, aid) for aid in value) \
+            if isinstance(value, list) else (agent_label(agents, value) if value else "none")
+        print(f"    {label:<28} {shown or 'none'}")
+    print("\n  Approval unlocks planned local work and role-scoped configured read access.")
+    print("  Codex writes, deployments and external publication keep their own gates.")
+
+    expected = f"APPROVE PLAN {run.id}"
+    print(f"\nType exactly: {expected}")
+    confirmation = input("> ").strip() if sys.stdin.isatty() else sys.stdin.readline().strip()
+    if confirmation != expected:
+        die("confirmation did not match; nothing was approved", 8)
+
+    stamp = iso()
+    plan["confirmedAt"] = stamp
+    plan["executionApprovedAt"] = stamp
+    plan["approvedAssignments"] = assignments
+    write_json(run.plan_path, plan)
+    roles["confirmedAt"] = stamp
+    write_json(run.roles_path, roles)
+    run.event("plan.execution-approved", assignments=assignments,
+              stages=plan.get("stages", []))
+    if run.state == "awaiting_roles":
+        run.set_state("roles_confirmed", "combined plan and roles approved by the user")
+    _sync_run_mcp(run)
+    print(f"\napproved  {run.id}")
+    print(f"state     {run.state}")
+    print(f"next      fde resume {run.id} --next")
     return 0
 
 
@@ -1614,6 +1727,12 @@ STAGE_HINT = {
 
 def next_action(run):
     state = run.state
+    plan = run.plan() or {}
+    if plan.get("approvalRequired") and not plan.get("executionApprovedAt"):
+        assignments = (run.roles() or {}).get("assignments", {})
+        if not _missing_required_roles(run, assignments):
+            return f"fde approve-plan {run.id}   — approve the plan and selected roles together"
+        return f"fde roles {run.id} {role_set_hint(run)}"
     if state == "awaiting_orchestrator":
         return f"fde orchestrator {run.id} <identity>   — work | msc | alt | bedrock | codex"
     if state == "awaiting_plan":
@@ -1702,7 +1821,8 @@ def cmd_status(args):
         print("  none assigned — this run may not read Jira, Confluence, SharePoint,")
         print("  email, repositories or client context yet.")
     else:
-        print(f"  confirmed  {r.get('confirmedAt') or '(orchestrator only, so far)'}")
+        state_label = r.get("confirmedAt") or r.get("selectedAt") or "(orchestrator only, so far)"
+        print(f"  {'confirmed' if r.get('confirmedAt') else 'selected ':<10} {state_label}")
         for role, label, _m in ROLE_PROMPTS:
             if role not in run.roles_needed():
                 continue
@@ -2299,6 +2419,10 @@ def main(argv=None):
     s.add_argument("--remove", action="append", metavar="STAGE")
     s.add_argument("--intent", help="the sentence this plan came from, recorded verbatim")
     s.add_argument("--show", action="store_true")
+    s.add_argument("--preview", action="store_true",
+                   help="show stages, omissions and required roles without writing the plan")
+    s.add_argument("--require-approval", action="store_true",
+                   help="select roles first, then require APPROVE PLAN <run-id> before access")
     s.set_defaults(fn=cmd_plan)
 
     s = sub.add_parser("shapes", help="the named plan shapes and what they contain")
@@ -2318,6 +2442,13 @@ def main(argv=None):
     s.add_argument("--allow-unassigned", action="store_true",
                    help="proceed with a role the plan needs left empty")
     s.set_defaults(fn=cmd_roles)
+
+    s = sub.add_parser(
+        "approve-plan",
+        help="approve a proposed plan and its selected roles together before execution",
+    )
+    s.add_argument("run_id")
+    s.set_defaults(fn=cmd_approve_plan)
 
     s = sub.add_parser("status", help="state, roles, artifacts, approvals, next action")
     s.add_argument("run_id")

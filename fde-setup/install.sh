@@ -297,11 +297,11 @@ Open a new shell, then:
   cc-which                     profiles and which one is active
   fde doctor                   what is configured, what is broken
 
-The pipeline is run by the controller, not by memory:
+Start the interactive orchestrator workflow:
 
-  fde start <JIRA-KEY|"description">    creates a run; asks for roles first
-  fde roles <run-id>                    you assign them, every run, from scratch
-  fde status <run-id>                   state, artifacts, approvals
+  fde-start                             choose an orchestrator, then chat
+  fde-start --orchestrator bedrock      select the profile directly
+  fde status <run-id>                   state, plan, roles and approvals
 
 Cross-tool helpers on your PATH:
   ask-gemini      ask-codex --read-only      ask-ms-copilot
