@@ -5,7 +5,7 @@
     {
       "name": "fde-core",
       "source": "./plugins/fde-core",
-      "description": "Forward-deployed engineering toolkit: client context, repo onboarding, review agents and shared MCP servers, available in every repository."
+      "description": "End-to-end FDE toolkit with per-run roles, product/design/delivery workflows, GitHub and Bitbucket PR review, TDD and evidence checkpoints, bounded context and learning, harness audits, deployment and observability."
     }
   ]
 }

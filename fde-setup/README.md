@@ -21,7 +21,8 @@ is never inherited from the last one.
 **Nothing crosses a boundary without you.** Nothing is read until roles are
 confirmed; Codex writes only under a one-time approval bound to the exact bytes
 of one task file; and anything that leaves this machine — Jira, Confluence,
-SharePoint, Bitbucket, email, Teams — needs its own publication approval.
+SharePoint, GitHub, Bitbucket, deployment, email or Teams — needs its own
+publication approval.
 
 ## The four layers
 
@@ -86,7 +87,7 @@ so neither can hold a run together. Both can still research or review.
 
 **A run is a slice of the pipeline, not all of it.** "Research this and get it
 validated" is a real ask; so is "slides and a Jira breakdown". The plan decides
-which of the ten stages this run does, and everything downstream follows it —
+which lifecycle stages this run does, and everything downstream follows it —
 the role question shrinks to fit, `fde status` shows only the artifacts in scope,
 and `fde invoke` refuses a stage that is not in the plan. `fde shapes` lists the
 common ones:
@@ -98,7 +99,11 @@ review-only       intake → adversarial review
 presentation      intake → presentation
 delivery-plan     intake → development plan
 build             intake → implementation → verification
-full              all ten stages
+pr-review         intake → adversarial review → verification
+design-to-build   intake → solution architecture/design → presentation → planning → implementation → verification
+release           verification → deployment → observability
+operate           intake → observability
+full              all twelve stages
 ```
 
 Skipping a stage's usual input warns rather than blocks — sometimes the input is
@@ -107,7 +112,8 @@ in your head or in a Confluence page. Widening a plan later works forwards
 
 Approval gates are not stages you can plan around. If `implementation` is in the
 plan, `awaiting_implementation_approval` precedes it and the run will not enter
-implementation without the approval that gate exists for. Same for publication.
+implementation without the approval that gate exists for. Deployment and
+publication have their own external-write approvals.
 
 Any identity may hold any role it has the capability for; one identity may hold
 several; `none` is valid. If something you assigned is not available on this
@@ -123,7 +129,10 @@ Artifacts land under the run, and only the ones the plan calls for:
 `research-brief.md`, `architecture-options.md`, `adr.md`, `review.md`,
 `reconciliation.md`, `solution-presentation.pptx`, `development-plan.md`,
 `jira-plan.json`, `implementation-task.md`, `verification-report.md`,
-`publication-manifest.json`.
+`deployment-report.md`, `observability-plan.md` and
+`publication-manifest.json`. Verification and observability also carry
+append-only evidence checkpoints; a passing checkpoint is required before
+release progression.
 
 `jira-plan.json` is a preview. A plan existing is not a reason to create
 anything.
@@ -191,9 +200,10 @@ fde invoke <run-id> chatgpt_codex <file> --write
 
 The approval is one-time, expires in 30 minutes, and is bound to the SHA-256 of
 the task file. Edit the task and it is refused, not widened. Codex then runs
-`--sandbox workspace-write --ask-for-approval never` — `never` is safe *only*
-because the exact invocation was already approved, the filesystem is bounded to
-the approved root and network is off. There is no `--yolo` and no
+non-interactively with `--sandbox workspace-write`; the current CLI fails closed
+unless an explicit auto-approval option is passed, and this toolkit never passes
+one. The filesystem is bounded to the approved root and network is off. There is
+no `--yolo` and no
 `danger-full-access` anywhere in this toolkit, and `fde doctor` fails if one
 ever appears.
 
@@ -236,14 +246,23 @@ Reads are allowed once roles are confirmed. Jira, Confluence and Bitbucket
 
 ## What's in the toolkit
 
-**Skills** — `/engage` (the pipeline), `/repo-init`, `/agents-sync`,
-`/crosscheck`, `/client-context`, `/handover`, `/standards`
+**Skills** — core control and context (`/task-init`, `/engage`, `/repo-init`,
+`/agents-sync`, `/client-context`, `/handover`, `/crosscheck`); product and
+delivery (`/product-discovery`, `/jira-delivery`, `/scm-pr-review`); UI and
+design (`/ui-prototype`, `/design-system`, `/design-to-code`); implementation
+and quality (`/implementation`, `/tdd-evidence`, `/verification-evidence`,
+`/quality-gates`, `/ci-diagnose`); operations and continuous improvement
+(`/release-observability`, `/context-budget`, `/retrospective`,
+`/harness-evaluation`, `/agent-config-audit`).
 
-**Agents** — `repo-cartographer`, `standards-reviewer`, `integration-scout`,
-`researcher`, `solutioner`, `reviewer`
+**Agents** — the original research, architecture and review agents plus focused
+product, UI/UX, design-system, delivery, implementation, PR analysis, standards,
+security, test, CI, release and SRE/observability specialists. These are methods,
+not fixed account assignments: the user chooses the identity for every role at
+the start of each run.
 
-**Controller** — `fde doctor | start | roles | status | resume | invoke |
-approve-codex | approve-publish | guard | log | list`
+**Controller** — `fde doctor | start | roles | status | brief | checkpoint |
+learn | resume | invoke | approve-codex | approve-publish | guard | log | list`
 
 ## Caveats
 

@@ -13,11 +13,10 @@
 #   fde approve-codex <run-id> <stage> --task-file <file> --repo <path>
 # and consumed here, once, immediately before the process starts.
 #
-# Codex's sandbox decides what it CAN touch; its approval policy decides when it
-# asks mid-run. Because we invoke it non-interactively, mid-run prompts would
-# hang forever — so the gate is outer (this script + fde) and the sandbox is
-# bounded (workspace-write, network off). --ask-for-approval never is safe only
-# in that combination, and only because the exact task was approved.
+# Codex's sandbox decides what it CAN touch. The gate is outer (this script +
+# fde) and the sandbox is bounded (workspace-write, network off). `codex exec`
+# is non-interactive by default; never pass an auto-approval or sandbox-bypass
+# option here.
 #
 # There is no bypass flag here and there must never be one.
 set -uo pipefail
@@ -58,7 +57,6 @@ if [[ "$mode" == "read" ]]; then
   [[ -n "${prompt// }" ]] || die "nothing to ask"
   exec codex exec \
     --sandbox read-only \
-    --ask-for-approval never \
     --skip-git-repo-check \
     "$prompt"
 fi
@@ -94,8 +92,11 @@ fi
 cd "$writable" || die "cannot enter $writable"
 
 # workspace-write bounds writes to this directory tree; network stays disabled.
+# codex exec is non-interactive by default (codex-cli 0.151.0 removed
+# --ask-for-approval from exec; the opt-in is now --approve-for-me, which we do
+# not pass). Omitting it means Codex fails closed rather than prompting, which is
+# the property this outer gate relies on.
 exec codex exec \
   --sandbox workspace-write \
-  --ask-for-approval never \
   --skip-git-repo-check \
   "$(cat "$task_file")"

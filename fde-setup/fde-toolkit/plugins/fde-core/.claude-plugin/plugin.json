@@ -1,7 +1,7 @@
 {
   "name": "fde-core",
-  "description": "Cross-repository toolkit for forward-deployed engineering work: repo onboarding, client context, architecture review agents and shared MCP servers.",
-  "version": "0.1.0",
+  "description": "Local FDE control plane with dynamic account roles, product/design/delivery workflows, GitHub and Bitbucket PR review, TDD and evidence gates, bounded context and learning, harness audits, release and observability.",
+  "version": "0.3.0",
   "author": { "name": "Poornima" },
   "license": "MIT"
 }

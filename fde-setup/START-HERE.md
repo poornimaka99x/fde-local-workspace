@@ -15,7 +15,7 @@ working — jump to *When something is refused* at the bottom.
 ## 1. Install (5 min)
 
 ```bash
-cd ~/Library/CloudStorage/OneDrive-MaxedaDIYGroup/Maxeda/FDE-Agent/fde-setup
+cd ~/Library/CloudStorage/OneDrive-MaxedaDIYGroup/Maxeda/FDE-Agent/fde-local-workspace/fde-setup
 ./install.sh --update --dry-run     # look first — nothing is written
 ./install.sh --update
 exec $SHELL -l
@@ -112,7 +112,7 @@ cc-bedrock      # or cc-work / cc-msc / cc-alt — any identity can scope a run
    state, Copilot is a chat endpoint — but either can still research or review.
 2. **Is this the ask?** It reads your sentence back before acting on it.
 3. **Is this the plan?** It proposes the stages your sentence implies and shows
-   what it is *not* doing. Most work is a slice, not all ten stages.
+   what it is *not* doing. Most work is a slice, not the full lifecycle.
 4. **Who does the rest?** Narrowed to the roles this plan needs — a research-only
    run never asks you for an implementation agent.
 
@@ -166,7 +166,11 @@ review-only       intake → adversarial review
 presentation      intake → presentation
 delivery-plan     intake → development plan
 build             intake → implementation → verification
-full              all ten stages
+pr-review         intake → review → verification
+design-to-build   intake → solution architecture/design → presentation → planning → implementation → verification
+release           verification → deployment → observability
+operate           intake → observability
+full              all twelve stages
 ```
 
 Say "use the presentation and delivery-plan shapes" and it will — or skip the
@@ -309,10 +313,10 @@ directory is gitignored and belongs to this machine.
 ## Checking it still works
 
 ```bash
-cd ~/Library/CloudStorage/OneDrive-MaxedaDIYGroup/Maxeda/FDE-Agent/fde-setup
+cd ~/Library/CloudStorage/OneDrive-MaxedaDIYGroup/Maxeda/FDE-Agent/fde-local-workspace/fde-setup
 python3 -m unittest discover -s tests
 fde doctor
 ```
 
-60 tests, all against a temporary home and a stub Codex — they never touch your
-real config.
+The controller and harness suites run against temporary homes and a stub Codex;
+they never touch your real configuration.

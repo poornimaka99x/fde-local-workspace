@@ -74,6 +74,11 @@ class Sandbox:
             dst.chmod(0o755)
         shutil.copy2(SRC_SHARED / "config/agents.json", self.shared / "config/agents.json")
         shutil.copy2(SRC_SHARED / "mcp/mcp-servers.json", self.shared / "mcp/mcp-servers.json")
+        shutil.copytree(
+            REPO / "fde-toolkit" / "plugins" / "fde-core",
+            self.shared / "fde-toolkit" / "plugins" / "fde-core",
+            dirs_exist_ok=True,
+        )
 
         for p in ("work", "msc", "alt", "bedrock"):
             d = self.profiles / p
@@ -149,7 +154,9 @@ class Sandbox:
             "orchestrator": "claude_alt", "research": "claude_work",
             "solutioning": "claude_work", "review": "claude_msc",
             "deliveryPlanning": "claude_alt", "presentation": "claude_work",
-            "implementation": "claude_work", "microsoftContext": "none",
+            "implementation": "claude_work", "testEngineering": "claude_work",
+            "releaseManagement": "claude_work", "observability": "claude_work",
+            "microsoftContext": "none",
         }
         base.update(overrides)
         args = []
@@ -340,6 +347,9 @@ class TestRoles(FDETest):
                 args = []
                 for k, v in {**{"deliveryPlanning": "claude_alt",
                                 "presentation": "claude_work",
+                                "testEngineering": "claude_work",
+                                "releaseManagement": "claude_work",
+                                "observability": "claude_work",
                                 "microsoftContext": "none"}, **combo}.items():
                     args += ["--set", f"{k}={v}"]
                 r = self.sb.fde("roles", run_id, *args, "--allow-unavailable")
@@ -472,7 +482,7 @@ class TestCodexGate(FDETest):
         self.sb.ask_codex("--read-only", "hello")
         calls = self.sb.codex_calls()
         self.assertIn("--sandbox read-only", calls)
-        self.assertIn("--ask-for-approval never", calls)
+        self.assertNotIn("--approve-for-me", calls)
 
     def test_write_refuses_without_approval(self):
         """7. Codex write mode refuses to start without approval."""
@@ -514,12 +524,13 @@ class TestCodexGate(FDETest):
         self.assertEqual(self._approve(run_id, task).returncode, 0)
         target = self.sb.repo / "new.txt"
         r = self.sb.ask_codex("--write", "--run", run_id, "--stage", "implementation",
-                              "--task-file", str(task), CODEX_TRY_WRITE=str(target))
+                              "--task-file", str(task),
+                              CODEX_TRY_WRITE=str(target.resolve()))
         self.assertEqual(r.returncode, 0, r.stderr)
         calls = self.sb.codex_calls()
         self.assertIn("--sandbox workspace-write", calls)
-        self.assertIn("--ask-for-approval never", calls)
-        self.assertIn(f"CWD={self.sb.repo}", calls)
+        self.assertNotIn("--approve-for-me", calls)
+        self.assertIn(f"CWD={self.sb.repo.resolve()}", calls)
         self.assertEqual(target.read_text().strip(), "written by codex")
 
     def test_approval_expires(self):
@@ -569,7 +580,7 @@ class TestCodexGate(FDETest):
                               "--task-file", str(task), CODEX_TRY_WRITE=str(target))
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse(target.exists())
-        self.assertIn(f"CWD={self.sb.repo}", self.sb.codex_calls())
+        self.assertIn(f"CWD={self.sb.repo.resolve()}", self.sb.codex_calls())
 
     def test_writable_root_outside_repo_is_refused_at_approval_time(self):
         """11. The widening is refused before the user is even asked."""
@@ -968,11 +979,35 @@ class TestStateMachine(FDETest):
                     "research", "solutioning", "review", "reconciliation",
                     "presentation", "planning", "awaiting_implementation_approval",
                     "implementation", "verification",
+                    "awaiting_deployment_approval", "deployment", "observability",
                     "awaiting_publication_approval", "publication", "complete",
                     "blocked"]
         run_id = self.sb.start_full()
         self.sb.full_roles(run_id, implementation="claude_work")
         for s in expected[4:expected.index("publication")]:
+            if s == "awaiting_deployment_approval":
+                report = (self.sb.run_dir(run_id) / "artifacts" /
+                          "implementation" / "verification-report.md")
+                report.write_text("# Verification\n\nPassing evidence.\n")
+                self.assertEqual(self.sb.fde(
+                    "checkpoint", run_id, "--stage", "verification",
+                    "--status", "pass", "--evidence",
+                    "artifacts/implementation/verification-report.md",
+                ).returncode, 0)
+            if s == "deployment":
+                self.assertEqual(self.sb.fde(
+                    "approve-publish", run_id, "deployment",
+                    stdin=f"APPROVE PUBLISH {run_id}\n",
+                ).returncode, 0)
+            if s == "awaiting_publication_approval":
+                plan = (self.sb.run_dir(run_id) / "artifacts" /
+                        "observability" / "observability-plan.md")
+                plan.write_text("# Observability\n\nPassing rollout health.\n")
+                self.assertEqual(self.sb.fde(
+                    "checkpoint", run_id, "--stage", "observability",
+                    "--status", "pass", "--evidence",
+                    "artifacts/observability/observability-plan.md",
+                ).returncode, 0)
             r = self.sb.fde("resume", run_id, "--advance", s)
             self.assertEqual(r.returncode, 0, f"{s}: {r.stderr}")
 
@@ -1009,7 +1044,9 @@ class TestStateMachine(FDETest):
         for rel in ("manifest.json", "requirement.md", "tasks", "inputs",
                     "artifacts/research", "artifacts/architecture", "artifacts/review",
                     "artifacts/presentation", "artifacts/delivery-plan",
-                    "artifacts/implementation"):
+                    "artifacts/implementation", "artifacts/deployment",
+                    "artifacts/observability", "artifacts/evidence",
+                    "artifacts/learning"):
             self.assertTrue((d / rel).exists(), rel)
 
     def test_doctor_is_clean_on_a_good_install(self):
@@ -1163,7 +1200,9 @@ class TestPlanning(FDETest):
 
         with_impl = self.sb.start("MAX-16 build it", shape="build")
         self.sb.fde("roles", with_impl, "--set", "orchestrator=claude_alt",
-                    "--set", "implementation=chatgpt_codex", "--set", "microsoftContext=none",
+                    "--set", "implementation=chatgpt_codex",
+                    "--set", "testEngineering=claude_work",
+                    "--set", "microsoftContext=none",
                     "--allow-unavailable")
         self.sb.advance_to(with_impl, "awaiting_implementation_approval")
         r = self.sb.fde("resume", with_impl, "--next")
@@ -1173,7 +1212,9 @@ class TestPlanning(FDETest):
     def test_a_non_codex_implementer_passes_the_gate_but_it_is_recorded(self):
         run_id = self.sb.start("MAX-17 build it myself", shape="build")
         self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
-                    "--set", "implementation=claude_work", "--set", "microsoftContext=none")
+                    "--set", "implementation=claude_work",
+                    "--set", "testEngineering=claude_work",
+                    "--set", "microsoftContext=none")
         self.sb.advance_to(run_id, "implementation")
         events = (self.sb.run_dir(run_id) / "events.jsonl").read_text()
         self.assertIn("approval.implementation.not-required", events)

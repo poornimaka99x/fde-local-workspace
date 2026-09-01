@@ -18,10 +18,14 @@ asked for.
 | Research volume, long documents, web grounding | `ask-gemini` | large context, ~1,000 req/day, and Bedrock has no WebSearch |
 | Independent critique from another model family | `ask-codex --read-only` | disagreement is the point; read-only sandbox |
 | Implementation by Codex | `fde approve-codex` then `fde invoke ... --write` | write needs a one-time, hash-bound approval every time |
-| Microsoft estate — SharePoint, Outlook, Teams | `ask-ms-copilot`, or `ms-intake` for the manual path | M365 Copilot has no API; a Copilot Studio agent does |
+| Microsoft estate — SharePoint, Outlook, Teams, Copilot Notebooks | `ask-ms-copilot`, or `ms-intake` for the manual path | Microsoft Copilot is the enterprise-context surface, not a coding agent |
 | Jira, Confluence, Bitbucket reads | Atlassian MCP, wired only to the run's orchestrator | no permanently privileged account |
-| Jira, Confluence, SharePoint, Bitbucket, email, Teams writes | `fde approve-publish <run-id> <target>` | other people watch those spaces |
-| Source code in a Bitbucket repository | local git | the connector is for work items, not for your working tree |
+| GitHub or Bitbucket PR analysis | `/scm-pr-review` + local git + matching provider context | provider is detected; reviews verify the local diff |
+| Jira, Confluence, SharePoint, GitHub, Bitbucket, email, Teams writes | `fde approve-publish <run-id> <target>` | other people watch those spaces |
+| UI flows and prototypes | `/ui-prototype` using Figma or Claude Design | design states and accessibility are settled before code |
+| Figma-to-code work | `/design-system` then `/design-to-code` | reuse tokens/components and keep a traceable design contract |
+| Strict development gates | `/quality-gates` | the attached engineering standard is normative and testable |
+| Deployment | `/release-observability` then an approved `deployment` publication | rollout and rollback are external state changes |
 | Orchestrating a run | any Claude profile, or Codex | Gemini and MS Copilot cannot hold a run together |
 | Scoping a run | `fde plan` / `fde shapes` | most work is a slice, not the whole pipeline |
 | Running it | `/engage <run-id>` | orchestrator → ask → plan → roles → only the stages you asked for |

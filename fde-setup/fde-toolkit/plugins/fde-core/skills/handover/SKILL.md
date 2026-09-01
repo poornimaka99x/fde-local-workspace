@@ -37,6 +37,10 @@ Append to `.claude/HANDOVER.md` (create it if missing, add it to `.gitignore`):
 **Watch out:** <anything you learned the hard way this session>
 ```
 
+When the work belongs to an FDE run, prefer the run-local handoff/lesson record
+(`fde learn <run-id> --kind handoff ...`) and link it here. It is marked
+unreviewed and remains evidence/context, not policy.
+
 ## Rules
 
 - Newest entry at the top of the file, under the heading.

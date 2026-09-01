@@ -295,9 +295,40 @@ approve a new, narrower task. Never widen an existing approval. There is no
 `--yolo` and no `danger-full-access` in this toolkit, and `fde doctor` fails if
 one ever appears.
 
+After independent verification, record the evidence before release progression:
+
+```bash
+fde checkpoint <run-id> --stage verification --status pass \
+  --evidence artifacts/implementation/verification-report.md \
+  --command "pytest -q"
+```
+
+The controller refuses the deployment gate if the report or passing checkpoint
+is missing. Use `/tdd-evidence`, `/quality-gates`, `/scm-pr-review` and
+`/ci-diagnose` as applicable; an unavailable check is recorded, never silently
+treated as a pass.
+
 ---
 
-## Phase 8 — publish, behind the other gate (5 min)
+## Phase 8 — deploy and establish observability
+
+Use `/release-observability` to prepare an immutable release identity, migration
+and rollback steps, rollout thresholds, SLOs, alerts and runbooks. Deployment is
+an external mutation and requires its own approval:
+
+```bash
+fde approve-publish <run-id> deployment --summary "<environment and release>"
+# you type: APPROVE PUBLISH <run-id>
+```
+
+Write `artifacts/deployment/deployment-report.md` and
+`artifacts/observability/observability-plan.md`. Record live rollout health as a
+passing observability checkpoint before the run completes or publishes later
+artifacts.
+
+---
+
+## Phase 9 — publish, behind the other gate (5 min)
 
 A plan existing is not a reason to create anything. `jira-plan.json` is a
 preview. When you actually want it out there:
@@ -316,7 +347,7 @@ One target, one approval. What was approved is recorded in the run's
 
 ---
 
-## Phase 9 — close the loop (optional)
+## Phase 10 — close the loop (optional)
 
 Once the pipeline earns its keep, add a weekly scheduled task that reads Jira and
 Confluence and writes you a state-of-the-engagement brief. That is what turns a
@@ -332,6 +363,8 @@ for f in install.sh shell/*.sh shell/claude-profile-new claude-shared/bin/*; do
   head -1 "$f" | grep -q bash && bash -n "$f" && echo "ok   $f"
 done
 python3 -m unittest discover -s tests -v
+python3 fde-toolkit/plugins/fde-core/scripts/audit_agent_config.py \
+  --plugin-root fde-toolkit/plugins/fde-core --shared-root claude-shared
 fde doctor
 ```
 

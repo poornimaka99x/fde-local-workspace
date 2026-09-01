@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""Check the FDE setup and say exactly what is wrong and how to fix it.
+
+  fde-doctor            check everything
+  fde-doctor 1          check one phase (0-4)
+
+Exit 0 if every check in the requested phases passed.
+"""
+import base64, json, os, pathlib, shutil, subprocess, sys, urllib.error, urllib.request
+
+HOME = pathlib.Path.home()
+SHARED = pathlib.Path(os.environ.get("CLAUDE_SHARED", HOME / ".claude-shared"))
+G, R, Y, B, X = "\033[32m", "\033[31m", "\033[33m", "\033[1m", "\033[0m"
+if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+    G = R = Y = B = X = ""
+
+fails = warns = 0
+
+
+def ok(msg, detail=""):
+    print(f"  {G}pass{X}  {msg}" + (f"  {detail}" if detail else ""))
+
+
+def bad(msg, fix):
+    global fails
+    fails += 1
+    print(f"  {R}FAIL{X}  {msg}\n        fix: {fix}")
+
+
+def warn(msg, fix):
+    global warns
+    warns += 1
+    print(f"  {Y}warn{X}  {msg}\n        {fix}")
+
+
+def head(t):
+    print(f"\n{B}{t}{X}")
+
+
+def get(url, headers, timeout=12):
+    """Return (status, body_text). status None means the request never landed."""
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()[:300]
+    except Exception as e:
+        return None, str(e)
+
+
+def basic(email, token):
+    return "Basic " + base64.b64encode(f"{email}:{token}".encode()).decode()
+
+
+# ---------------------------------------------------------------- phase 0
+def phase0():
+    head("Phase 0 — install")
+    if shutil.which("claude"):
+        ok("claude CLI on PATH")
+    else:
+        bad("claude CLI not found", "install Claude Code, then re-run install.sh")
+
+    if SHARED.is_dir():
+        ok(f"shared layer at {SHARED}")
+    else:
+        bad(f"no {SHARED}", "run ./install.sh from the unpacked fde-setup folder")
+        return
+
+    for tool in ("mcp-sync", "confluence", "ms-intake", "ask-gemini", "fde-doctor"):
+        if shutil.which(tool):
+            ok(f"{tool} on PATH")
+        else:
+            bad(f"{tool} not on PATH",
+                'add: export PATH="$HOME/.claude-shared/bin:$PATH" to ~/.zshrc, then exec $SHELL -l')
+            break
+
+    profiles = sorted(p.name for p in (HOME / ".claude-profiles").glob("*") if p.is_dir())
+    if profiles:
+        ok("profiles", ", ".join(profiles))
+    else:
+        bad("no profiles", "run ./install.sh work msc bedrock")
+
+    for p in profiles:
+        d = HOME / ".claude-profiles" / p
+        if not (d / "CLAUDE.md").exists():
+            bad(f"profile '{p}' has no CLAUDE.md link", f"run: {SHARED}/bin/claude-profile-new {p}")
+        elif not (d / "CLAUDE.md").resolve().exists():
+            bad(f"profile '{p}' CLAUDE.md is a broken symlink",
+                f"the shared layer moved; re-run install.sh")
+        signed_in = (d / "projects").exists() or (d / ".credentials.json").exists()
+        cfg = d / "settings.json"
+        bedrock = cfg.exists() and "BEDROCK" in cfg.read_text()
+        if bedrock:
+            ok(f"profile '{p}' configured for Bedrock")
+        elif signed_in:
+            ok(f"profile '{p}' signed in")
+        else:
+            warn(f"profile '{p}' not signed in yet", f"run: cc-{p}  (once, to log in)")
+
+
+# ---------------------------------------------------------------- phase 1
+def phase1():
+    head("Phase 1 — Atlassian")
+    base = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
+    email = os.environ.get("CONFLUENCE_EMAIL", "")
+    token = os.environ.get("CONFLUENCE_API_TOKEN", "")
+
+    envfile = SHARED / "env.sh"
+    if not envfile.exists():
+        bad("no ~/.claude-shared/env.sh", "cp ~/.claude-shared/env.sh.example ~/.claude-shared/env.sh")
+    elif oct(envfile.stat().st_mode)[-3:] != "600":
+        warn("env.sh is readable by others", "chmod 600 ~/.claude-shared/env.sh")
+
+    missing = [n for n, v in (("CONFLUENCE_BASE_URL", base), ("CONFLUENCE_EMAIL", email),
+                              ("CONFLUENCE_API_TOKEN", token)) if not v]
+    if missing:
+        bad("env not set: " + ", ".join(missing),
+            "fill in ~/.claude-shared/env.sh then: source ~/.claude-shared/env.sh")
+        return
+    ok("Atlassian env vars set", f"({base})")
+
+    if not base.startswith("https://"):
+        bad(f"CONFLUENCE_BASE_URL is not https ({base})",
+            "use https://<your-site>.atlassian.net with no trailing /wiki")
+    if base.endswith("/wiki"):
+        bad("CONFLUENCE_BASE_URL ends with /wiki",
+            "drop the /wiki — the tools add it themselves")
+
+    h = {"Authorization": basic(email, token), "Accept": "application/json"}
+
+    # --- Confluence read
+    st, body = get(f"{base}/wiki/api/v2/spaces?limit=5", h)
+    if st == 200:
+        try:
+            spaces = [s["key"] for s in json.loads(body).get("results", [])]
+        except Exception:
+            spaces = []
+        ok("Confluence API reachable and authenticated",
+           "spaces: " + (", ".join(spaces) if spaces else "none visible"))
+        if not spaces:
+            warn("authenticated but no spaces visible",
+                 "your account may lack space permissions — check with your Confluence admin")
+    elif st == 401:
+        bad("Confluence returned 401 (bad credentials)",
+            "the API token or email is wrong. Regenerate at id.atlassian.com > Security > API tokens. "
+            "Use your Atlassian ACCOUNT EMAIL, not a username.")
+    elif st == 403:
+        bad("Confluence returned 403 (authenticated, not permitted)",
+            "the token is valid but the account lacks Confluence access — ask your admin")
+    elif st == 404:
+        bad("Confluence returned 404",
+            f"CONFLUENCE_BASE_URL looks wrong. Expected https://<site>.atlassian.net, got {base}")
+    elif st is None:
+        bad(f"could not reach {base} ({body})",
+            "check the site URL, your network, and any corporate proxy or VPN")
+    else:
+        bad(f"Confluence returned HTTP {st}", body[:200])
+
+    # --- Jira read (same credentials, different product entitlement)
+    st, body = get(f"{base}/rest/api/3/myself", h)
+    if st == 200:
+        try:
+            who = json.loads(body).get("displayName", "?")
+        except Exception:
+            who = "?"
+        ok("Jira API reachable and authenticated", f"as {who}")
+    elif st in (401, 403):
+        bad(f"Jira returned {st}",
+            "the same token works for Confluence but not Jira — your account may not be "
+            "licensed for Jira. Check with your Atlassian admin.")
+    elif st is None:
+        bad(f"could not reach Jira ({body})", "same network/proxy check as above")
+    else:
+        warn(f"Jira returned HTTP {st}", "not fatal if you only use Confluence")
+
+    # --- MCP config
+    src = SHARED / "mcp" / "mcp-servers.json"
+    if src.exists():
+        servers = json.loads(src.read_text()).get("servers", {})
+        atlassian = servers.get("atlassian")
+        if atlassian:
+            ok("atlassian entry present in mcp-servers.json")
+            endpoint = atlassian.get("url", "")
+            if endpoint == "https://mcp.atlassian.com/v1/mcp/authv2":
+                ok("Atlassian MCP endpoint verified", "OAuth 2.1 interactive endpoint")
+            elif endpoint == "https://mcp.atlassian.com/v1/mcp":
+                ok("Atlassian MCP endpoint verified", "API-token endpoint")
+            else:
+                warn(f"unrecognised Atlassian MCP endpoint: {endpoint or '(missing)'}",
+                     "use https://mcp.atlassian.com/v1/mcp/authv2 for interactive OAuth, "
+                     "or https://mcp.atlassian.com/v1/mcp for API-token authentication")
+        else:
+            warn("no atlassian entry in mcp-servers.json",
+                 "add one and run mcp-sync, or work through the confluence CLI only")
+
+        gen = SHARED / "fde-toolkit/plugins/fde-core/.mcp.json"
+        generated = json.loads(gen.read_text()).get("mcpServers", {}) if gen.exists() else {}
+        generated_has_atlassian = "atlassian" in generated
+        targets = set(atlassian.get("targets", [])) if atlassian else set()
+        role_scoped = any(t.startswith("role:") for t in targets)
+        globally_targeted = bool(targets.intersection({"claude", "gemini", "codex"}))
+
+        if atlassian and role_scoped and not globally_targeted:
+            if generated_has_atlassian:
+                bad("run-scoped Atlassian MCP leaked into the global config",
+                    "run mcp-sync; the global .mcp.json must not grant permanent access")
+            else:
+                ok("Atlassian MCP correctly held out of global config",
+                   "run-scoped to the selected orchestrator")
+        elif atlassian and "claude" in targets:
+            if generated_has_atlassian:
+                ok("generated Claude .mcp.json includes atlassian")
+            else:
+                bad("globally targeted Atlassian MCP is missing from Claude config",
+                    "run: mcp-sync")
+    else:
+        bad("no mcp-servers.json", "re-run install.sh")
+
+    print("\n  Still to confirm by hand (nothing here can test it for you):")
+    print("    1. scope a run and confirm its orchestrator and roles")
+    print("    2. launch the run-scoped command printed by /engage, then /mcp")
+    print("    3. ask the orchestrator to fetch a real Jira epic by key")
+    print("    4. Bitbucket MCP tools depend on tenant/admin enablement; use local git for repository files")
+
+
+# ---------------------------------------------------------------- phase 2
+def phase2():
+    head("Phase 2 — engagement context")
+    d = SHARED / "shared" / "clients"
+    files = [f for f in d.glob("*.md") if f.name != "_template.md"] if d.is_dir() else []
+    if not files:
+        bad("no client context file",
+            "run /client-context <slug> in a Claude session, or drop one into "
+            f"{d}/<slug>.md")
+        return
+    for f in files:
+        text = f.read_text()
+        todos = text.count("TODO")
+        lines = len(text.splitlines())
+        note = f"{lines} lines"
+        if lines > 250:
+            warn(f"{f.name} is {lines} lines", "trim below ~200 — it loads into every session")
+        if todos:
+            warn(f"{f.name} still has {todos} TODO placeholder(s)",
+                 "vocabulary and architecture decisions are the two that matter most")
+        else:
+            ok(f"{f.name}", note)
+        if "## Vocabulary" in text:
+            vocab = text.split("## Vocabulary", 1)[1].split("##", 1)[0]
+            if "TODO" in vocab or len(vocab.strip()) < 80:
+                warn(f"{f.name}: vocabulary section is effectively empty",
+                     "this is the single highest-leverage section — seed 5-6 real terms")
+
+
+# ---------------------------------------------------------------- phase 3/4
+def phase3():
+    head("Phase 3 — Microsoft, manual path")
+    d = SHARED / "intake"
+    if d.is_dir():
+        n = len(list(d.glob("*.md")))
+        ok(f"intake directory exists ({n} item(s) filed)")
+        if n == 0:
+            warn("nothing filed yet",
+                 'try: pbpaste | ms-intake - --title "test" --kind meeting')
+    else:
+        bad("no intake directory", "mkdir -p ~/.claude-shared/intake")
+    if shutil.which("pandoc"):
+        ok("pandoc available (.docx notebook exports will convert)")
+    else:
+        warn("pandoc not installed",
+             "brew install pandoc — only needed if you export Notebooks as .docx")
+
+
+def phase4():
+    head("Phase 4 — Microsoft, Copilot Studio")
+    secret = os.environ.get("COPILOT_DIRECTLINE_SECRET", "")
+    endpoint = os.environ.get("COPILOT_TOKEN_ENDPOINT", "")
+    if not secret and not endpoint:
+        warn("no Copilot Studio credentials set (this phase is optional)",
+             "set COPILOT_DIRECTLINE_SECRET or COPILOT_TOKEN_ENDPOINT in env.sh once "
+             "your agent is published")
+        return
+    ok("credential set", "token endpoint" if endpoint else "Direct Line secret")
+    print('  test it with:  ask-copilot-studio "hello"')
+
+
+PHASES = {"0": phase0, "1": phase1, "2": phase2, "3": phase3, "4": phase4}
+
+if __name__ == "__main__":
+    wanted = sys.argv[1:] or list(PHASES)
+    for p in wanted:
+        if p not in PHASES:
+            sys.exit(f"unknown phase '{p}' (choose from {', '.join(PHASES)})")
+        PHASES[p]()
+    print()
+    if fails:
+        print(f"{R}{fails} failure(s){X}" + (f", {warns} warning(s)" if warns else ""))
+        sys.exit(1)
+    print(f"{G}all checks passed{X}" + (f" ({warns} warning(s))" if warns else ""))
