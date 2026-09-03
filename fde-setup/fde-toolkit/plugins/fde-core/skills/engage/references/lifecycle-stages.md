@@ -64,4 +64,9 @@ Preview each external mutation and obtain a separate publication approval for
 Jira, Confluence, SharePoint, GitHub, Bitbucket, email or Teams. Publish only the
 approved items and log resulting identifiers. Use `/retrospective` for a
 supported lesson or failure pattern and `/handover` when work remains. Mark the
-run complete only when planned artifacts and evidence are present.
+run complete only when planned artifacts and evidence are present. The
+controller runs output hygiene before entering `publication` and again before
+recording `complete`: only run
+artifacts are in scope, symlinks are skipped, permitted privacy cleanup is
+logged, and creator/copyright/ownership plus C2PA/content credentials remain
+intact. Use `fde output-hygiene <run-id> --check` earlier when you want a preview.

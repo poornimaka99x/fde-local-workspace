@@ -147,6 +147,19 @@ Artifacts land under the run, and only the ones the plan calls for:
 append-only evidence checkpoints; a passing checkpoint is required before
 release progression.
 
+Every legal transition into `publication` or `complete` runs
+provenance-preserving output hygiene first. It scans only `artifacts/`, never
+follows symlinks, and removes a narrow allowlist of unsafe invisible Unicode,
+home-directory prefixes and personal or
+path-like Office properties, and writes a hashed JSON report under
+`artifacts/evidence/`. Creator, copyright, ownership, visible-watermark and C2PA
+metadata are preserved. Run it early with `fde output-hygiene <run-id> --check`,
+or apply it manually without `--check`.
+
+The optional [watermarks-remover](https://github.com/guillaumemeyer/watermarks-remover)
+service is inspect-only in FDE. Set `WATERMARKS_SERVICE_URL` to its loopback URL
+to include its findings in the evidence report; FDE never calls `/clean`.
+
 `jira-plan.json` is a preview. A plan existing is not a reason to create
 anything.
 
@@ -276,7 +289,8 @@ not fixed account assignments: the user chooses the identity for every role at
 the start of each run.
 
 **Controller** — `fde doctor | start | roles | status | brief | checkpoint |
-learn | resume | invoke | approve-codex | approve-publish | guard | log | list`
+output-hygiene | learn | resume | invoke | approve-codex | approve-publish |
+guard | log | list`
 
 ## Caveats
 

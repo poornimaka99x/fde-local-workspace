@@ -20,8 +20,11 @@ Python 3, standard library only.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as _dt
 import hashlib
+import html
+import io
 import json
 import os
 import pathlib
@@ -30,6 +33,10 @@ import secrets
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import zipfile
 
 # ---------------------------------------------------------------- locations --
 
@@ -255,6 +262,32 @@ ARTIFACT_DIRS = [
     "implementation", "deployment", "observability", "evidence", "learning",
 ]
 
+# Output hygiene deliberately excludes provenance removal. These are the only
+# invisible characters FDE removes automatically from text artifacts. ZWJ/ZWNJ,
+# variation selectors and ordinary bidi isolates are preserved because they can
+# carry real language or emoji semantics.
+UNSAFE_INVISIBLE_CODEPOINTS = {
+    0x00AD: "soft-hyphen",
+    0x200B: "zero-width-space",
+    0x202A: "left-to-right-embedding",
+    0x202B: "right-to-left-embedding",
+    0x202C: "pop-directional-formatting",
+    0x202D: "left-to-right-override",
+    0x202E: "right-to-left-override",
+    0x2060: "word-joiner",
+    0xFEFF: "zero-width-no-break-space",
+}
+
+TEXT_ARTIFACT_SUFFIXES = {
+    ".css", ".csv", ".htm", ".html", ".ini", ".js", ".json", ".md",
+    ".py", ".sh", ".svg", ".toml", ".ts", ".tsv", ".txt", ".xml",
+    ".yaml", ".yml",
+}
+
+OOXML_ARTIFACT_SUFFIXES = {".docx", ".pptx", ".xlsx"}
+
+HYGIENE_REPORT_PREFIX = "output-hygiene-"
+
 
 def expand_stages(stages):
     """A plan, in canonical order, with its approval gates inserted."""
@@ -343,6 +376,15 @@ def write_atomic(path: pathlib.Path, text: str):
     os.replace(tmp, path)
 
 
+def write_bytes_atomic(path: pathlib.Path, data: bytes):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp{os.getpid()}")
+    tmp.write_bytes(data)
+    if path.exists():
+        os.chmod(tmp, path.stat().st_mode & 0o777)
+    os.replace(tmp, path)
+
+
 def write_json(path: pathlib.Path, data):
     write_atomic(path, json.dumps(data, indent=2) + "\n")
 
@@ -383,6 +425,10 @@ def sha256_file(path: pathlib.Path) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 # -------------------------------------------------------------------- agents --
@@ -628,6 +674,12 @@ class Run:
             hint = f" Next in this run's plan is '{nxt}'." if nxt else ""
             die(f"illegal transition {old} -> {new}.{hint}\n"
                 f"       This run's plan: {self.plan_line()}", 5)
+        if new in ("publication", "complete"):
+            report_path, report = run_output_hygiene(
+                self, apply=True, trigger=f"transition:{old}->{new}")
+            print(f"hygiene {report['summary']['files']} artifact(s), "
+                  f"{report['summary']['changedFiles']} changed")
+            print(f"evidence {report_path.relative_to(self.dir)}")
         if new == "blocked":
             m["blockedFrom"] = old
         if old == "blocked":
@@ -698,6 +750,327 @@ class Run:
         if not self.roles_confirmed():
             die(f"run {self.id} is in state '{self.state}'. Roles are not confirmed, so "
                 f"{what} is not permitted yet.\n       run: fde roles {self.id}", 6)
+
+
+def _artifact_files(run: Run):
+    """Yield regular in-scope artifacts without following symlinks."""
+    if not run.artifacts_dir.is_dir():
+        return
+    for path in sorted(run.artifacts_dir.rglob("*")):
+        rel = path.relative_to(run.artifacts_dir)
+        if path.is_symlink():
+            yield path, rel, "symlink"
+        elif path.is_file():
+            if rel.parent == pathlib.Path("evidence") and rel.name.startswith(HYGIENE_REPORT_PREFIX):
+                continue
+            yield path, rel, "file"
+
+
+def _sanitize_text_artifact(data: bytes):
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data, [], ["not-utf8; left unchanged"]
+
+    counts = {}
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        label = UNSAFE_INVISIBLE_CODEPOINTS.get(cp)
+        if label is None and 0xE0000 <= cp <= 0xE007F:
+            label = "unicode-tag-character"
+        if label:
+            counts[label] = counts.get(label, 0) + 1
+            continue
+        out.append(ch)
+    cleaned = "".join(out)
+
+    redactions = 0
+    homes = {str(HOME)}
+    user_profile = os.environ.get("USERPROFILE", "").strip()
+    if user_profile:
+        homes.add(user_profile.rstrip("/\\"))
+    for home in sorted((h for h in homes if h and h not in ("/", "\\")), key=len, reverse=True):
+        for sep in ("/", "\\"):
+            needle = home.rstrip("/\\") + sep
+            redactions += cleaned.count(needle)
+            cleaned = cleaned.replace(needle, "~" + sep)
+
+    changes = [f"removed {count} {label}" for label, count in sorted(counts.items())]
+    if redactions:
+        changes.append(f"redacted {redactions} home-directory path reference(s)")
+    return cleaned.encode("utf-8"), changes, []
+
+
+def _xml_remove_elements(data: bytes, names):
+    changes = []
+    for name, label in names:
+        tag = re.escape(name.encode("ascii"))
+        pattern = re.compile(
+            rb"<(?:(?:[A-Za-z_][\w.-]*):)?" + tag +
+            rb"\b[^>]*(?:/>|>.*?</(?:(?:[A-Za-z_][\w.-]*):)?" + tag + rb"\s*>)",
+            re.DOTALL,
+        )
+        data, count = pattern.subn(b"", data)
+        if count:
+            changes.append(f"removed {count} {label} Office propert{'y' if count == 1 else 'ies'}")
+    return data, changes
+
+
+def _xml_remove_path_template(data: bytes):
+    pattern = re.compile(
+        rb"<(?:(?:[A-Za-z_][\w.-]*):)?Template\b[^>]*>(?P<value>.*?)"
+        rb"</(?:(?:[A-Za-z_][\w.-]*):)?Template\s*>",
+        re.DOTALL,
+    )
+    count = 0
+
+    def remove_if_local(match):
+        nonlocal count
+        value = html.unescape(match.group("value").decode("utf-8", errors="ignore")).strip()
+        local = (value.startswith(("/", "~", "file:")) or
+                 bool(re.match(r"^[A-Za-z]:[\\/]", value)) or
+                 str(HOME) in value)
+        if local:
+            count += 1
+            return b""
+        return match.group(0)
+
+    data = pattern.sub(remove_if_local, data)
+    changes = ["removed local-path Office template property"] if count else []
+    return data, changes
+
+
+def _sanitize_ooxml_artifact(data: bytes):
+    changes = []
+    observations = []
+    source = io.BytesIO(data)
+    target = io.BytesIO()
+    changed_parts = {}
+    try:
+        with zipfile.ZipFile(source, "r") as zin:
+            infos = zin.infolist()
+            if sum(i.file_size for i in infos) > 200 * 1024 * 1024:
+                return data, [], ["expanded Office document exceeds 200 MiB; left unchanged"]
+            lowered_names = [i.filename.lower() for i in infos]
+            if any(name.startswith("_xmlsignatures/") or "c2pa" in name or
+                   "jumbf" in name for name in lowered_names):
+                return data, [], [
+                    "Office signature/provenance part detected; package left unchanged"
+                ]
+            for info in infos:
+                payload = zin.read(info.filename)
+                part_changes = []
+                if info.filename == "docProps/core.xml":
+                    payload, part_changes = _xml_remove_elements(payload, [
+                        ("lastModifiedBy", "last-modified-by"),
+                    ])
+                elif info.filename == "docProps/app.xml":
+                    payload, part_changes = _xml_remove_elements(payload, [
+                        ("Manager", "manager"),
+                        ("HyperlinkBase", "hyperlink-base"),
+                    ])
+                    payload, template_changes = _xml_remove_path_template(payload)
+                    part_changes.extend(template_changes)
+                elif info.filename == "docProps/custom.xml":
+                    observations.append("custom Office properties preserved for provenance")
+                if part_changes:
+                    changed_parts[info.filename] = payload
+                    changes.extend(part_changes)
+            if not changed_parts:
+                return data, [], observations
+            with zipfile.ZipFile(target, "w") as zout:
+                for info in infos:
+                    payload = changed_parts.get(info.filename)
+                    if payload is None:
+                        payload = zin.read(info.filename)
+                    zout.writestr(info, payload)
+    except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+        raise ValueError(f"invalid Office package: {exc}") from exc
+    return target.getvalue(), changes, observations
+
+
+def _inspect_private_binary_metadata(path: pathlib.Path):
+    """Read-only metadata inspection. Never rewrites binary artifacts."""
+    if not shutil.which("exiftool"):
+        return []
+    try:
+        proc = subprocess.run([
+            "exiftool", "-json", "-GPS*", "-CameraOwnerName", "-BodySerialNumber",
+            "-LensSerialNumber", "-SerialNumber", "-HostComputer", str(path),
+        ], capture_output=True, text=True, timeout=15)
+        if proc.returncode != 0:
+            return ["binary privacy metadata inspection failed; file left unchanged"]
+        rows = json.loads(proc.stdout or "[]")
+        fields = sorted(k for k, value in (rows[0] if rows else {}).items()
+                        if k != "SourceFile" and value not in (None, "", [], {}))
+        if fields:
+            return ["privacy metadata detected but preserved to avoid invalidating provenance: " +
+                    ", ".join(fields)]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return ["binary privacy metadata inspection failed; file left unchanged"]
+    return []
+
+
+def _service_is_allowed(url):
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False, "service URL must be http(s)"
+    if parsed.username or parsed.password:
+        return False, "service credentials must use WATERMARKS_SERVER_API_KEY, not the URL"
+    loopback = parsed.hostname.lower() in ("localhost", "127.0.0.1", "::1")
+    if not loopback and os.environ.get("FDE_ALLOW_REMOTE_HYGIENE_SERVICE") != "1":
+        return False, "remote service refused; set FDE_ALLOW_REMOTE_HYGIENE_SERVICE=1 explicitly"
+    return True, ""
+
+
+def _inspect_with_provenance_service(files, service_url):
+    """Call only the linked service's inspect endpoint; never its clean endpoint."""
+    if not service_url:
+        return {"status": "not-configured", "results": []}
+    allowed, reason = _service_is_allowed(service_url)
+    if not allowed:
+        return {"status": "refused", "error": reason, "results": []}
+    batch = []
+    skipped = max(0, len(files) - 50)
+    total_bytes = 0
+    for path, rel in files[:50]:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            skipped += 1
+            continue
+        if len(data) > 10 * 1024 * 1024 or total_bytes + len(data) > 20 * 1024 * 1024:
+            skipped += 1
+            continue
+        batch.append({"file": base64.b64encode(data).decode("ascii"), "name": rel.as_posix()})
+        total_bytes += len(data)
+    if not batch:
+        return {"status": "ok", "results": [], "skipped": skipped}
+    body = json.dumps({"files": batch}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    api_key = os.environ.get("WATERMARKS_SERVER_API_KEY", "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(
+        service_url.rstrip("/") + "/inspect/batch", data=body, headers=headers,
+        method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return {"status": "unavailable", "error": str(exc), "results": [], "skipped": skipped}
+    if not isinstance(payload, dict) or not isinstance(payload.get("results", []), list):
+        return {"status": "unavailable", "error": "invalid service response",
+                "results": [], "skipped": skipped}
+    summaries = []
+    for item in payload.get("results", []):
+        summaries.append({
+            "name": item.get("name"),
+            "ok": bool(item.get("ok")),
+            "kind": item.get("kind"),
+            "suspicious": bool(item.get("suspicious")),
+        })
+    return {"status": "ok", "results": summaries, "skipped": skipped}
+
+
+def run_output_hygiene(run: Run, *, apply=True, service_url=None, trigger="manual"):
+    """Sanitize only FDE artifacts and produce tamper-evident run evidence."""
+    run.guard_roles("running output hygiene")
+    started = iso()
+    records = []
+    errors = []
+    service_files = []
+    changed_files = 0
+    would_change_files = 0
+    for path, rel, kind in _artifact_files(run):
+        record = {"path": f"artifacts/{rel.as_posix()}"}
+        if kind == "symlink":
+            record.update({"status": "skipped", "observations": ["symlink not followed"]})
+            records.append(record)
+            continue
+        try:
+            before = path.read_bytes()
+            record["sha256Before"] = sha256_bytes(before)
+            suffix = path.suffix.lower()
+            changes = []
+            observations = []
+            after = before
+            if suffix in TEXT_ARTIFACT_SUFFIXES:
+                after, changes, observations = _sanitize_text_artifact(before)
+            elif suffix in OOXML_ARTIFACT_SUFFIXES:
+                after, changes, observations = _sanitize_ooxml_artifact(before)
+            else:
+                observations.extend(_inspect_private_binary_metadata(path))
+                observations.append("binary content and provenance metadata left unchanged")
+            if changes:
+                would_change_files += 1
+            if changes and apply:
+                write_bytes_atomic(path, after)
+                changed_files += 1
+            else:
+                after = before
+            record.update({
+                "status": "changed" if changes and apply else ("would-change" if changes else "clean"),
+                "sha256After": sha256_bytes(after),
+                "changes": changes,
+                "observations": observations,
+            })
+            records.append(record)
+            service_files.append((path, rel))
+        except (OSError, ValueError) as exc:
+            message = f"{rel.as_posix()}: {exc}"
+            errors.append(message)
+            record.update({"status": "error", "error": str(exc)})
+            records.append(record)
+
+    service_url = service_url if service_url is not None else os.environ.get(
+        "WATERMARKS_SERVICE_URL", "").strip()
+    provenance_scan = _inspect_with_provenance_service(service_files, service_url)
+    evidence_dir = run.artifacts_dir / "evidence"
+    stamp = now().strftime("%Y%m%dT%H%M%S%z")
+    report_path = evidence_dir / f"{HYGIENE_REPORT_PREFIX}{stamp}-{secrets.token_hex(3)}.json"
+    report = {
+        "type": "fde-output-hygiene",
+        "version": 1,
+        "runId": run.id,
+        "at": started,
+        "trigger": trigger,
+        "mode": "apply" if apply else "check",
+        "scope": "artifacts/ only; symlinks are never followed",
+        "policy": {
+            "preserve": [
+                "C2PA and content credentials", "creator/copyright/ownership metadata",
+                "visible watermarks", "unknown binary metadata",
+            ],
+            "remove": [
+                "allowlisted unsafe invisible Unicode", "absolute home-directory prefixes",
+                "Office last-modified-by, manager, hyperlink-base and local template paths",
+            ],
+            "externalService": "inspect-only; /clean is never called",
+        },
+        "summary": {
+            "files": len(records), "changedFiles": changed_files,
+            "wouldChangeFiles": would_change_files,
+            "errors": len(errors), "provenanceService": provenance_scan.get("status"),
+        },
+        "files": records,
+        "provenanceScan": provenance_scan,
+        "errors": errors,
+    }
+    write_json(report_path, report)
+    report_rel = str(report_path.relative_to(run.dir))
+    report_hash = sha256_file(report_path)
+    event_kind = "output-hygiene.failed" if errors else "output-hygiene.completed"
+    run.event(event_kind, trigger=trigger, mode=report["mode"], report=report_rel,
+              reportSha256=report_hash, files=len(records), changedFiles=changed_files,
+              wouldChangeFiles=would_change_files,
+              errors=len(errors), provenancePreserved=True,
+              provenanceService=provenance_scan.get("status"))
+    if errors:
+        die(f"run {run.id} output hygiene failed for {len(errors)} artifact(s).\n"
+            f"       evidence: {report_rel}", 10)
+    return report_path, report
 
 
 def new_run(requirement: str = "") -> Run:
@@ -1857,6 +2230,17 @@ def cmd_status(args):
               f"{c.get('status','?'):<12} {len(c.get('evidence') or [])} evidence item(s)")
 
     ev = run.events()
+    hygiene = [e for e in ev if e.get("event") in
+               ("output-hygiene.completed", "output-hygiene.failed")]
+    print("\noutput hygiene")
+    if not hygiene:
+        print("  pending — runs automatically before publication/completion")
+    else:
+        last = hygiene[-1]
+        print(f"  {last.get('event','').split('.')[-1]:<9} "
+              f"{last.get('files', 0)} file(s), {last.get('changedFiles', 0)} changed")
+        print(f"  evidence  {last.get('report', '(missing)')}")
+
     print(f"\nevents ({len(ev)}) — last 6")
     for e in ev[-6:]:
         extra = e.get("to") or e.get("agent") or e.get("target") or e.get("note", "")
@@ -1920,6 +2304,20 @@ def cmd_resume(args):
     done = [n for _s, n, f in artifact_report(run) if f]
     print(f"\ndone   {len(done)} artifact(s): {', '.join(done) or 'none yet'}")
     print(f"\nnext\n  {next_action(run)}\n")
+    return 0
+
+
+def cmd_output_hygiene(args):
+    run = Run(args.run_id)
+    report_path, report = run_output_hygiene(
+        run, apply=not args.check, service_url=args.service_url, trigger="manual")
+    summary = report["summary"]
+    print(f"mode       {report['mode']}")
+    print(f"files      {summary['files']}")
+    print(f"changed    {summary['changedFiles']}")
+    print(f"candidates {summary['wouldChangeFiles']}")
+    print(f"provenance {summary['provenanceService']}")
+    print(f"evidence   {report_path.relative_to(run.dir)}")
     return 0
 
 
@@ -2462,6 +2860,19 @@ def main(argv=None):
     s.add_argument("--block", metavar="REASON")
     s.add_argument("--unblock", action="store_true")
     s.set_defaults(fn=cmd_resume)
+
+    s = sub.add_parser(
+        "output-hygiene",
+        help="sanitize run artifacts without removing provenance; writes evidence",
+    )
+    s.add_argument("run_id")
+    s.add_argument("--check", action="store_true",
+                   help="report changes without modifying artifacts")
+    s.add_argument(
+        "--service-url", default=None,
+        help="optional watermarks-remover service URL; FDE calls /inspect/batch only",
+    )
+    s.set_defaults(fn=cmd_output_hygiene)
 
     s = sub.add_parser("guard", help="fail unless roles are confirmed (call before any connector use)")
     s.add_argument("run_id")

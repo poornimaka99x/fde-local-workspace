@@ -28,3 +28,14 @@ For observability, use the corresponding observability plan and live rollout
 evidence. Record `fail` or `blocked` when evidence is incomplete. A checkpoint
 is an observation, not an approval; deployments and publications still require
 their separate FDE approval.
+
+Before publication, preview final-artifact hygiene when useful:
+
+```bash
+fde output-hygiene <run-id> --check
+```
+
+The controller applies the same bounded policy automatically before publication
+and completion and appends a hash-bound evidence event. Treat any reported
+C2PA/content credential or creator/copyright field as provenance to preserve,
+not as cleanup work.

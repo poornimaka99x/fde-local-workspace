@@ -251,6 +251,7 @@ fde plan <run-id> --require-approval record a chat-proposed plan
 fde plan <run-id> --add solutioning widen it later (forwards only)
 fde roles <run-id> --set r=identity the rest; asked fresh every run
 fde approve-plan <run-id>           exact combined approval gate
+fde output-hygiene <run-id> --check preview safe final-artifact cleanup
 fde resume <run-id> --next          advance to whatever the plan says is next
 fde resume <run-id> --block "..."   park it with a reason
 fde resume <run-id> --unblock       back to where it was
@@ -268,6 +269,13 @@ mcp-sync                            regenerate MCP config from one file
 Everything for a run lives in `~/.claude-shared/runs/<run-id>/` — the artifacts,
 the approval ledger (`approvals.jsonl`) and the full log (`events.jsonl`). That
 directory is gitignored and belongs to this machine.
+
+Before a run enters `publication` or `complete`, FDE automatically applies its
+narrow output hygiene policy to files under `artifacts/` and records a hashed report under
+`artifacts/evidence/`. It removes unsafe invisible Unicode, local home-directory
+prefixes and selected personal/path-like Office properties. It does not remove
+visible watermarks, creator/copyright/ownership fields or C2PA/content
+credentials. Symlinks and unknown binary metadata are left untouched.
 
 ## When something is refused
 

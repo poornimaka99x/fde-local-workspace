@@ -327,6 +327,7 @@ A plan existing is not a reason to create anything. `jira-plan.json` is a
 preview. When you actually want it out there:
 
 ```bash
+fde output-hygiene <run-id> --check
 fde approve-publish <run-id> jira --summary "8 stories under MAX-142" \
   --items artifacts/delivery-plan/jira-preview.txt
 # you type: APPROVE PUBLISH <run-id>
@@ -337,6 +338,25 @@ confluence create ENG "ADR 004: Token exchange" \
 
 One target, one approval. What was approved is recorded in the run's
 `publication-manifest.json`.
+
+The `publication` transition applies the bounded hygiene policy before the
+state is recorded, so external publication reads the cleaned artifact. The
+`complete` transition runs it again to cover artifacts created during
+publication. Each pass writes hashed evidence under `artifacts/evidence/`.
+Creator/copyright/ownership fields, visible watermarks and C2PA/content
+credentials are never removed.
+
+For optional deeper inspection, run the linked `watermarks-remover` service on
+loopback and add this to `~/.claude-shared/env.sh`:
+
+```bash
+export WATERMARKS_SERVICE_URL="http://127.0.0.1:8765"
+```
+
+FDE sends supported artifacts only to `/inspect/batch`; it never calls the
+service's `/clean` endpoint. Remote service URLs are refused unless you also set
+`FDE_ALLOW_REMOTE_HYGIENE_SERVICE=1`, because inspection uploads artifact bytes
+to that endpoint.
 
 ---
 

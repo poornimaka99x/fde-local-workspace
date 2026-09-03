@@ -33,6 +33,7 @@ fde roles <run-id> --set <role>=<identity>
 fde approve-plan <run-id>
 fde status <run-id>
 fde checkpoint <run-id> --stage <stage> --status <status> --evidence <item>
+fde output-hygiene <run-id> --check
 fde resume <run-id> --next
 ```
 
@@ -54,6 +55,9 @@ fde resume <run-id> --next
   deployment. Neither phrase may be inferred from general consent.
 - A checkpoint records evidence; it never grants permission. Verification and
   observability require passing checkpoints before release progression.
+- A legal transition into `publication` or `complete` automatically runs
+  provenance-preserving output hygiene on `artifacts/` and records hashed evidence. Never substitute
+  a watermark-removal or C2PA-stripping tool for this bounded policy.
 - Report missing agents, unavailable checks and disagreements. Never present a
   partial pipeline as complete.
 - After combined approval, use the configured tool surface autonomously for the

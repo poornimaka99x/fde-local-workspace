@@ -17,7 +17,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SRC_SHARED = REPO / "claude-shared"
@@ -826,6 +829,215 @@ class TestPublication(FDETest):
         for target in ("jira", "confluence", "sharepoint", "bitbucket", "email", "teams"):
             r = self.sb.fde("approve-publish", run_id, target, stdin="no\n")
             self.assertNotEqual(r.returncode, 0, target)
+
+
+# -- 15b. Provenance-preserving output hygiene ------------------------------
+
+class TestOutputHygiene(FDETest):
+    def research_run(self):
+        run_id = self.sb.start("MAX-150 prepare safe output", shape="research")
+        r = self.sb.fde(
+            "roles", run_id, "--set", "research=claude_work",
+            "--set", "microsoftContext=none",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return run_id
+
+    def test_completion_cleans_safe_text_and_records_evidence(self):
+        run_id = self.research_run()
+        artifact = self.sb.run_dir(run_id) / "artifacts/research/research-brief.md"
+        artifact.write_text(
+            f"# Brief\n\nHidden\u200b marker. Local: {self.sb.home}/private/note.md\n"
+        )
+
+        self.sb.advance_to(run_id, "complete")
+
+        cleaned = artifact.read_text()
+        self.assertNotIn("\u200b", cleaned)
+        self.assertNotIn(str(self.sb.home), cleaned)
+        self.assertIn("~/private/note.md", cleaned)
+        reports = list((self.sb.run_dir(run_id) / "artifacts/evidence").glob(
+            "output-hygiene-*.json"))
+        self.assertEqual(len(reports), 1)
+        report = json.loads(reports[0].read_text())
+        self.assertEqual(report["mode"], "apply")
+        self.assertEqual(report["summary"]["changedFiles"], 1)
+        self.assertIn("C2PA and content credentials", report["policy"]["preserve"])
+        events = (self.sb.run_dir(run_id) / "events.jsonl").read_text()
+        self.assertIn("output-hygiene.completed", events)
+        self.assertIn("reportSha256", events)
+        self.assertIn("state      complete", self.sb.fde("status", run_id).stdout)
+        self.assertIn("output hygiene", self.sb.fde("status", run_id).stdout)
+
+    def test_publication_transition_cleans_before_publication_state_is_recorded(self):
+        run_id = self.sb.start("MAX-151 publish a safe brief")
+        self.sb.plan(run_id, "intake", "publication")
+        r = self.sb.fde("roles", run_id, "--set", "microsoftContext=none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.sb.advance_to(run_id, "awaiting_publication_approval")
+        artifact = self.sb.run_dir(run_id) / "artifacts/research/publication-input.md"
+        artifact.write_text("publish\u200bme\n")
+
+        r = self.sb.fde(
+            "approve-publish", run_id, "confluence",
+            stdin=f"APPROVE PUBLISH {run_id}\n",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(artifact.read_text(), "publishme\n")
+        events = [json.loads(line) for line in
+                  (self.sb.run_dir(run_id) / "events.jsonl").read_text().splitlines()]
+        hygiene_index = next(i for i, event in enumerate(events)
+                             if event["event"] == "output-hygiene.completed")
+        publication_index = next(i for i, event in enumerate(events)
+                                 if event["event"] == "state" and
+                                 event.get("to") == "publication")
+        self.assertLess(hygiene_index, publication_index)
+
+    def test_check_mode_does_not_modify_artifacts(self):
+        run_id = self.research_run()
+        artifact = self.sb.run_dir(run_id) / "artifacts/research/research-brief.md"
+        original = "one\u200btwo\n"
+        artifact.write_text(original)
+        r = self.sb.fde("output-hygiene", run_id, "--check")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(artifact.read_text(), original)
+        report_path = next((self.sb.run_dir(run_id) / "artifacts/evidence").glob(
+            "output-hygiene-*.json"))
+        report = json.loads(report_path.read_text())
+        self.assertEqual(report["files"][0]["status"], "would-change")
+        self.assertEqual(report["summary"]["changedFiles"], 0)
+        self.assertEqual(report["summary"]["wouldChangeFiles"], 1)
+
+    def test_office_privacy_fields_are_removed_but_creator_is_preserved(self):
+        run_id = self.research_run()
+        artifact = self.sb.run_dir(run_id) / "artifacts/presentation/output.pptx"
+        core = b'''<?xml version="1.0" encoding="UTF-8"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <dc:creator>Maxeda Design Team</dc:creator>
+  <cp:lastModifiedBy>local-user</cp:lastModifiedBy>
+</cp:coreProperties>'''
+        app = b'''<?xml version="1.0" encoding="UTF-8"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
+  <Company>Maxeda</Company><Manager>Local Manager</Manager>
+  <HyperlinkBase>/Users/local-user/work</HyperlinkBase>
+  <Template>/Users/local-user/template.potx</Template>
+</Properties>'''
+        with zipfile.ZipFile(artifact, "w") as archive:
+            archive.writestr("docProps/core.xml", core)
+            archive.writestr("docProps/app.xml", app)
+            archive.writestr("ppt/presentation.xml", b"<presentation/>")
+
+        r = self.sb.fde("output-hygiene", run_id)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with zipfile.ZipFile(artifact) as archive:
+            cleaned_core = archive.read("docProps/core.xml").decode()
+            cleaned_app = archive.read("docProps/app.xml").decode()
+        self.assertIn("Maxeda Design Team", cleaned_core)
+        self.assertIn("<Company>Maxeda</Company>", cleaned_app)
+        self.assertNotIn("lastModifiedBy", cleaned_core)
+        self.assertNotIn("<Manager>", cleaned_app)
+        self.assertNotIn("HyperlinkBase", cleaned_app)
+        self.assertNotIn("<Template>", cleaned_app)
+
+    def test_signed_office_package_is_left_byte_for_byte_unchanged(self):
+        run_id = self.research_run()
+        artifact = self.sb.run_dir(run_id) / "artifacts/presentation/signed.pptx"
+        with zipfile.ZipFile(artifact, "w") as archive:
+            archive.writestr(
+                "docProps/core.xml",
+                b"<cp:coreProperties><cp:lastModifiedBy>local-user</cp:lastModifiedBy>"
+                b"</cp:coreProperties>",
+            )
+            archive.writestr("_xmlsignatures/sig1.xml", b"<Signature>proof</Signature>")
+        before = artifact.read_bytes()
+
+        r = self.sb.fde("output-hygiene", run_id)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(artifact.read_bytes(), before)
+        report_path = next((self.sb.run_dir(run_id) / "artifacts/evidence").glob(
+            "output-hygiene-*.json"))
+        report = json.loads(report_path.read_text())
+        signed = next(item for item in report["files"] if item["path"].endswith("signed.pptx"))
+        self.assertIn("signature/provenance", signed["observations"][0])
+
+    def test_symlinks_are_not_followed(self):
+        run_id = self.research_run()
+        outside = self.sb.outside / "owned-elsewhere.md"
+        outside.write_text("outside\u200bcontent\n")
+        link = self.sb.run_dir(run_id) / "artifacts/research/outside.md"
+        link.symlink_to(outside)
+
+        r = self.sb.fde("output-hygiene", run_id)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(outside.read_text(), "outside\u200bcontent\n")
+        report_path = next((self.sb.run_dir(run_id) / "artifacts/evidence").glob(
+            "output-hygiene-*.json"))
+        report = json.loads(report_path.read_text())
+        symlink = next(item for item in report["files"] if item["path"].endswith("outside.md"))
+        self.assertEqual(symlink["status"], "skipped")
+
+    def test_hygiene_error_blocks_completion_and_records_failure(self):
+        run_id = self.research_run()
+        self.sb.advance_to(run_id, "research")
+        broken = self.sb.run_dir(run_id) / "artifacts/presentation/broken.pptx"
+        broken.write_bytes(b"not an Office package")
+
+        r = self.sb.fde("resume", run_id, "--next")
+        self.assertEqual(r.returncode, 10)
+        self.assertIn("output hygiene failed", r.stderr)
+        manifest = json.loads((self.sb.run_dir(run_id) / "manifest.json").read_text())
+        self.assertEqual(manifest["state"], "research")
+        events = (self.sb.run_dir(run_id) / "events.jsonl").read_text()
+        self.assertIn("output-hygiene.failed", events)
+
+    def test_optional_watermark_service_is_inspect_only(self):
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                calls.append(self.path)
+                size = int(self.headers.get("Content-Length", "0"))
+                self.rfile.read(size)
+                body = json.dumps({"ok": True, "results": []}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            run_id = self.research_run()
+            artifact = self.sb.run_dir(run_id) / "artifacts/research/research-brief.md"
+            artifact.write_text("clean\n")
+            url = f"http://127.0.0.1:{server.server_port}"
+            r = self.sb.fde("output-hygiene", run_id, "--service-url", url)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.assertEqual(calls, ["/inspect/batch"])
+
+    def test_remote_inspection_requires_explicit_opt_in(self):
+        run_id = self.research_run()
+        artifact = self.sb.run_dir(run_id) / "artifacts/research/research-brief.md"
+        artifact.write_text("clean\n")
+        r = self.sb.fde(
+            "output-hygiene", run_id, "--service-url", "https://example.invalid",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        report_path = next((self.sb.run_dir(run_id) / "artifacts/evidence").glob(
+            "output-hygiene-*.json"))
+        report = json.loads(report_path.read_text())
+        self.assertEqual(report["provenanceScan"]["status"], "refused")
+        self.assertIn("FDE_ALLOW_REMOTE_HYGIENE_SERVICE=1",
+                      report["provenanceScan"]["error"])
 
 
 # -- 16. DOCX intake ---------------------------------------------------------
