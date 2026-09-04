@@ -238,6 +238,14 @@ APPROVE PUBLISH <run-id>            yours to type; never inferred
 fde doctor                          what's configured, what's broken
 fde status <run-id>                 plan, roles, artifacts, approvals, next
 fde list                            all runs
+fde list --json                     the same, for a program to read
+
+fde project create --name "..."     group runs under a project
+fde projects                        projects, repositories, run counts
+fde project show <project-id>       its repositories and its runs
+fde start "..." --project <id>      a run inside that project
+fde attach <run-id> <file>          copy an input in, hashed and recorded
+fde attachments <run-id>            what has been attached
 fde shapes                          the named plan shapes
 mcp-sync --run <run-id>             wire the connector once roles are confirmed
 
@@ -297,6 +305,10 @@ credentials. Symlinks and unknown binary metadata are left untouched.
 | `approval consumed` / `expired` | one use, 30 minutes | approve again |
 | `illegal transition` | you skipped a stage | `fde status <run-id>` shows the next legal one |
 | `GitHub Copilot is not part of this FDE ecosystem` | you called `ask-copilot` | use `ask-ms-copilot` — "Copilot" here always means Microsoft 365 |
+| `no such project` | the project id doesn't exist | `fde projects` |
+| `repository path does not exist` | a project repo path is wrong or not yet cloned | give an existing directory; FDE never clones one |
+| `refusing to attach a symlink` | the file you pointed at is a link | attach the real file |
+| `over the ... byte limit` | the attachment is above the 100 MiB ceiling, or a lower one you set | attach a smaller file; the ceiling only goes down |
 
 ## Still needs someone else
 

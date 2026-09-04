@@ -90,6 +90,13 @@ class Sandbox:
         (self.profiles / "bedrock" / "settings.json").write_text(json.dumps(
             {"env": {"AWS_PROFILE": "bedrock-dev", "AWS_REGION": "eu-west-1"}}, indent=2))
 
+        # `fde doctor` asks the aws CLI which profiles exist. Without this the
+        # answer comes from whatever is configured on the machine running the
+        # tests, which is exactly what a sandbox is supposed to prevent.
+        self.aws_config = self.tmp / "aws-config"
+        self.aws_config.write_text(
+            "[profile bedrock-dev]\nregion = eu-west-1\noutput = json\n")
+
         stub = self.bindir / "codex"
         stub.write_text(STUB_CODEX)
         stub.chmod(0o755)
@@ -106,6 +113,8 @@ class Sandbox:
             "FDE_RUNS_DIR": str(self.shared / "runs"),
             "PATH": f"{self.bindir}:{self.shared / 'bin'}:{os.environ['PATH']}",
             "CODEX_LOG": str(self.codex_log),
+            "AWS_CONFIG_FILE": str(self.aws_config),
+            "AWS_SHARED_CREDENTIALS_FILE": str(self.tmp / "aws-credentials"),
         })
         for k in ("CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN",
                   "COPILOT_DIRECTLINE_SECRET", "COPILOT_TOKEN_ENDPOINT"):
@@ -1465,7 +1474,9 @@ class TestRealCodexSandbox(FDETest):
         for k, v in {"orchestrator": "claude_alt", "research": "claude_work",
                      "solutioning": "claude_work", "review": "claude_msc",
                      "deliveryPlanning": "claude_alt", "presentation": "claude_work",
-                     "implementation": "chatgpt_codex", "microsoftContext": "none"}.items():
+                     "implementation": "chatgpt_codex", "testEngineering": "claude_work",
+                     "releaseManagement": "claude_work", "observability": "claude_work",
+                     "microsoftContext": "none"}.items():
             args += ["--set", f"{k}={v}"]
         self.assertEqual(self.sb.fde("roles", run_id, *args).returncode, 0)
         self.sb.advance_to(run_id, "awaiting_implementation_approval")

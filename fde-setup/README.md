@@ -290,7 +290,77 @@ the start of each run.
 
 **Controller** — `fde doctor | start | roles | status | brief | checkpoint |
 output-hygiene | learn | resume | invoke | approve-codex | approve-publish |
-guard | log | list`
+guard | log | list | projects | project | attach | attachments`
+
+## Projects, attachments and machine-readable views
+
+Three additions that a local operator console — or any other non-human reader —
+can build on without parsing formatted text or writing run files itself.
+
+**Projects** group runs. A project is a name, a description and a list of
+existing repository paths; it holds no workflow state.
+
+```bash
+fde project create --name "Returns modernisation" --repo ~/code/returns-api
+fde start "MAX-142 returns orchestration" --project returns-modernisation-a1b2
+fde projects                       # names, repositories, run counts
+fde project show <project-id>      # its repositories and its runs
+```
+
+Runs created before projects existed keep working and are listed as unassigned.
+Repository paths must already exist: nothing here initialises, clones, modifies
+or deletes a repository.
+
+**Attachments** copy an input file into the run, hash it, and record it in an
+append-only ledger.
+
+```bash
+fde attach <run-id> ./requirements.pdf
+fde attach <run-id> --stdin --name requirements.pdf < requirements.pdf
+fde attachments <run-id>
+```
+
+The source file is copied, never moved or modified. Symlinks, directories and
+devices are refused; the stored name is generated, so a supplied filename can
+never become a path. Files land in `<run-dir>/inputs/files/` with a SHA-256 in
+`<run-dir>/inputs/attachments.jsonl`, and each one appends `attachment.added` to
+the run log.
+
+**JSON views** give a stable contract:
+
+```bash
+fde list --json
+fde status <run-id> --json --events-limit 50
+fde projects --json
+fde project show <project-id> --json
+fde attachments <run-id> --json
+```
+
+Each payload carries `schemaVersion`, writes only JSON to stdout, keeps
+diagnostics on stderr, contains no secret values and exits nonzero for an
+unknown run or project. Events are paginated rather than dumped. Human output is
+unchanged. The full shapes are in
+[`docs/FDE-CONTROLLER-CONTRACTS.md`](docs/FDE-CONTROLLER-CONTRACTS.md).
+
+## The control center (local, read-only)
+
+`fde-gui/` is a local operator console over this controller: projects, runs,
+plans, roles, approvals, checkpoints, events, attachments, artifacts and
+output-hygiene evidence, in a browser on this machine only.
+
+```bash
+cd fde-gui && npm install && npm start
+# then open the http://127.0.0.1:7317/#token=... link it prints
+```
+
+It reads runs through `fde … --json`, and can create a project, edit one, create
+a run and attach a file — each one a controller command, not a write of its own.
+It starts no process and approves nothing: roles, plan approval, Codex writes,
+deployment and publication stay in a terminal, typed by you. Resuming a Claude
+session in an embedded terminal arrives in a later phase.
+Details, environment variables and the deliberate deviations are in
+[`fde-gui/README.md`](fde-gui/README.md); the security boundaries are in
+[`docs/FDE-GUI-THREAT-MODEL.md`](docs/FDE-GUI-THREAT-MODEL.md).
 
 ## Caveats
 

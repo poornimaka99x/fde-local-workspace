@@ -217,6 +217,38 @@ anything.
 
 ---
 
+## Phase 5b — projects and input attachments (5 min, optional)
+
+Runs stand on their own. A project is only a grouping — a name, a description and
+the repositories the work concerns — for when one engagement produces many runs.
+
+```bash
+fde project create --name "Returns modernisation" \
+  --description "Store and web returns" \
+  --repo ~/code/returns-api --repo ~/code/returns-web
+fde projects
+fde start "MAX-142 returns orchestration" --project returns-modernisation-a1b2
+```
+
+The repository paths must already exist. FDE reads about them; it does not
+clone, initialise, modify or delete a repository, and there is no project
+deletion. Runs made before you had projects keep working and show as unassigned.
+
+Give a run its input documents the same way you give it the ask:
+
+```bash
+fde attach <run-id> ~/Downloads/requirements.pdf
+fde attachments <run-id>
+```
+
+The file is copied into `<run-dir>/inputs/files/` under a generated name, hashed,
+and recorded in `inputs/attachments.jsonl` with an `attachment.added` line in the
+run log. The original is not moved or changed. Symlinks, directories and devices
+are refused.
+
+Every one of these commands takes `--json` for a program reading the run —
+`docs/FDE-CONTROLLER-CONTRACTS.md` has the shapes and the exit codes.
+
 ## Phase 6 — run the pipeline (15 min)
 
 ```bash
