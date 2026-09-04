@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react'
 import { Link, useRoute } from '../lib/router'
 import { captureToken } from '../lib/token'
 import { useApi } from '../lib/useApi'
@@ -12,6 +12,10 @@ import { ProjectsView } from '../features/projects/ProjectsView'
 import { ProjectDetail } from '../features/projects/ProjectDetail'
 import { HealthView } from '../features/health/HealthView'
 import { SessionsView } from '../features/sessions/SessionsView'
+
+const ChatsView = lazy(() => import('../features/chats/ChatsView').then((module) => ({ default: module.ChatsView })))
+const NewChatForm = lazy(() => import('../features/chats/NewChatForm').then((module) => ({ default: module.NewChatForm })))
+const ChatDetail = lazy(() => import('../features/chats/ChatDetail').then((module) => ({ default: module.ChatDetail })))
 
 function NoToken(): JSX.Element {
   return (
@@ -51,8 +55,11 @@ export function App(): JSX.Element {
   const runMatch = /^\/runs\/([^/]+)$/.exec(path)
   const projectMatch = /^\/projects\/([^/]+)$/.exec(path)
   const projectEditMatch = /^\/projects\/([^/]+)\/edit$/.exec(path)
+  const chatMatch = /^\/chats\/([^/]+)$/.exec(path)
   const section = path.startsWith('/projects')
     ? 'projects'
+    : path.startsWith('/chats')
+      ? 'chats'
     : path.startsWith('/sessions')
       ? 'sessions'
       : path.startsWith('/health')
@@ -67,7 +74,7 @@ export function App(): JSX.Element {
       <nav className="sidebar" aria-label="Sections">
         <div className="brand">
           FDE Control Center
-          <small>read-only console</small>
+          <small>local agent workspace</small>
         </div>
         <div className="nav">
           <Link to="/projects" current={section === 'projects'}>
@@ -75,6 +82,9 @@ export function App(): JSX.Element {
           </Link>
           <Link to="/runs" current={section === 'runs'}>
             All runs
+          </Link>
+          <Link to="/chats" current={section === 'chats'}>
+            Chats
           </Link>
           <Link to="/sessions" current={section === 'sessions'}>
             Active sessions
@@ -133,29 +143,37 @@ export function App(): JSX.Element {
               </p>
             </div>
           ) : null}
-          {path === '/runs/new' ? (
-            <NewRunForm projectId={search.get('projectId') ?? undefined} />
-          ) : path === '/projects/new' ? (
-            <ProjectForm />
-          ) : projectEditMatch?.[1] ? (
-            <ProjectForm projectId={decodeURIComponent(projectEditMatch[1])} />
-          ) : runMatch?.[1] && runMatch[1] !== 'new' ? (
-            <RunDetail runId={decodeURIComponent(runMatch[1])} />
-          ) : projectMatch?.[1] ? (
-            <ProjectDetail projectId={decodeURIComponent(projectMatch[1])} />
-          ) : section === 'projects' ? (
-            <ProjectsView />
-          ) : section === 'sessions' ? (
-            <SessionsView />
-          ) : section === 'health' ? (
-            <HealthView />
-          ) : (
-            <RunsView
-              key={window.location.search}
-              projectId={search.get('projectId') ?? undefined}
-              initialQuery={search.get('query') ?? undefined}
-            />
-          )}
+          <Suspense fallback={<div className="card muted">Loading view…</div>}>
+            {path === '/runs/new' ? (
+              <NewRunForm projectId={search.get('projectId') ?? undefined} />
+            ) : path === '/chats/new' ? (
+              <NewChatForm />
+            ) : path === '/projects/new' ? (
+              <ProjectForm />
+            ) : projectEditMatch?.[1] ? (
+              <ProjectForm projectId={decodeURIComponent(projectEditMatch[1])} />
+            ) : runMatch?.[1] && runMatch[1] !== 'new' ? (
+              <RunDetail runId={decodeURIComponent(runMatch[1])} />
+            ) : chatMatch?.[1] && chatMatch[1] !== 'new' ? (
+              <ChatDetail chatId={decodeURIComponent(chatMatch[1])} />
+            ) : projectMatch?.[1] ? (
+              <ProjectDetail projectId={decodeURIComponent(projectMatch[1])} />
+            ) : section === 'projects' ? (
+              <ProjectsView />
+            ) : section === 'chats' ? (
+              <ChatsView />
+            ) : section === 'sessions' ? (
+              <SessionsView />
+            ) : section === 'health' ? (
+              <HealthView />
+            ) : (
+              <RunsView
+                key={window.location.search}
+                projectId={search.get('projectId') ?? undefined}
+                initialQuery={search.get('query') ?? undefined}
+              />
+            )}
+          </Suspense>
         </main>
       </div>
     </div>

@@ -1104,7 +1104,7 @@ def run_output_hygiene(run: Run, *, apply=True, service_url=None, trigger="manua
     return report_path, report
 
 
-def new_run(requirement: str = "", project_id=None) -> Run:
+def new_run(requirement: str = "", project_id=None, model=None, effort=None) -> Run:
     key = (requirement or "").strip()
     m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
     jira_key = m.group(1) if m else None
@@ -1122,13 +1122,20 @@ def new_run(requirement: str = "", project_id=None) -> Run:
         "jiraKey": jira_key,
         "requirement": key[:400],
         "projectId": project_id,
+        # Session choices are durable run data.  fde-start reads them again on
+        # every resume, so the GUI never has to remember (or silently change)
+        # how an orchestrator conversation was launched.
+        "sessionConfig": {
+            "model": model or "default",
+            "effort": effort or "auto",
+        },
         "toolkit": "fde-core",
     })
     r = Run(stem)
     if key:
         r.write_requirement(key)
     r.event("run.created", jiraKey=jira_key, hasRequirement=bool(key),
-            projectId=project_id)
+            projectId=project_id, model=model or "default", effort=effort or "auto")
     if project_id:
         project_event(project_id, "run.created", runId=stem)
     r.event("note", note="Created in awaiting_orchestrator. Choosing an orchestrator and "
@@ -2440,7 +2447,12 @@ def cmd_start(args):
 def _start(args):
     req = " ".join(args.requirement or []).strip()
     project = load_project(args.project) if getattr(args, "project", None) else None
-    run = new_run(req, project_id=project["projectId"] if project else None)
+    model = getattr(args, "model", None)
+    effort = getattr(args, "effort", None)
+    if model and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}", model):
+        die("model contains unsupported characters", 2)
+    run = new_run(req, project_id=project["projectId"] if project else None,
+                  model=model, effort=effort)
     print(f"run    {run.id}")
     if project:
         print(f"project {project['projectId']}  ({project.get('name')})")
@@ -2706,6 +2718,7 @@ CONTRACTS = [
     "attach --stdin --name",
     "start --json",
     "start --project",
+    "start --model --effort",
 ]
 
 
@@ -3688,6 +3701,10 @@ def main(argv=None):
     s.add_argument("--shape", help="skip the plan question with a named shape (see: fde shapes)")
     s.add_argument("--project", metavar="PROJECT-ID",
                    help="group this run under an existing project (see: fde projects)")
+    s.add_argument("--model", metavar="ALIAS-OR-ID",
+                   help="Claude model alias or provider model id for the orchestrator session")
+    s.add_argument("--effort", choices=["auto", "low", "medium", "high", "xhigh", "max"],
+                   help="Claude reasoning effort for the orchestrator session")
     s.add_argument("--json", action="store_true",
                    help="print the created run as JSON; narration goes to stderr")
     s.set_defaults(fn=cmd_start)

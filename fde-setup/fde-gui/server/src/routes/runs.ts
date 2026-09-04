@@ -20,6 +20,7 @@ import {
 } from '../schemas/controller'
 import { block, describeZod, line } from '../schemas/input'
 import type { Services } from '../services/types'
+import { EFFORTS, MODEL_PATTERN } from '../services/accounts'
 import {
   FilePathError,
   listRunFiles,
@@ -63,6 +64,8 @@ const createRunBody = z.object({
   projectId: z.string().regex(PROJECT_ID_PATTERN, 'not a valid project id').optional(),
   requirement: block(4000).optional(),
   orchestrator: z.enum(['work', 'msc', 'alt', 'bedrock', 'codex']),
+  model: z.string().regex(MODEL_PATTERN).default('default'),
+  effort: z.enum(EFFORTS).default('auto'),
   shape: z
     .string()
     .regex(/^[a-z][a-z-]{0,40}(\+[a-z][a-z-]{0,40}){0,4}$/, 'not a named shape')
@@ -231,7 +234,25 @@ export function registerRunRoutes(
       return problem(reply, 409, 'busy', 'Another run is being created right now.')
     }
     try {
+      if (
+        parsed.data.orchestrator !== 'codex' &&
+        !services.accounts.validateSelection(
+          parsed.data.orchestrator,
+          parsed.data.model,
+          parsed.data.effort,
+        )
+      ) {
+        return problem(
+          reply,
+          400,
+          'invalid-selection',
+          'That model and effort combination is not available for this account.',
+        )
+      }
       const args = ['start', '--json', '--orchestrator', parsed.data.orchestrator]
+      if (parsed.data.orchestrator !== 'codex') {
+        args.push('--model', parsed.data.model, '--effort', parsed.data.effort)
+      }
       if (parsed.data.projectId !== undefined) args.push('--project', parsed.data.projectId)
       if (parsed.data.shape !== undefined) args.push('--shape', parsed.data.shape)
       // Everything after `--` is the ask, so a requirement that starts with a

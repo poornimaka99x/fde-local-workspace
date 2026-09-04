@@ -45,11 +45,22 @@ export function registerAuth(app: FastifyInstance, config: GuiConfig, services: 
     'http://localhost:5199',
   ])
 
-  const TERMINAL_PATH = /^\/api\/runs\/([^/?]+)\/session\/terminal(?:\?(.*))?$/
+  const RUN_TERMINAL_PATH = /^\/api\/runs\/([^/?]+)\/session\/terminal(?:\?(.*))?$/
+  const LOGIN_TERMINAL_PATH = /^\/api\/claude\/accounts\/([^/?]+)\/login\/terminal(?:\?(.*))?$/
+
+  const terminalTarget = (url: string): { key: string; query: string } | null => {
+    const run = RUN_TERMINAL_PATH.exec(url)
+    if (run?.[1] !== undefined) return { key: decodeURIComponent(run[1]), query: run[2] ?? '' }
+    const login = LOGIN_TERMINAL_PATH.exec(url)
+    if (login?.[1] !== undefined) {
+      return { key: `login:${decodeURIComponent(login[1])}`, query: login[2] ?? '' }
+    }
+    return null
+  }
 
   const isTerminalUpgrade = (request: FastifyRequest): boolean =>
     String(request.headers.upgrade ?? '').toLowerCase() === 'websocket' &&
-    TERMINAL_PATH.test(request.url)
+    terminalTarget(request.url) !== null
 
   /** Answer on the raw socket and end it: the client is waiting for a 101. */
   const refuseUpgrade = (request: FastifyRequest, reply: FastifyReply, status: string): void => {
@@ -76,10 +87,9 @@ export function registerAuth(app: FastifyInstance, config: GuiConfig, services: 
       }
       // The ticket is checked before the handshake, so an unauthenticated
       // client never gets a socket at all. It is spent inside the route.
-      const match = TERMINAL_PATH.exec(request.url)
-      const runId = match?.[1] === undefined ? '' : decodeURIComponent(match[1])
-      const ticket = new URLSearchParams(match?.[2] ?? '').get('ticket') ?? ''
-      if (ticket === '' || !services.sessions.peekTicket(ticket, runId)) {
+      const target = terminalTarget(request.url)
+      const ticket = new URLSearchParams(target?.query ?? '').get('ticket') ?? ''
+      if (target === null || ticket === '' || !services.sessions.peekTicket(ticket, target.key)) {
         refuseUpgrade(request, reply, '401 Unauthorized')
         return undefined
       }

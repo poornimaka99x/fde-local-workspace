@@ -16,7 +16,8 @@ RUNS="${FDE_RUNS_DIR:-${CLAUDE_SHARED:-$HOME/.claude-shared}/runs}"
 usage() {
   cat <<'USAGE'
 usage:
-  fde-start [--orchestrator work|msc|alt|bedrock]
+  fde-start [--orchestrator work|msc|alt|bedrock] [--model ALIAS-OR-ID]
+            [--effort auto|low|medium|high|xhigh|max]
   fde-start --resume <run-id>
 
 Starts a chat with the selected orchestrator. In that chat:
@@ -34,10 +35,14 @@ USAGE
 
 orchestrator=""
 resume_id=""
+model=""
+effort=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --orchestrator|-o) orchestrator="${2:-}"; shift 2 ;;
     --resume|-r) resume_id="${2:-}"; shift 2 ;;
+    --model) model="${2:-}"; shift 2 ;;
+    --effort) effort="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "fde-start: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -91,7 +96,10 @@ else
       exit 3 ;;
     *) echo "fde-start: unknown orchestrator '$orchestrator'" >&2; exit 2 ;;
   esac
-  start_output="$("$FDE" start)"
+  start_args=(start)
+  [[ -n "$model" ]] && start_args+=(--model "$model")
+  [[ -n "$effort" ]] && start_args+=(--effort "$effort")
+  start_output="$("$FDE" "${start_args[@]}")"
   run_id="$(printf '%s\n' "$start_output" | awk '$1 == "run" {print $2; exit}')"
   [[ -n "$run_id" ]] || { echo "fde-start: controller did not return a run id" >&2; exit 1; }
   "$FDE" orchestrator "$run_id" "$orchestrator"
@@ -103,6 +111,14 @@ profile_dir="$HOME/.claude-profiles/$orchestrator"
   echo "fde-start: profile '$orchestrator' is not configured at $profile_dir" >&2; exit 3; }
 
 session_file="$run_dir/orchestrator-session-id"
+[[ -n "$model" ]] || model="$(read_json_field "$run_dir/manifest.json" sessionConfig.model)"
+[[ -n "$effort" ]] || effort="$(read_json_field "$run_dir/manifest.json" sessionConfig.effort)"
+case "$effort" in
+  ""|auto|low|medium|high|xhigh|max) ;;
+  *) echo "fde-start: unsupported effort in run manifest: $effort" >&2; exit 2 ;;
+esac
+[[ -z "$model" || "$model" =~ ^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$ ]] || {
+  echo "fde-start: unsupported model in run manifest" >&2; exit 2; }
 if [[ -s "$session_file" ]]; then
   session_id="$(tr -d '[:space:]' < "$session_file")"
   have_session=1
@@ -113,12 +129,16 @@ else
 fi
 
 run_claude() {
+  local session_options=()
+  [[ -n "$model" && "$model" != "default" ]] && session_options+=(--model "$model")
+  [[ -n "$effort" && "$effort" != "auto" ]] && session_options+=(--effort "$effort")
   if [[ "$orchestrator" == "bedrock" ]]; then
     CLAUDE_CONFIG_DIR="$profile_dir" CLAUDE_PROFILE="$orchestrator" \
-      CLAUDE_CODE_USE_BEDROCK=1 FDE_RUN_ID="$run_id" "$CLAUDE_BIN" "$@"
+      CLAUDE_CODE_USE_BEDROCK=1 FDE_RUN_ID="$run_id" "$CLAUDE_BIN" \
+      "${session_options[@]}" "$@"
   else
     CLAUDE_CONFIG_DIR="$profile_dir" CLAUDE_PROFILE="$orchestrator" \
-      FDE_RUN_ID="$run_id" "$CLAUDE_BIN" "$@"
+      FDE_RUN_ID="$run_id" "$CLAUDE_BIN" "${session_options[@]}" "$@"
   fi
 }
 

@@ -78,17 +78,19 @@ export function registerHealthRoutes(
       version: config.version,
       apiVersion: config.apiVersion,
       startedAt,
-      mode: 'read-only',
+      mode: 'local workspace',
       roots: {
         shared: config.sharedRoot,
         runs: config.runsRoot,
         projects: config.projectsRoot,
+        chats: config.chatsRoot,
         profiles: config.profilesRoot,
       },
       controller: contracts,
       binaries: {
         fde: { path: config.fdeBin, present: isExecutable(config.fdeBin) },
         fdeStart: { path: config.fdeStartBin, present: isExecutable(config.fdeStartBin) },
+        claude: { path: config.claudeBin, present: isExecutable(config.claudeBin) },
       },
       // Names only. No credential file is opened, and none is reported.
       claudeProfiles: profiles.map((name) => ({

@@ -54,6 +54,10 @@ describe('change watcher', () => {
     watcher.start([runs])
     expect(watcher.watching).toBe(true)
 
+    // macOS FSEvents may report the watcher as created just before its stream
+    // is ready when the full suite is starting many processes in parallel.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
     writeFileSync(path.join(runs, 'manifest.json'), '{}')
     writeFileSync(path.join(runs, 'events.jsonl'), '{}')
 

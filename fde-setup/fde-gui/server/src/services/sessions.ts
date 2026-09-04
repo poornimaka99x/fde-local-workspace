@@ -143,17 +143,43 @@ export class SessionManager {
     cols?: number
     rows?: number
   }): SessionView {
+    return this.startCommand({
+      sessionId: options.runId,
+      file: options.startBin,
+      args: ['--resume', options.runId],
+      cwd: options.cwd,
+      env: options.env,
+      cols: options.cols,
+      rows: options.rows,
+    })
+  }
+
+  /**
+   * Start a command assembled by a trusted server route. This is deliberately
+   * not an HTTP command endpoint: callers never supply file, args, cwd or env.
+   * It lets the same hardened PTY/ticket lifecycle host Claude's fixed login
+   * command as well as an FDE resume.
+   */
+  startCommand(options: {
+    sessionId: string
+    file: string
+    args: string[]
+    cwd: string
+    env: NodeJS.ProcessEnv
+    cols?: number
+    rows?: number
+  }): SessionView {
     if (this.spawnTerminal === null) {
       throw new Error('no terminal backend')
     }
-    const existing = this.sessions.get(options.runId)
+    const existing = this.sessions.get(options.sessionId)
     if (existing !== undefined && existing.status === 'running') {
-      throw new SessionExists(options.runId)
+      throw new SessionExists(options.sessionId)
     }
-    const command = [options.startBin, '--resume', options.runId]
+    const command = [options.file, ...options.args]
     const child = this.spawnTerminal({
-      file: options.startBin,
-      args: ['--resume', options.runId],
+      file: options.file,
+      args: [...options.args],
       cwd: options.cwd,
       env: options.env,
       cols: options.cols ?? 120,
@@ -161,7 +187,7 @@ export class SessionManager {
     })
 
     const session: Session = {
-      runId: options.runId,
+      runId: options.sessionId,
       process: child,
       status: 'running',
       pid: child.pid,
@@ -176,7 +202,7 @@ export class SessionManager {
       listeners: new Set(),
       exitListeners: new Set(),
     }
-    this.sessions.set(options.runId, session)
+    this.sessions.set(options.sessionId, session)
 
     child.onData((chunk) => {
       session.buffer += chunk
@@ -318,6 +344,10 @@ export function sessionEnv(config: GuiConfig): NodeJS.ProcessEnv {
   const base: NodeJS.ProcessEnv = {
     HOME: config.home,
     PATH: process.env.PATH ?? '/usr/bin:/bin',
+    // Claude Code uses the macOS account name when resolving credentials from
+    // Keychain. This is identity metadata, not a credential, and is the only
+    // extra operator-shell value its auth lookup needs.
+    USER: process.env.USER ?? path.basename(config.home),
     CLAUDE_SHARED: config.sharedRoot,
     FDE_RUNS_DIR: config.runsRoot,
     FDE_PROJECTS_DIR: config.projectsRoot,

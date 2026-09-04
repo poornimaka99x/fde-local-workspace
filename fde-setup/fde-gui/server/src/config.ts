@@ -13,10 +13,12 @@ export interface GuiConfig {
   token: string
   fdeBin: string
   fdeStartBin: string
+  claudeBin: string
   home: string
   sharedRoot: string
   runsRoot: string
   projectsRoot: string
+  chatsRoot: string
   profilesRoot: string
   webRoot: string
   version: string
@@ -52,6 +54,19 @@ function intFrom(value: string | undefined, fallback: number, label: string): nu
   return parsed
 }
 
+function resolveClaudeBin(home: string, env: NodeJS.ProcessEnv): string {
+  if (env.FDE_CLAUDE_BIN?.trim()) return env.FDE_CLAUDE_BIN.trim()
+  for (const directory of (env.PATH ?? '').split(path.delimiter)) {
+    if (!directory) continue
+    const candidate = path.join(directory, 'claude')
+    if (isExecutable(candidate)) return candidate
+  }
+  // Claude Desktop's claude-code-vm contains a Linux guest binary on macOS;
+  // it must not be mistaken for a host CLI. The native `claude` command must
+  // be installed on PATH or named explicitly with FDE_CLAUDE_BIN.
+  return 'claude'
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
   const host = env.FDE_GUI_HOST?.trim() || '127.0.0.1'
   if (!LOOPBACK_HOSTS.has(host)) {
@@ -64,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
   const sharedRoot = path.resolve(env.CLAUDE_SHARED?.trim() || path.join(home, '.claude-shared'))
   const runsRoot = path.resolve(env.FDE_RUNS_DIR?.trim() || path.join(sharedRoot, 'runs'))
   const projectsRoot = path.resolve(env.FDE_PROJECTS_DIR?.trim() || path.join(sharedRoot, 'projects'))
+  const chatsRoot = path.resolve(env.FDE_CHATS_DIR?.trim() || path.join(sharedRoot, 'chats'))
   const profilesRoot = path.resolve(
     env.CLAUDE_PROFILES_DIR?.trim() || path.join(home, '.claude-profiles'),
   )
@@ -76,10 +92,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
     token: env.FDE_GUI_TOKEN?.trim() || randomBytes(32).toString('base64url'),
     fdeBin,
     fdeStartBin,
+    claudeBin: resolveClaudeBin(home, env),
     home,
     sharedRoot,
     runsRoot,
     projectsRoot,
+    chatsRoot,
     profilesRoot,
     webRoot: path.join(PACKAGE_ROOT, 'dist', 'web'),
     version: readVersion(),

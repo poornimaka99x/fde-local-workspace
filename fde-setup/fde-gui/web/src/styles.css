@@ -128,10 +128,31 @@ button.action, a.action {
 button.action:hover, a.action:hover { background: var(--surface-2); }
 button.action[disabled] { opacity: 0.55; cursor: not-allowed; }
 
-input[type="search"], input[type="text"], select {
+input[type="search"], input[type="text"], select, textarea {
   font: inherit; padding: 6px 10px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
 }
+textarea { width: 100%; resize: vertical; }
+.form-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px; margin-bottom: 12px;
+}
+.form-grid label { display: grid; gap: 5px; align-content: start; }
+.account-status { margin: 4px 0 12px; }
+.login-panel { margin: 12px 0; }
+.login-panel [aria-label="Claude account login terminal"] { height: 42vh !important; min-height: 260px !important; }
+
+.chat-thread { display: grid; gap: 12px; margin: 18px 0; }
+.chat-message {
+  max-width: min(820px, 92%); padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface);
+}
+.chat-message.user { justify-self: end; background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.chat-message.assistant { justify-self: start; }
+.chat-message header { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+.chat-message.user .muted { color: color-mix(in srgb, var(--accent-text) 75%, transparent); }
+.chat-message p:last-child, .chat-message .md > :last-child { margin-bottom: 0; }
+.chat-composer { position: sticky; bottom: 10px; display: grid; gap: 8px; box-shadow: 0 8px 30px color-mix(in srgb, var(--text) 10%, transparent); }
 
 pre, code, .mono { font-family: var(--mono); font-size: 12.5px; }
 pre {

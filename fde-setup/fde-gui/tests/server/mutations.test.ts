@@ -214,6 +214,7 @@ describe('safe mutations', () => {
     expect(response.json().run.runId).toBe(RUN)
     expect(harness.calls()[0]).toEqual([
       'start', '--json', '--orchestrator', 'work',
+      '--model', 'default', '--effort', 'auto',
       '--project', PROJECT, '--shape', 'research',
       '--', 'MAX-1 returns research',
     ])

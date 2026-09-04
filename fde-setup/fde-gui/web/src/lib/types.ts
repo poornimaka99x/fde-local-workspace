@@ -207,7 +207,7 @@ export interface HealthResponse {
   startedAt: string
   mode: string
   controller: ContractCheck
-  roots: { shared: string; runs: string; projects: string; profiles: string }
+  roots: { shared: string; runs: string; projects: string; chats: string; profiles: string }
   binaries: Record<string, { path: string; present: boolean }>
   claudeProfiles: { name: string; path: string }[]
 }
@@ -234,4 +234,58 @@ export interface SessionState {
 export interface SessionListResponse {
   available: boolean
   sessions: ConsoleSession[]
+}
+
+export type ClaudeEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export interface ClaudeModelOption {
+  id: string
+  label: string
+  efforts: ClaudeEffort[]
+}
+
+export interface ClaudeAccount {
+  id: string
+  label: string
+  profile: string
+  provider: 'anthropic' | 'bedrock'
+  profilePresent: boolean
+  authState: 'authenticated' | 'login_required' | 'external' | 'unavailable'
+  authMethod: string | null
+  models: ClaudeModelOption[]
+}
+
+export interface ClaudeAccountsResponse {
+  accounts: ClaudeAccount[]
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+export interface ChatRecord {
+  schemaVersion: 1
+  chatId: string
+  title: string
+  accountId: string
+  profile: string
+  provider: 'anthropic' | 'bedrock'
+  model: string
+  effort: ClaudeEffort
+  projectId: string | null
+  cwd: string
+  claudeSessionId: string
+  createdAt: string
+  updatedAt: string
+  status: 'idle' | 'running' | 'failed'
+  lastError: string | null
+  messages: ChatMessage[]
+}
+
+export interface ChatSummary extends Omit<ChatRecord, 'messages'> {
+  messageCount: number
+  lastMessage: string | null
 }

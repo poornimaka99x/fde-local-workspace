@@ -18,8 +18,9 @@ export const TerminalView = forwardRef<
     onInput: (data: string) => void
     onResize: (cols: number, rows: number) => void
     readOnly?: boolean
+    ariaLabel?: string
   }
->(function TerminalView({ onInput, onResize, readOnly = false }, ref) {
+>(function TerminalView({ onInput, onResize, readOnly = false, ariaLabel = 'Orchestrator session terminal' }, ref) {
   const host = useRef<HTMLDivElement>(null)
   const terminal = useRef<Terminal | null>(null)
 
@@ -74,7 +75,7 @@ export const TerminalView = forwardRef<
     <div
       ref={host}
       role="group"
-      aria-label="Orchestrator session terminal"
+      aria-label={ariaLabel}
       style={{
         height: '60vh',
         minHeight: 320,

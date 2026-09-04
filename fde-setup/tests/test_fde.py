@@ -218,6 +218,25 @@ class TestIsolation(FDETest):
 # -- 1, 2, 3. Roles are asked, asked again, and unconstrained by identity ----
 
 class TestRoles(FDETest):
+    def test_start_persists_claude_model_and_effort(self):
+        r = self.sb.fde(
+            "start", "model selection", "--orchestrator", "work",
+            "--model", "opus", "--effort", "xhigh", "--json",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        run_id = json.loads(r.stdout)["run"]["runId"]
+        manifest = json.loads((self.sb.run_dir(run_id) / "manifest.json").read_text())
+        self.assertEqual(
+            manifest["sessionConfig"],
+            {"model": "opus", "effort": "xhigh"},
+        )
+
+        bad = self.sb.fde(
+            "start", "bad model", "--orchestrator", "work",
+            "--model", "../../escape", "--effort", "high",
+        )
+        self.assertEqual(bad.returncode, 2)
+
     def test_start_asks_who_orchestrates_before_anything_else(self):
         """1. The first decision is the orchestrator, and it reads nothing."""
         r = self.sb.fde("start")

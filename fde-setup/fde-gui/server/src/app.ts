@@ -18,6 +18,9 @@ import { SessionManager } from './services/sessions'
 import { ChangeWatcher } from './services/watch'
 import type { Services } from './services/types'
 import { registerSessionRoutes } from './routes/sessions'
+import { registerClaudeRoutes } from './routes/claude'
+import { AccountService } from './services/accounts'
+import { ChatService } from './services/chats'
 
 const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -37,12 +40,15 @@ const MISSING_BUILD_PAGE = `<!doctype html><html lang="en"><head><meta charset="
 </body></html>`
 
 export function buildApp(config: GuiConfig, services?: Partial<Services>): FastifyInstance {
+  const accounts = services?.accounts ?? new AccountService(config)
   const resolved: Services = {
     locks: services?.locks ?? new AdvisoryLocks(),
     watcher: services?.watcher ?? new ChangeWatcher(),
     // No backend unless one is supplied: an installation without node-pty says
     // so rather than pretending it can open a terminal.
     sessions: services?.sessions ?? new SessionManager(null),
+    accounts,
+    chats: services?.chats ?? new ChatService(config, accounts),
   }
   resolved.watcher.start([config.runsRoot, config.projectsRoot])
   const app = Fastify({
@@ -92,11 +98,13 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   app.register(async (instance) => {
     await instance.register(websocket, { options: { maxPayload: 64 * 1024 } })
     registerSessionRoutes(instance, config, resolved)
+    registerClaudeRoutes(instance, config, resolved)
   })
 
   app.addHook('onClose', async () => {
     resolved.watcher.stop()
     resolved.sessions.shutdown()
+    resolved.chats.shutdown()
   })
 
   const sendIndex = async (reply: FastifyReply): Promise<unknown> => {

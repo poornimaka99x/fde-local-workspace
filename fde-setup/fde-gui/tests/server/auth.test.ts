@@ -107,6 +107,6 @@ describe('local API access control', () => {
     })
     expect(response.statusCode).toBe(200)
     expect(response.payload).not.toContain(harness.token)
-    expect(response.json()).toMatchObject({ mode: 'read-only' })
+    expect(response.json()).toMatchObject({ mode: 'local workspace' })
   })
 })

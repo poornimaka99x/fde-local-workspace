@@ -83,7 +83,8 @@ class FdeStartTest(unittest.TestCase):
             "FDE_TEST_COUNT": str(self.count),
         })
         result = subprocess.run(
-            ["bash", str(LAUNCHER), "--orchestrator", "work"],
+            ["bash", str(LAUNCHER), "--orchestrator", "work",
+             "--model", "opus", "--effort", "xhigh"],
             text=True, capture_output=True, env=env,
         )
         self.assertEqual(
@@ -97,11 +98,16 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("ARG=--mcp-config", log)
         self.assertIn("ARG=--permission-mode", log)
         self.assertIn("ARG=auto", log)
+        self.assertGreaterEqual(log.count("ARG=--model"), 2)
+        self.assertGreaterEqual(log.count("ARG=opus"), 2)
+        self.assertGreaterEqual(log.count("ARG=--effort"), 2)
+        self.assertGreaterEqual(log.count("ARG=xhigh"), 2)
         runs = list((self.shared / "runs").iterdir())
         self.assertEqual(len(runs), 1)
         manifest = json.loads((runs[0] / "manifest.json").read_text())
         plan = json.loads((runs[0] / "plan.json").read_text())
         self.assertEqual(manifest["state"], "roles_confirmed")
+        self.assertEqual(manifest["sessionConfig"], {"model": "opus", "effort": "xhigh"})
         self.assertIn("executionApprovedAt", plan)
         self.assertTrue((runs[0] / "mcp/claude-work.mcp.json").is_file())
 

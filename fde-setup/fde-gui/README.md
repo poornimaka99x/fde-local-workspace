@@ -1,7 +1,6 @@
 # FDE Control Center
 
-A local operator console for the `fde` controller. Phase 4: **read, four safe
-changes, and an embedded resume terminal**.
+A local workspace for the `fde` controller and configured Claude Code accounts.
 
 It shows projects, runs, plans, roles, approvals, checkpoints, events, input
 attachments, artifacts and output-hygiene evidence. It can create a project,
@@ -12,6 +11,17 @@ It can also resume a Claude-led run: Resume starts exactly
 `fde-start --resume <run-id>` in an embedded terminal, one process per run, and
 streams it to the tab. A Codex-led run is labelled honestly instead — it is
 driven from its own Codex task.
+
+General chats are deliberately separate from FDE runs. A chat stores its own
+metadata and messages under `~/.claude-shared/chats`, resumes one opaque Claude
+conversation, and starts Claude in bare print mode with all tools disabled.
+Account status comes from `claude auth status`; the Login action opens an
+isolated `claude auth login` terminal for only the selected profile. The GUI
+never receives a password, OAuth token or credential file.
+
+Both New run and New chat expose the selected Claude profile, model and the
+effort levels supported by that model. Run choices are persisted in the run
+manifest and reapplied by `fde-start` on every resume.
 
 Approving is still yours. Assigning roles, approving a plan, granting a Codex
 write, deploying and publishing all happen in that conversation, typed by you —
@@ -53,7 +63,8 @@ tab and sends it as a bearer header. A new launch invalidates the old link.
 | `FDE_GUI_HOST` | `127.0.0.1` | loopback only; any other value is refused |
 | `FDE_GUI_TOKEN` | random | fixed token, for tests and scripted launches |
 | `FDE_CONTROLLER` | `$CLAUDE_SHARED/bin/fde` | the controller binary |
-| `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `CLAUDE_PROFILES_DIR` | as the controller's | which FDE roots to read |
+| `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `FDE_CHATS_DIR`, `CLAUDE_PROFILES_DIR` | as the controller's | which FDE roots to use |
+| `FDE_CLAUDE_BIN` | `claude` from `PATH` | native Claude Code CLI used for status, login and chat |
 
 For UI work, `npm run dev:web` runs Vite on `127.0.0.1:5199` and proxies `/api`
 to a server you start separately with `npm run dev:server`.
@@ -69,8 +80,10 @@ server/src/
   services/controller.ts   spawns `fde` with an argument array
   services/files.ts   run-scoped, symlink-refusing file access
   schemas/            zod validation of every controller answer
-  routes/             health, projects, runs, events, files
-web/src/              React UI: projects, runs, run detail, health
+  services/accounts.ts  profile discovery and auth status
+  services/chats.ts   durable, tool-disabled Claude conversations
+  routes/             health, projects, runs, files, sessions, Claude and chats
+web/src/              React UI: projects, runs, chats, sessions and health
 tests/                server tests (stub controller) and component tests
 ```
 
@@ -99,8 +112,9 @@ The rules it is built to:
   rendered by building React elements — the app contains no `innerHTML` anywhere.
 - **Malformed data is shown, not swallowed.** A half-written JSONL line becomes a
   warning banner; the rest of the run still renders.
-- **Changes are narrow and honest.** Four mutating routes, each mapping to one
-  controller command; a change needs an `Origin` as well as the token; uploads go
+- **Changes are narrow and honest.** FDE mutations map to controller commands;
+  chat and account actions have their own validated stores and fixed commands.
+  A change needs an `Origin` as well as the token; uploads go
   to `fde attach --stdin --name`, so a browser filename never becomes a path; and
   a per-run lock means two changes cannot race. A controller refusal is shown in
   its own words and never retried automatically.
@@ -111,26 +125,25 @@ The rules it is built to:
   a single-use ticket checked before the WebSocket handshake. Closing a tab
   detaches; Stop interrupts; Force stop is a second, confirmed action. The last
   256 KiB of screen is kept in memory only, never on disk.
+- **Login is one command, not a credential form.** The server can start exactly
+  `claude auth login` for a configured, validated profile. Its PTY uses the same
+  one-time WebSocket tickets as run sessions. Bedrock remains externally
+  authenticated through AWS credentials.
+- **General chat has no FDE authority.** Claude starts with `--bare`,
+  `--tools ""`, `--no-chrome`, disabled slash commands and plan-only
+  permissions. No run-scoped MCP configuration is loaded.
 - **Terminal changes show up.** The server watches the run and project roots
   (falling back to the nearest directory that exists, so a fresh install is
   covered) and keeps a change counter; the console polls that counter and
   reloads. Where the platform cannot watch, the counter still moves after every
   change the console makes and each view keeps its own slower poll.
 
-## Deviations from the build brief, and why
+## Deliberate implementation choices
 
-- **Playwright is not installed yet.** End-to-end flows belong to Phase 5.
-- **The xterm wiring itself is untested here.** `node-pty` could not be built in
-  the environment this phase was developed in, so the session machinery is
-  covered two ways instead: with a fake terminal, and against real OS processes
-  driven through the same manager. The pty layer and the xterm rendering are the
-  parts to check by hand on first run.
-- **No `POST` routes.** The brief lists them under the API; they arrive with
-  Phase 3 so that this phase cannot mutate anything by accident.
 - **Markdown is rendered by a small element-building renderer**, not a Markdown
   library with an HTML sanitizer. Nothing in it can emit markup, which is a
   stronger guarantee than sanitizing after the fact. Links render as text.
-- **`fde doctor` is not invoked.** System health reports resolved roots, binary
+- **`fde doctor` is not invoked automatically.** System health reports resolved roots, binary
   presence and profile *names* only: running doctor touches the Keychain, the AWS
   CLI and the network, which a page must not do on a timer.
 

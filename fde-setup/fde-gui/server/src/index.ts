@@ -22,9 +22,10 @@ async function main(): Promise<void> {
   process.stdout.write(
     [
       '',
-      '  FDE Control Center — read-only console',
+      '  FDE Control Center — local agent workspace',
       `  runs      ${config.runsRoot}`,
       `  projects  ${config.projectsRoot}`,
+      `  chats     ${config.chatsRoot}`,
       `  open      http://${config.host}:${config.port}/#token=${config.token}`,
       '',
       sessions.available

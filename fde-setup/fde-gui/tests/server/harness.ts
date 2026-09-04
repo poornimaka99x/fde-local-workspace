@@ -74,6 +74,22 @@ if (payload && payload.events) {
 process.stdout.write(JSON.stringify(payload))
 `
 
+const CLAUDE_STUB = `#!/usr/bin/env node
+const args = process.argv.slice(2)
+if (args[0] === 'auth' && args[1] === 'status') {
+  process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'test-subscription' }))
+  process.exit(0)
+}
+if (args.includes('--print')) {
+  const prompt = args[args.indexOf('--print') + 1] || ''
+  const sessionFlag = args.includes('--session-id') ? '--session-id' : '--resume'
+  const session = args[args.indexOf(sessionFlag) + 1]
+  process.stdout.write(JSON.stringify({ result: 'Claude reply: ' + prompt, session_id: session }))
+  process.exit(0)
+}
+process.exit(0)
+`
+
 export interface Harness {
   config: GuiConfig
   app: ReturnType<typeof buildApp>
@@ -122,6 +138,9 @@ export async function makeHarness(
     writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
     chmodSync(launcher, 0o755)
   }
+  const claudePath = path.join(shared, 'bin', 'claude-test')
+  writeFileSync(claudePath, CLAUDE_STUB)
+  chmodSync(claudePath, 0o755)
 
   const token = 'test-token-not-a-real-one'
   const config = loadConfig({
@@ -132,6 +151,7 @@ export async function makeHarness(
     CLAUDE_PROFILES_DIR: path.join(home, '.claude-profiles'),
     FDE_GUI_TOKEN: token,
     FDE_GUI_PORT: '7317',
+    FDE_CLAUDE_BIN: claudePath,
     ...(options.maxUploadBytes === undefined
       ? {}
       : { FDE_GUI_MAX_UPLOAD_BYTES: String(options.maxUploadBytes) }),

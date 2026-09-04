@@ -97,9 +97,22 @@ describe('creating and editing through the controller', () => {
     expect(screen.getByRole('button', { name: 'Create project' })).toBeEnabled()
   })
 
-  it('collects only project, ask, orchestrator and shape when creating a run', async () => {
-    stubFetch((_url, init) =>
-      init?.method === 'POST'
+  const accountsResponse = {
+    accounts: [{
+      id: 'work', label: 'Claude: work', profile: 'work', provider: 'anthropic',
+      profilePresent: true, authState: 'authenticated', authMethod: 'subscription',
+      models: [
+        { id: 'default', label: 'Account default', efforts: ['auto', 'low', 'medium', 'high'] },
+        { id: 'sonnet', label: 'Claude Sonnet', efforts: ['auto', 'low', 'medium', 'high', 'max'] },
+      ],
+    }],
+  }
+
+  it('collects project, ask, account, model, effort and shape when creating a run', async () => {
+    stubFetch((url, init) =>
+      url === '/api/claude/accounts'
+        ? jsonResponse(accountsResponse)
+        : init?.method === 'POST'
         ? jsonResponse({ schemaVersion: 1, run: { runId: '20260903-max-1-aaaa' } }, 201)
         : jsonResponse({
             schemaVersion: 1,
@@ -115,12 +128,16 @@ describe('creating and editing through the controller', () => {
     await user.selectOptions(screen.getByLabelText(/Project/), 'returns-a1b2')
     await user.type(screen.getByLabelText(/What do you want done/), 'MAX-1 returns research')
     await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'work')
+    await user.selectOptions(screen.getByLabelText(/Model/), 'sonnet')
+    await user.selectOptions(screen.getByLabelText(/Effort/), 'high')
     await user.type(screen.getByLabelText(/Named shape/), 'research')
     await user.click(screen.getByRole('button', { name: 'Create run' }))
 
     await waitFor(() => expect(sent).toHaveLength(1))
     expect(sent[0]?.body).toEqual({
       orchestrator: 'work',
+      model: 'sonnet',
+      effort: 'high',
       projectId: 'returns-a1b2',
       requirement: 'MAX-1 returns research',
       shape: 'research',
@@ -130,9 +147,9 @@ describe('creating and editing through the controller', () => {
   })
 
   it('is honest that a Codex-led run cannot be driven from here', async () => {
-    stubFetch(() =>
-      jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] }),
-    )
+    stubFetch((url) => url === '/api/claude/accounts'
+      ? jsonResponse(accountsResponse)
+      : jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] }))
     const user = userEvent.setup()
     render(<NewRunForm />)
     await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'codex')

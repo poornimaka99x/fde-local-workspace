@@ -1,0 +1,89 @@
+// @vitest-environment jsdom
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { NewChatForm } from '../../web/src/features/chats/NewChatForm'
+import { ChatDetail } from '../../web/src/features/chats/ChatDetail'
+import type { ChatRecord } from '../../web/src/lib/types'
+
+const accounts = {
+  accounts: [{
+    id: 'work', label: 'Claude: work', profile: 'work', provider: 'anthropic',
+    profilePresent: true, authState: 'authenticated', authMethod: 'subscription',
+    models: [
+      { id: 'default', label: 'Account default', efforts: ['auto', 'low', 'medium', 'high'] },
+      { id: 'opus', label: 'Claude Opus', efforts: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] },
+    ],
+  }],
+}
+
+function response(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+describe('general chat UI', () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem('fde-gui-token', 'test-token')
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.sessionStorage.clear()
+  })
+
+  it('creates a chat with account, model, effort and optional project context', async () => {
+    const sent: unknown[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/claude/accounts') return response(accounts)
+      if (url === '/api/projects') return response({
+        schemaVersion: 1, projects: [{ projectId: 'returns-a1b2', name: 'Returns', repoPaths: [] }],
+        unassignedRunCount: 0, warnings: [],
+      })
+      if (url === '/api/chats' && init?.method === 'POST') {
+        sent.push(JSON.parse(String(init.body)))
+        return response({ chat: { chatId: 'chat-20260904-abcdef12' } }, 201)
+      }
+      return response({})
+    }))
+    const user = userEvent.setup()
+    render(<NewChatForm />)
+    await waitFor(() => expect(screen.getByLabelText(/Claude account/)).toBeInTheDocument())
+    await user.type(screen.getByLabelText(/Title/), 'Architecture question')
+    await user.selectOptions(screen.getByLabelText(/Project context/), 'returns-a1b2')
+    await user.selectOptions(screen.getByLabelText(/Model/), 'opus')
+    await user.selectOptions(screen.getByLabelText(/Effort/), 'xhigh')
+    await user.click(screen.getByRole('button', { name: 'Create chat' }))
+    await waitFor(() => expect(sent).toEqual([{
+      title: 'Architecture question', projectId: 'returns-a1b2', accountId: 'work', model: 'opus', effort: 'xhigh',
+    }]))
+    expect(window.location.pathname).toBe('/chats/chat-20260904-abcdef12')
+  })
+
+  it('renders the transcript and sends the next message', async () => {
+    let chat: ChatRecord = {
+      schemaVersion: 1 as const,
+      chatId: 'chat-20260904-abcdef12', title: 'Architecture', accountId: 'work', profile: 'work',
+      provider: 'anthropic' as const, model: 'opus', effort: 'high' as const, projectId: null,
+      cwd: '/tmp', claudeSessionId: '11111111-1111-1111-1111-111111111111',
+      createdAt: '2026-09-04T00:00:00Z', updatedAt: '2026-09-04T00:00:00Z',
+      status: 'idle' as const, lastError: null,
+      messages: [{ id: 'one', role: 'assistant' as const, content: '**Ready.**', createdAt: '2026-09-04T00:00:00Z' }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const prompt = (JSON.parse(String(init.body)) as { message: string }).message
+        chat = {
+          ...chat,
+          messages: [...chat.messages, { id: 'two', role: 'user' as const, content: prompt, createdAt: '2026-09-04T00:01:00Z' }],
+        }
+      }
+      return response({ chat })
+    }))
+    const user = userEvent.setup()
+    render(<ChatDetail chatId={chat.chatId} />)
+    expect(await screen.findByText('Ready.')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Message'), 'What changed?')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(screen.getByText('What changed?')).toBeInTheDocument())
+  })
+})

@@ -32,7 +32,9 @@ fde attach <run-id> <source-path> [--name <original-name>] [--max-bytes N] [--js
 fde attach <run-id> --stdin --name <original-name> [--max-bytes N] [--json]
 fde attachments <run-id> [--json]
 fde start [requirement] --project <project-id>
-fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>] [-- <requirement>]
+fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>]
+          [--model <alias-or-id>] [--effort auto|low|medium|high|xhigh|max]
+          [-- <requirement>]
 ```
 
 ## Checking compatibility first
@@ -134,6 +136,12 @@ is text rather than a flag.
 Creating a run assigns no specialist role and approves no plan. A run arrives in
 `awaiting_plan` (or `awaiting_roles` when `--shape` was given), exactly as it
 does from a terminal.
+
+`--model` and `--effort` are session choices, not workflow authority. They are
+stored in the manifest as `sessionConfig` and `fde-start --resume` reapplies
+them to the same Claude conversation. Omitting them records `default` and
+`auto`. A GUI must validate model identifiers and effort values before passing
+them to the controller.
 
 ## Containment rules every reader can rely on
 
