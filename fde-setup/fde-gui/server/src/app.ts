@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
+import websocket from '@fastify/websocket'
 import { ZodError } from 'zod'
 import type { GuiConfig } from './config'
 import { problem } from './problem'
@@ -13,8 +14,10 @@ import { registerRunRoutes } from './routes/runs'
 import { ControllerError } from './services/controller'
 import { FilePathError } from './services/files'
 import { AdvisoryLocks } from './services/locks'
+import { SessionManager } from './services/sessions'
 import { ChangeWatcher } from './services/watch'
 import type { Services } from './services/types'
+import { registerSessionRoutes } from './routes/sessions'
 
 const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -37,12 +40,18 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   const resolved: Services = {
     locks: services?.locks ?? new AdvisoryLocks(),
     watcher: services?.watcher ?? new ChangeWatcher(),
+    // No backend unless one is supplied: an installation without node-pty says
+    // so rather than pretending it can open a terminal.
+    sessions: services?.sessions ?? new SessionManager(null),
   }
   resolved.watcher.start([config.runsRoot, config.projectsRoot])
   const app = Fastify({
     logger: false,
     bodyLimit: config.bodyLimitBytes,
     trustProxy: false,
+    // A local console must be able to stop. A refused upgrade or a held-open
+    // connection does not get to keep the process alive.
+    forceCloseConnections: true,
   })
 
   // An upload arrives as bytes, not as a parsed body: the stream is handed
@@ -52,13 +61,43 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     (_request, payload, done) => done(null, payload),
   )
 
-  registerSecurityHeaders(app)
-  registerAuth(app, config)
+  // Some changes carry no body — resuming a session, for one. An empty body is
+  // an empty object, not a parse error.
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      const text = String(body ?? '').trim()
+      if (text === '') {
+        done(null, {})
+        return
+      }
+      try {
+        done(null, JSON.parse(text))
+      } catch {
+        done(Object.assign(new Error('invalid json'), { statusCode: 400 }), undefined)
+      }
+    },
+  )
+
+  registerSecurityHeaders(app, config)
+  registerAuth(app, config, resolved)
   registerHealthRoutes(app, config, resolved)
   registerProjectRoutes(app, config, resolved)
   registerRunRoutes(app, config, resolved)
 
-  app.addHook('onClose', async () => resolved.watcher.stop())
+  // The terminal routes live inside their own plugin so the websocket support
+  // is loaded before the route that needs it. Hooks from the root — headers,
+  // token and origin — still apply.
+  app.register(async (instance) => {
+    await instance.register(websocket, { options: { maxPayload: 64 * 1024 } })
+    registerSessionRoutes(instance, config, resolved)
+  })
+
+  app.addHook('onClose', async () => {
+    resolved.watcher.stop()
+    resolved.sessions.shutdown()
+  })
 
   const sendIndex = async (reply: FastifyReply): Promise<unknown> => {
     const indexPath = path.join(config.webRoot, 'index.html')

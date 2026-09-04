@@ -532,6 +532,25 @@ class TestStartJson(ProjectTest):
         self.assertNotIn("schemaVersion", result.stdout)
 
 
+# -- a reader can ask what this controller speaks ----------------------------
+
+class TestVersionContract(ProjectTest):
+    def test_version_json_names_the_schema_and_the_contracts(self):
+        payload = self.json_of("version")
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(payload["toolkit"], "fde-core")
+        for contract in ("list --json", "status --json", "projects --json",
+                         "attach --stdin --name", "start --json"):
+            self.assertIn(contract, payload["contracts"])
+
+    def test_version_is_readable_by_a_person_too(self):
+        result = self.sb.fde("version")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("schema 1", result.stdout)
+        self.assertIn("contracts", result.stdout)
+        self.assertNotIn("schemaVersion", result.stdout)
+
+
 # -- containment: a run, a project and a ledger stay where they say they are --
 
 class TestContainment(ProjectTest):

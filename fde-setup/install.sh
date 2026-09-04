@@ -50,8 +50,34 @@ say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 act()  { if (( DRY )); then printf '    would %s\n' "$*"; else printf '    %s\n' "$*"; fi; }
 
-command -v claude >/dev/null 2>&1 || {
-  echo "claude CLI not found on PATH. Install Claude Code first." >&2; exit 1; }
+# The Claude CLI is needed to create profiles and install the plugin — both of
+# which only happen on a fresh install. An update just syncs files, so a missing
+# claude must not stand between you and an up-to-date controller.
+find_claude() {
+  command -v claude >/dev/null 2>&1 && return 0
+  local candidate
+  # Only the per-user install locations. A claude in /usr/local/bin that is not
+  # on your PATH is a PATH you chose; this script does not overrule it.
+  for candidate in "$HOME/.claude/local/claude" "$HOME/.local/bin/claude"; do
+    if [[ -x "$candidate" ]]; then
+      PATH="$(dirname "$candidate"):$PATH"; export PATH
+      note "found claude at $candidate — it is not on your PATH, so this run uses it directly"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! find_claude; then
+  if [[ "$MODE" == "update" ]]; then
+    note "claude CLI not found on PATH. That is fine for an update: profiles,"
+    note "credentials and plugin installation are untouched in this mode."
+  else
+    echo "claude CLI not found on PATH. Install Claude Code first — or, if you only" >&2
+    echo "want to refresh the toolkit files, run: ./install.sh --update" >&2
+    exit 1
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Ownership rules. Anything matching PRESERVE belongs to you and is never

@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { GuiConfig } from '../config'
 import { problem } from '../problem'
+import type { Services } from '../services/types'
 
 /**
  * Two independent checks on every request that reaches the API.
@@ -35,7 +36,7 @@ function presentedToken(request: FastifyRequest): string | null {
   return null
 }
 
-export function registerAuth(app: FastifyInstance, config: GuiConfig): void {
+export function registerAuth(app: FastifyInstance, config: GuiConfig, services: Services): void {
   const expectedOrigins = new Set([
     `http://${config.host}:${config.port}`,
     `http://localhost:${config.port}`,
@@ -44,8 +45,46 @@ export function registerAuth(app: FastifyInstance, config: GuiConfig): void {
     'http://localhost:5199',
   ])
 
+  const TERMINAL_PATH = /^\/api\/runs\/([^/?]+)\/session\/terminal(?:\?(.*))?$/
+
+  const isTerminalUpgrade = (request: FastifyRequest): boolean =>
+    String(request.headers.upgrade ?? '').toLowerCase() === 'websocket' &&
+    TERMINAL_PATH.test(request.url)
+
+  /** Answer on the raw socket and end it: the client is waiting for a 101. */
+  const refuseUpgrade = (request: FastifyRequest, reply: FastifyReply, status: string): void => {
+    reply.hijack()
+    request.raw.socket.end(
+      `HTTP/1.1 ${status}\r\n` +
+        'Connection: close\r\n' +
+        'Content-Length: 0\r\n' +
+        'X-Content-Type-Options: nosniff\r\n\r\n',
+    )
+  }
+
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.url.startsWith('/api/')) return
+
+    // A browser cannot put a header on a WebSocket, so the terminal upgrade
+    // carries a single-use ticket instead, redeemed inside the route. The
+    // origin check below still applies to it.
+    if (isTerminalUpgrade(request)) {
+      const origin = request.headers.origin
+      if (typeof origin === 'string' && origin !== '' && !expectedOrigins.has(origin)) {
+        refuseUpgrade(request, reply, '403 Forbidden')
+        return undefined
+      }
+      // The ticket is checked before the handshake, so an unauthenticated
+      // client never gets a socket at all. It is spent inside the route.
+      const match = TERMINAL_PATH.exec(request.url)
+      const runId = match?.[1] === undefined ? '' : decodeURIComponent(match[1])
+      const ticket = new URLSearchParams(match?.[2] ?? '').get('ticket') ?? ''
+      if (ticket === '' || !services.sessions.peekTicket(ticket, runId)) {
+        refuseUpgrade(request, reply, '401 Unauthorized')
+        return undefined
+      }
+      return undefined
+    }
 
     // The token first, so a caller with no credential is told that plainly,
     // and the origin checks second, so a stolen token still cannot be spent

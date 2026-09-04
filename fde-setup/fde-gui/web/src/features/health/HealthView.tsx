@@ -17,6 +17,28 @@ export function HealthView(): JSX.Element {
       </p>
 
       <div className="card">
+        <h2 style={{ marginTop: 0 }}>Controller contracts</h2>
+        <div className="stack">
+          <span className={`badge ${health.data.controller.ok ? 'ok' : 'danger'}`}>
+            {health.data.controller.ok
+              ? `schema ${health.data.controller.schemaVersion}`
+              : (health.data.controller.problem ?? 'unavailable')}
+          </span>
+          <span className="muted">{health.data.binaries.fde?.path}</span>
+        </div>
+        {health.data.controller.detail ? (
+          <p className="muted">{health.data.controller.detail}</p>
+        ) : null}
+        {health.data.controller.contracts.length > 0 ? (
+          <ul className="mono" style={{ fontSize: 12 }}>
+            {health.data.controller.contracts.map((contract) => (
+              <li key={contract}>fde {contract}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      <div className="card">
         <h2 style={{ marginTop: 0 }}>Roots</h2>
         <table>
           <tbody>

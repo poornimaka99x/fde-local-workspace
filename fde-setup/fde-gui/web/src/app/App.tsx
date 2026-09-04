@@ -11,6 +11,7 @@ import { RunDetail } from '../features/runs/RunDetail'
 import { ProjectsView } from '../features/projects/ProjectsView'
 import { ProjectDetail } from '../features/projects/ProjectDetail'
 import { HealthView } from '../features/health/HealthView'
+import { SessionsView } from '../features/sessions/SessionsView'
 
 function NoToken(): JSX.Element {
   return (
@@ -50,7 +51,13 @@ export function App(): JSX.Element {
   const runMatch = /^\/runs\/([^/]+)$/.exec(path)
   const projectMatch = /^\/projects\/([^/]+)$/.exec(path)
   const projectEditMatch = /^\/projects\/([^/]+)\/edit$/.exec(path)
-  const section = path.startsWith('/projects') ? 'projects' : path.startsWith('/health') ? 'health' : 'runs'
+  const section = path.startsWith('/projects')
+    ? 'projects'
+    : path.startsWith('/sessions')
+      ? 'sessions'
+      : path.startsWith('/health')
+        ? 'health'
+        : 'runs'
 
   return (
     <div className="layout">
@@ -68,6 +75,9 @@ export function App(): JSX.Element {
           </Link>
           <Link to="/runs" current={section === 'runs'}>
             All runs
+          </Link>
+          <Link to="/sessions" current={section === 'sessions'}>
+            Active sessions
           </Link>
           <Link to="/health" current={section === 'health'}>
             System health
@@ -111,6 +121,18 @@ export function App(): JSX.Element {
         </header>
 
         <main id="main" tabIndex={-1}>
+          {health.data && !health.data.controller.ok ? (
+            <div className="banner danger" role="alert">
+              <strong>This console cannot talk to the installed controller.</strong>
+              <p style={{ margin: '6px 0 0' }}>
+                {health.data.controller.detail ??
+                  'The controller did not answer the contract check.'}
+              </p>
+              <p style={{ margin: '6px 0 0' }}>
+                Update it with <code>./install.sh</code> from your fde-setup checkout, then reload.
+              </p>
+            </div>
+          ) : null}
           {path === '/runs/new' ? (
             <NewRunForm projectId={search.get('projectId') ?? undefined} />
           ) : path === '/projects/new' ? (
@@ -123,6 +145,8 @@ export function App(): JSX.Element {
             <ProjectDetail projectId={decodeURIComponent(projectMatch[1])} />
           ) : section === 'projects' ? (
             <ProjectsView />
+          ) : section === 'sessions' ? (
+            <SessionsView />
           ) : section === 'health' ? (
             <HealthView />
           ) : (

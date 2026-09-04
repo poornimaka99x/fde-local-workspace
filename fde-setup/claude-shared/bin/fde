@@ -2697,6 +2697,37 @@ def cmd_plan(args):
                             amend and (run.plan() or {}).get("approvalRequired"))))
 
 
+CONTRACTS = [
+    "list --json",
+    "status --json",
+    "projects --json",
+    "project show --json",
+    "attachments --json",
+    "attach --stdin --name",
+    "start --json",
+    "start --project",
+]
+
+
+def cmd_version(args):
+    """What this controller is, and which machine-readable contracts it speaks."""
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "toolkit": "fde-core",
+        "contracts": CONTRACTS,
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"fde           schema {SCHEMA_VERSION}  (toolkit fde-core)")
+    print(f"controller    {pathlib.Path(__file__).resolve()}")
+    print(f"runs          {RUNS}")
+    print(f"projects      {PROJECTS}")
+    print("contracts")
+    for contract in CONTRACTS:
+        print(f"  fde {contract}")
+    return 0
+
+
 def cmd_shapes(args):
     print("\nNamed shapes — shorthand for the plans that come up often.\n")
     width = max(len(s) for s in SHAPES)
@@ -3686,6 +3717,10 @@ def main(argv=None):
     s.add_argument("--require-approval", action="store_true",
                    help="select roles first, then require APPROVE PLAN <run-id> before access")
     s.set_defaults(fn=cmd_plan)
+
+    s = sub.add_parser("version", help="schema version and the machine-readable contracts")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_version)
 
     s = sub.add_parser("shapes", help="the named plan shapes and what they contain")
     s.set_defaults(fn=cmd_shapes)

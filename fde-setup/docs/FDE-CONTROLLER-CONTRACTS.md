@@ -21,6 +21,7 @@ nonzero with empty stdout.
 ## Commands
 
 ```bash
+fde version [--json]
 fde list --json
 fde status <run-id> --json [--events-limit N] [--events-cursor OFFSET]
 fde projects --json
@@ -33,6 +34,25 @@ fde attachments <run-id> [--json]
 fde start [requirement] --project <project-id>
 fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>] [-- <requirement>]
 ```
+
+## Checking compatibility first
+
+`fde version --json` says what this controller is and which contracts it speaks:
+
+```json
+{
+  "schemaVersion": 1,
+  "toolkit": "fde-core",
+  "contracts": ["list --json", "status --json", "projects --json", "..."]
+}
+```
+
+Ask this before depending on a contract. A controller that predates them answers
+argparse's own refusal — `invalid choice: 'version'`, or
+`unrecognized arguments: --json`, with exit 2. That is an **installation**
+problem, not a workflow refusal: the fix is `./install.sh --update` from the
+fde-setup checkout, and a reader should say so rather than showing a usage
+string. The local console does exactly this.
 
 ## Exit codes
 

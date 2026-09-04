@@ -1,16 +1,21 @@
 # FDE Control Center
 
-A local operator console for the `fde` controller. Phase 3: **read, and four
-safe changes**.
+A local operator console for the `fde` controller. Phase 4: **read, four safe
+changes, and an embedded resume terminal**.
 
 It shows projects, runs, plans, roles, approvals, checkpoints, events, input
 attachments, artifacts and output-hygiene evidence. It can create a project,
 edit one, create a run and attach a file — each one a controller command, with
 the console writing nothing itself.
 
-It still starts no process and approves nothing. Assigning roles, approving a
-plan, granting a Codex write, deploying and publishing stay where they were: in
-a terminal, typed by you. The embedded resume terminal arrives in Phase 4.
+It can also resume a Claude-led run: Resume starts exactly
+`fde-start --resume <run-id>` in an embedded terminal, one process per run, and
+streams it to the tab. A Codex-led run is labelled honestly instead — it is
+driven from its own Codex task.
+
+Approving is still yours. Assigning roles, approving a plan, granting a Codex
+write, deploying and publishing all happen in that conversation, typed by you —
+the console adds no button for any of them.
 
 ## Run it
 
@@ -20,10 +25,16 @@ npm install          # once — see the note below if it was installed elsewhere
 npm start            # builds the UI, then serves it on 127.0.0.1:7317
 ```
 
-> `node_modules` holds platform-specific binaries (esbuild, rollup). A tree
-> installed on one OS or architecture will not run on another — if `npm test` or
-> `npm start` fails with a missing or invalid binary, delete `node_modules` and
-> reinstall on this machine.
+> `node_modules` holds platform-specific binaries (esbuild, rollup, node-pty). A
+> tree installed on one OS or architecture will not run on another — if
+> `npm test` or `npm start` fails with a missing or invalid binary, delete
+> `node_modules` and reinstall on this machine.
+>
+> `node-pty` is an **optional** dependency: it is native, and where a platform
+> has no prebuild and no toolchain the install still succeeds. The console then
+> reports that it has no terminal backend and refuses to start a session, rather
+> than falling back to pipes and calling that a terminal. The launch banner says
+> which case you are in.
 
 Open the link the server prints. It looks like:
 
@@ -93,6 +104,13 @@ The rules it is built to:
   to `fde attach --stdin --name`, so a browser filename never becomes a path; and
   a per-run lock means two changes cannot race. A controller refusal is shown in
   its own words and never retried automatically.
+- **A session is one command, not a shell.** Resume runs
+  `fde-start --resume <validated run id>` through node-pty — no shell, no command
+  from the caller, one process per run, and the working directory is the
+  project's first repository or the server's own. The stream is authenticated by
+  a single-use ticket checked before the WebSocket handshake. Closing a tab
+  detaches; Stop interrupts; Force stop is a second, confirmed action. The last
+  256 KiB of screen is kept in memory only, never on disk.
 - **Terminal changes show up.** The server watches the run and project roots
   (falling back to the nearest directory that exists, so a fresh install is
   covered) and keeps a change counter; the console polls that counter and
@@ -101,20 +119,37 @@ The rules it is built to:
 
 ## Deviations from the build brief, and why
 
-- **Playwright, `node-pty` and xterm.js are not installed yet.** They belong to
-  the phases that need them (4 and 5); adding them now would ship an unused
-  terminal dependency into a read-only console.
+- **Playwright is not installed yet.** End-to-end flows belong to Phase 5.
+- **The xterm wiring itself is untested here.** `node-pty` could not be built in
+  the environment this phase was developed in, so the session machinery is
+  covered two ways instead: with a fake terminal, and against real OS processes
+  driven through the same manager. The pty layer and the xterm rendering are the
+  parts to check by hand on first run.
 - **No `POST` routes.** The brief lists them under the API; they arrive with
   Phase 3 so that this phase cannot mutate anything by accident.
 - **Markdown is rendered by a small element-building renderer**, not a Markdown
   library with an HTML sanitizer. Nothing in it can emit markup, which is a
   stronger guarantee than sanitizing after the fact. Links render as text.
-- **No Active Sessions view.** The brief lists it in the global navigation, but
-  a session only exists once the console can start one, which is Phase 4. A nav
-  entry that can only ever say "none" is worse than not having it yet.
 - **`fde doctor` is not invoked.** System health reports resolved roots, binary
   presence and profile *names* only: running doctor touches the Keychain, the AWS
   CLI and the network, which a page must not do on a timer.
+
+## When the console says the controller is too old
+
+The console talks to the **installed** controller at `~/.claude-shared/bin/fde`,
+not to the copy in this checkout. Editing the checkout changes nothing until it
+is installed. If a screen reports *"The installed controller is older than this
+console"*, update it:
+
+```bash
+cd <your fde-setup checkout>
+./install.sh --update --dry-run   # see exactly what would change
+./install.sh --update             # backs up every file it replaces
+```
+
+Update mode leaves your runs, `env.sh`, profiles, credentials and client context
+exactly as they are. System health shows which contracts the installed
+controller speaks, and `fde version` says the same thing from a terminal.
 
 ## Tests
 

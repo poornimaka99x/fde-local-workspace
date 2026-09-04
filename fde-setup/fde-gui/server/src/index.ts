@@ -1,9 +1,11 @@
 import { loadConfig } from './config'
 import { buildApp } from './app'
+import { SessionManager, loadNodePty } from './services/sessions'
 
 async function main(): Promise<void> {
   const config = loadConfig()
-  const app = buildApp(config)
+  const sessions = new SessionManager(await loadNodePty())
+  const app = buildApp(config, { sessions })
 
   const shutdown = async (): Promise<void> => {
     await app.close()
@@ -25,6 +27,9 @@ async function main(): Promise<void> {
       `  projects  ${config.projectsRoot}`,
       `  open      http://${config.host}:${config.port}/#token=${config.token}`,
       '',
+      sessions.available
+        ? '  Terminal sessions: available.'
+        : '  Terminal sessions: unavailable here (node-pty is not installed).',
       '  Loopback only. The link above is valid for this launch alone.',
       '',
     ].join('\n'),

@@ -33,6 +33,18 @@ export class ControllerError extends Error {
  */
 const DOCUMENTED_EXITS = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10])
 
+/**
+ * An argparse refusal of a subcommand or flag we know exists means the binary
+ * on disk predates these contracts. That is an installation problem with a
+ * one-line fix, not a workflow refusal, and it deserves to be said that way
+ * rather than pasted as a usage string.
+ */
+const OUTDATED = /invalid choice|unrecognized arguments|no such option/i
+
+export function looksOutdated(exitCode: number, text: string): boolean {
+  return exitCode === 2 && OUTDATED.test(text)
+}
+
 function safeDetail(exitCode: number, text: string): string | undefined {
   if (!DOCUMENTED_EXITS.has(exitCode)) return undefined
   const trimmed = text.trim()
@@ -77,6 +89,21 @@ export function controllerEnv(config: GuiConfig): NodeJS.ProcessEnv {
     LANG: process.env.LANG ?? 'en_US.UTF-8',
     ...(process.env.PYTHONPATH ? { PYTHONPATH: process.env.PYTHONPATH } : {}),
   }
+}
+
+export function outdatedControllerError(
+  config: GuiConfig,
+  args: readonly string[],
+): ControllerError {
+  return new ControllerError(
+    503,
+    'controller-outdated',
+    'The installed controller is older than this console.',
+    `${config.fdeBin} does not understand "fde ${args.filter((a) => !a.startsWith('-')).join(' ')} --json", ` +
+      'so it predates the machine-readable contracts (schema 1) the console needs. ' +
+      'Update it by running ./install.sh from your fde-setup checkout, or point ' +
+      'FDE_CONTROLLER at an updated fde.',
+  )
 }
 
 export async function runController(
@@ -127,6 +154,11 @@ export async function runController(
           )
           return
         }
+        const output = stderr || stdout
+        if (looksOutdated(exitCode, output)) {
+          reject(outdatedControllerError(config, args))
+          return
+        }
         const mapped = statusForExit(exitCode)
         reject(
           new ControllerError(
@@ -135,7 +167,7 @@ export async function runController(
             DOCUMENTED_EXITS.has(exitCode)
               ? 'The controller refused this request.'
               : 'The controller failed.',
-            safeDetail(exitCode, stderr || stdout),
+            safeDetail(exitCode, output),
           ),
         )
       },
@@ -251,6 +283,7 @@ export async function runControllerWithStdin(
     })
     const exitCode = await finished
     if (exitCode !== 0) {
+      if (looksOutdated(exitCode, stderr || stdout)) throw outdatedControllerError(config, args)
       const mapped = statusForExit(exitCode)
       throw new ControllerError(
         mapped.status,

@@ -32,6 +32,10 @@ web page. What it is not: a service, a shared tool, or anything with an account.
 | Mutation → CSRF | A change must present the launch token **and** an `Origin` header matching this console. A same-origin `fetch` always sends one; a cross-site form post never sends a matching one, and cannot set the token header at all. |
 | Upload → disk | The request body is streamed to `fde attach --stdin --name <name>`. The console never writes into a run directory itself, and a browser-supplied filename is a label the controller sanitizes — it never becomes a path or a command line here. Size is capped by a per-route body limit and counted again while streaming; the controller receives the same ceiling as `--max-bytes`. |
 | Concurrent changes | A per-run and per-project advisory lock. A second change on a busy target is told the target is busy rather than racing it; the lock is released even when the controller refuses. A controller refusal is shown, never retried automatically. |
+| Terminal sessions | The console can start exactly one command: `fde-start --resume <run-id>`, for a run the controller reports as a resumable Claude run. The run id is validated against a real run directory first; there is no shell, no command parameter, and no second process per run. The working directory is the project's first configured repository or the server's own directory — never a caller's choice. |
+| Terminal → environment | The session gets a fixed allowlist: `HOME`, `PATH`, `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `CLAUDE_PROFILES_DIR`, `LANG`, `TERM`, `COLORTERM`, plus `FDE_CONTROLLER`/`FDE_MCP_SYNC`/`FDE_CLAUDE_BIN` when the operator set them for this server. Anything whose name looks like a credential is dropped even from that list, and diagnostics report variable *names* only. |
+| Terminal → WebSocket | A browser cannot set a header on a WebSocket, so the stream is authenticated by a single-use ticket issued over the authenticated resume call: 32 random bytes, bound to one run, valid for 60 seconds, spent on first use. It is checked *before* the handshake, so an unauthenticated client never gets a socket; the origin check applies to the upgrade too, and a refused upgrade is answered on the raw socket and closed. |
+| Terminal → transcript | The last 256 KiB of screen output is kept in memory so a reattaching tab sees where it got to. It is never written to disk. Closing a tab detaches a viewer and nothing else; stopping is an explicit action, and force-stopping a second one behind a confirmation. On server shutdown running sessions are hung up rather than orphaned — the run itself stays resumable from a terminal. |
 | Input that becomes argv | Project names, descriptions, requirements, shape names and upload filenames are rejected outright if they contain control characters, and are bounded in length. Identifiers are pattern-checked. Everything is passed as an argument array. |
 
 ## What an attacker would have to do
@@ -69,6 +73,13 @@ web page. What it is not: a service, a shared tool, or anything with an account.
   those is a controller command with validated arguments; the console still has
   no way to assign a role, approve a plan, grant a Codex write, deploy or
   publish, and adds none.
-- Phase 4 will add a PTY that runs exactly `fde-start --resume <validated run id>`.
-  That is a new and larger surface — one process per run, no shell, no arbitrary
-  command endpoint — and this note will be revised with it.
+- The console can now start a terminal session. That is the largest surface it
+  has: a real process, with the operator's own profile, streaming to a browser
+  tab. It is bounded to one command, one run, one process, and a stream nothing
+  can join without a ticket the server issued seconds earlier.
+- Anyone who can drive the console can type into that session — including typing
+  an approval phrase. That is the same authority the operator has in their own
+  terminal, and it is why the launch token matters: the token is the boundary.
+- `node-pty` is an optional dependency. Where it is missing the console refuses
+  to start a session and says so; it does not fall back to pipes and call the
+  result a terminal.

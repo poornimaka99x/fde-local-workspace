@@ -106,6 +106,66 @@ describe('controller boundary', () => {
     expect(response.json()).toMatchObject({ type: 'about:fde/controller-unexpected-shape' })
   })
 
+  it('names an outdated controller instead of pasting its usage string', async () => {
+    // What a pre-contract fde actually says when the console calls it.
+    harness.failure(
+      'list',
+      2,
+      "usage: fde [-h] {doctor,start,orchestrator,request,plan,shapes,list,roles}\n" +
+        'fde: error: unrecognized arguments: --json',
+    )
+    const response = await get('/api/runs')
+    expect(response.statusCode).toBe(503)
+    const body = response.json()
+    expect(body).toMatchObject({ type: 'about:fde/controller-outdated' })
+    expect(body.title).toContain('older than this console')
+    expect(body.detail).toContain('./install.sh')
+    expect(body.detail).not.toContain('usage: fde')
+  })
+
+  it('names an outdated controller for a missing subcommand too', async () => {
+    harness.failure(
+      'projects',
+      2,
+      "fde: error: argument cmd: invalid choice: 'projects' (choose from 'doctor', 'start')",
+    )
+    const response = await get('/api/projects')
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ type: 'about:fde/controller-outdated' })
+  })
+
+  it('still reports a real refusal as a refusal', async () => {
+    harness.failure(`status-${RUN}`, 2, 'fde: unknown stage')
+    const response = await get(`/api/runs/${RUN}`)
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ type: 'about:fde/controller-rejected-input' })
+  })
+
+  it('reports the contract check in health', async () => {
+    harness.fixture('version', {
+      schemaVersion: 1,
+      toolkit: 'fde-core',
+      contracts: ['list --json', 'status --json'],
+    })
+    const healthy = await get('/api/health')
+    expect(healthy.json().controller).toMatchObject({ ok: true, schemaVersion: 1 })
+
+    const stale = await makeHarness()
+    try {
+      stale.failure('version', 2, "fde: error: argument cmd: invalid choice: 'version'")
+      const response = await stale.app.inject({
+        method: 'GET', url: '/api/health', headers: authed(stale.token),
+      })
+      expect(response.json().controller).toMatchObject({
+        ok: false,
+        problem: 'controller-outdated',
+      })
+      expect(response.json().controller.detail).toContain('./install.sh')
+    } finally {
+      await stale.destroy()
+    }
+  })
+
   it('says so when the controller is not installed', async () => {
     const bare = await makeHarness({ withController: false })
     try {

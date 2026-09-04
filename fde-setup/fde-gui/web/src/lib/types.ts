@@ -1,5 +1,6 @@
 /** Mirrors of the controller contracts (schema version 1). Deliberately loose:
  *  a legacy or half-written run must still type-check its way onto the screen. */
+/** What the controller derives about resuming a run. */
 export interface SessionView {
   provider: string | null
   profile: string | null
@@ -191,13 +192,46 @@ export interface FileListResponse {
   withheld: string[]
 }
 
+export interface ContractCheck {
+  ok: boolean
+  schemaVersion: number | null
+  contracts: string[]
+  problem: string | null
+  detail: string | null
+}
+
 export interface HealthResponse {
   status: string
   version: string
   apiVersion: number
   startedAt: string
   mode: string
+  controller: ContractCheck
   roots: { shared: string; runs: string; projects: string; profiles: string }
   binaries: Record<string, { path: string; present: boolean }>
   claudeProfiles: { name: string; path: string }[]
+}
+
+export interface ConsoleSession {
+  runId: string
+  status: 'running' | 'exited'
+  pid: number
+  startedAt: string
+  exitedAt: string | null
+  exitCode: number | null
+  cwd: string
+  command: string[]
+  envKeys: string[]
+  stopRequestedAt: string | null
+  attachedClients: number
+}
+
+export interface SessionState {
+  available: boolean
+  session: ConsoleSession | null
+}
+
+export interface SessionListResponse {
+  available: boolean
+  sessions: ConsoleSession[]
 }

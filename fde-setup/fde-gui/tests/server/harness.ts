@@ -13,6 +13,7 @@ import path from 'node:path'
 import { buildApp } from '../../server/src/app'
 import { loadConfig, type GuiConfig } from '../../server/src/config'
 import { AdvisoryLocks } from '../../server/src/services/locks'
+import { SessionManager, type SpawnTerminal } from '../../server/src/services/sessions'
 import { ChangeWatcher } from '../../server/src/services/watch'
 
 /**
@@ -78,7 +79,9 @@ export interface Harness {
   app: ReturnType<typeof buildApp>
   locks: AdvisoryLocks
   watcher: ChangeWatcher
+  sessions: SessionManager
   stdinFor: (name: string) => Buffer | null
+  listen: () => Promise<string>
   root: string
   runsRoot: string
   stubDir: string
@@ -91,7 +94,12 @@ export interface Harness {
 }
 
 export async function makeHarness(
-  options: { withController?: boolean; maxUploadBytes?: number } = {},
+  options: {
+    withController?: boolean
+    maxUploadBytes?: number
+    spawnTerminal?: SpawnTerminal | null
+    withLauncher?: boolean
+  } = {},
 ): Promise<Harness> {
   const root = mkdtempSync(path.join(os.tmpdir(), 'fde-gui-test-'))
   const home = path.join(root, 'home')
@@ -107,6 +115,12 @@ export async function makeHarness(
   if (options.withController !== false) {
     writeFileSync(controllerPath, STUB)
     chmodSync(controllerPath, 0o755)
+  }
+  // A launcher file only has to exist: the fake terminal backend never runs it.
+  if (options.withLauncher !== false) {
+    const launcher = path.join(shared, 'bin', 'fde-start')
+    writeFileSync(launcher, '#!/bin/sh\nexit 0\n')
+    chmodSync(launcher, 0o755)
   }
 
   const token = 'test-token-not-a-real-one'
@@ -126,7 +140,8 @@ export async function makeHarness(
 
   const locks = new AdvisoryLocks()
   const watcher = new ChangeWatcher(10)
-  const app = buildApp(config, { locks, watcher })
+  const sessions = new SessionManager(options.spawnTerminal ?? null)
+  const app = buildApp(config, { locks, watcher, sessions })
   await app.ready()
 
   return {
@@ -134,6 +149,13 @@ export async function makeHarness(
     app,
     locks,
     watcher,
+    sessions,
+    listen: async () => {
+      await app.listen({ host: '127.0.0.1', port: 0 })
+      const address = app.server.address()
+      const port = typeof address === 'object' && address !== null ? address.port : 0
+      return `127.0.0.1:${port}`
+    },
     stdinFor: (name) => {
       const file = path.join(stubDir, `stdin-${name}.bin`)
       return existsSync(file) ? readFileSync(file) : null

@@ -355,9 +355,11 @@ cd fde-gui && npm install && npm start
 
 It reads runs through `fde … --json`, and can create a project, edit one, create
 a run and attach a file — each one a controller command, not a write of its own.
-It starts no process and approves nothing: roles, plan approval, Codex writes,
-deployment and publication stay in a terminal, typed by you. Resuming a Claude
-session in an embedded terminal arrives in a later phase.
+It can resume a Claude-led run in an embedded terminal — exactly
+`fde-start --resume <run-id>`, one process per run — and a Codex-led run is
+labelled honestly rather than given a resume button that could not work.
+Approving is still yours: roles, plan approval, Codex writes, deployment and
+publication all happen in that conversation, typed by you.
 Details, environment variables and the deliberate deviations are in
 [`fde-gui/README.md`](fde-gui/README.md); the security boundaries are in
 [`docs/FDE-GUI-THREAT-MODEL.md`](docs/FDE-GUI-THREAT-MODEL.md).
