@@ -46,7 +46,12 @@ export function useApi<T>(path: string | null, pollMs = 0): ApiState<T> {
 
   useEffect(() => {
     if (path === null || pollMs <= 0) return
-    const timer = window.setInterval(reload, pollMs)
+    // Skip the request while the tab is in the background; the next poll
+    // after it becomes visible again picks up whatever changed meanwhile.
+    const tick = (): void => {
+      if (!document.hidden) reload()
+    }
+    const timer = window.setInterval(tick, pollMs)
     return () => window.clearInterval(timer)
   }, [path, pollMs, reload])
 

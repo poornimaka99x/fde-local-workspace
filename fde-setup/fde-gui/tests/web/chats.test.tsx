@@ -68,6 +68,7 @@ describe('general chat UI', () => {
       createdAt: '2026-09-04T00:00:00Z', updatedAt: '2026-09-04T00:00:00Z',
       status: 'idle' as const, lastError: null,
       messages: [{ id: 'one', role: 'assistant' as const, content: '**Ready.**', createdAt: '2026-09-04T00:00:00Z' }],
+      attachments: [],
     }
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
@@ -85,5 +86,29 @@ describe('general chat UI', () => {
     await user.type(screen.getByLabelText('Message'), 'What changed?')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(screen.getByText('What changed?')).toBeInTheDocument())
+  })
+
+  it('keeps a failed message ready to retry and shows the real safe error', async () => {
+    const chat: ChatRecord = {
+      schemaVersion: 1, chatId: 'chat-20260904-abcdef12', title: 'Architecture',
+      accountId: 'work', profile: 'work', provider: 'anthropic', model: 'default', effort: 'auto',
+      projectId: null, cwd: '/tmp', claudeSessionId: '11111111-1111-1111-1111-111111111111',
+      createdAt: '2026-09-04T00:00:00Z', updatedAt: '2026-09-04T00:00:00Z',
+      status: 'idle', lastError: null, messages: [], attachments: [],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return response({ chat: {
+        ...chat,
+        status: 'failed',
+        lastError: 'This Claude account is not logged in. Use Login for the selected account, then try again.',
+      } })
+      return response({ chat })
+    }))
+    const user = userEvent.setup()
+    render(<ChatDetail chatId={chat.chatId} />)
+    await user.type(await screen.findByLabelText('Message'), 'Please retry me')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('not logged in')
+    expect(screen.getByLabelText('Message')).toHaveValue('Please retry me')
   })
 })

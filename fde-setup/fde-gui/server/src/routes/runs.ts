@@ -229,26 +229,45 @@ export function registerRunRoutes(
       return problem(reply, 400, 'invalid-body', 'That run cannot be created as described.',
         describeZod(parsed.error))
     }
+    if (
+      parsed.data.orchestrator !== 'codex' &&
+      !services.accounts.validateSelection(
+        parsed.data.orchestrator,
+        parsed.data.model,
+        parsed.data.effort,
+      )
+    ) {
+      return problem(
+        reply,
+        400,
+        'invalid-selection',
+        'That model and effort combination is not available for this account.',
+      )
+    }
+    if (parsed.data.orchestrator !== 'codex') {
+      const auth = await services.accounts.status(parsed.data.orchestrator)
+      if (auth.state === 'login_required') {
+        return problem(
+          reply,
+          409,
+          'login-required',
+          'Sign in to this Claude account before creating the run.',
+        )
+      }
+      if (auth.state === 'unavailable') {
+        return problem(
+          reply,
+          503,
+          'claude-unavailable',
+          'The selected Claude account is not available.',
+        )
+      }
+    }
     const release = services.locks.tryAcquire('run:create')
     if (release === null) {
       return problem(reply, 409, 'busy', 'Another run is being created right now.')
     }
     try {
-      if (
-        parsed.data.orchestrator !== 'codex' &&
-        !services.accounts.validateSelection(
-          parsed.data.orchestrator,
-          parsed.data.model,
-          parsed.data.effort,
-        )
-      ) {
-        return problem(
-          reply,
-          400,
-          'invalid-selection',
-          'That model and effort combination is not available for this account.',
-        )
-      }
       const args = ['start', '--json', '--orchestrator', parsed.data.orchestrator]
       if (parsed.data.orchestrator !== 'codex') {
         args.push('--model', parsed.data.model, '--effort', parsed.data.effort)

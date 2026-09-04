@@ -22,8 +22,11 @@ export function announceChange(): void {
   for (const listener of [...listeners]) listener()
 }
 
-export function startChangePolling(intervalMs = 3000): () => void {
+export function startChangePolling(intervalMs = 15000): () => void {
   const tick = async (): Promise<void> => {
+    // Nothing is watching this tab right now; save the round trip and pick
+    // up the current version the moment it becomes visible again.
+    if (document.hidden) return
     try {
       const state = await apiGet<{ version: number }>('/api/state-version')
       if (known !== null && state.version !== known) announceChange()
@@ -34,8 +37,13 @@ export function startChangePolling(intervalMs = 3000): () => void {
   }
   void tick()
   timer = window.setInterval(() => void tick(), intervalMs)
+  const onVisibilityChange = (): void => {
+    if (!document.hidden) void tick()
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
   return () => {
     if (timer !== null) window.clearInterval(timer)
     timer = null
+    document.removeEventListener('visibilitychange', onVisibilityChange)
   }
 }

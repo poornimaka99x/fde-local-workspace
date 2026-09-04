@@ -1,6 +1,9 @@
 # Runtime state, never source. Runs hold client material, task files and the
 # approval ledger; they belong to the machine, not to the repository.
 runs/
+!fde-gui/web/src/features/runs/
+!fde-gui/web/src/features/runs/**
+!claude-shared/runs/
 claude-shared/runs/*
 !claude-shared/runs/.gitkeep
 

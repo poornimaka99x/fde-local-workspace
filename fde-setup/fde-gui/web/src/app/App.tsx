@@ -36,7 +36,7 @@ function NoToken(): JSX.Element {
 export function App(): JSX.Element {
   const [token] = useState<string | null>(() => captureToken())
   const { path } = useRoute()
-  const health = useApi<HealthResponse>(token === null ? null : '/api/health', 60000)
+  const health = useApi<HealthResponse>(token === null ? null : '/api/health', 120000)
 
   useEffect(() => {
     document.title = 'FDE Control Center'

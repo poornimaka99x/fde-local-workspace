@@ -187,3 +187,9 @@ details summary { cursor: pointer; color: var(--text-muted); }
 .muted { color: var(--text-muted); }
 .right { text-align: right; }
 .stack { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: color-mix(in srgb, var(--text) 35%, transparent);
+  display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 30;
+}
+.modal { width: min(640px, 100%); max-height: 85vh; overflow: auto; }

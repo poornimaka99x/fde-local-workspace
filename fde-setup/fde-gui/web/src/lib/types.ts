@@ -266,6 +266,13 @@ export interface ChatMessage {
   createdAt: string
 }
 
+export interface ChatAttachment {
+  id: string
+  path: string
+  kind: 'file' | 'directory'
+  addedAt: string
+}
+
 export interface ChatRecord {
   schemaVersion: 1
   chatId: string
@@ -283,9 +290,26 @@ export interface ChatRecord {
   status: 'idle' | 'running' | 'failed'
   lastError: string | null
   messages: ChatMessage[]
+  attachments: ChatAttachment[]
 }
 
 export interface ChatSummary extends Omit<ChatRecord, 'messages'> {
   messageCount: number
   lastMessage: string | null
+}
+
+export interface FsEntry {
+  name: string
+  path: string
+  kind: 'directory' | 'file' | 'other'
+  symlink: boolean
+  size: number | null
+  modifiedAt: string | null
+}
+
+export interface FsBrowseResponse {
+  path: string
+  parent: string | null
+  entries: FsEntry[]
+  truncated: boolean
 }

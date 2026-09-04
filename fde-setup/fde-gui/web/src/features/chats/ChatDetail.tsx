@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Markdown } from '../../components/Markdown'
+import { PathBrowser } from '../../components/PathBrowser'
 import { ErrorState, Loading } from '../../components/States'
 import { ApiError, apiSend } from '../../lib/api'
 import { formatTime } from '../../lib/format'
@@ -12,6 +13,8 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
+  const [attaching, setAttaching] = useState(false)
+  const [attachError, setAttachError] = useState<ApiError | null>(null)
 
   const send = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -21,7 +24,19 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
     setError(null)
     setMessage('')
     try {
-      await apiSend<{ chat: ChatRecord }>(`/api/chats/${encodeURIComponent(chatId)}/messages`, 'POST', { message: prompt })
+      const result = await apiSend<{ chat: ChatRecord }>(
+        `/api/chats/${encodeURIComponent(chatId)}/messages`,
+        'POST',
+        { message: prompt },
+      )
+      if (result.chat.status === 'failed') {
+        setMessage(prompt)
+        setError(new ApiError(
+          502,
+          'claude-failed',
+          result.chat.lastError ?? 'Claude did not complete this message.',
+        ))
+      }
       state.reload()
     } catch (cause) {
       setMessage(prompt)
@@ -37,6 +52,30 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
       state.reload()
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not stop Claude.'))
+    }
+  }
+
+  const attach = async (attachPath: string): Promise<void> => {
+    setAttachError(null)
+    try {
+      await apiSend<{ chat: ChatRecord }>(`/api/chats/${encodeURIComponent(chatId)}/attachments`, 'POST', { path: attachPath })
+      setAttaching(false)
+      state.reload()
+    } catch (cause) {
+      setAttachError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not attach that path.'))
+    }
+  }
+
+  const detach = async (attachmentId: string): Promise<void> => {
+    setAttachError(null)
+    try {
+      await apiSend<{ chat: ChatRecord }>(
+        `/api/chats/${encodeURIComponent(chatId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        'DELETE',
+      )
+      state.reload()
+    } catch (cause) {
+      setAttachError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not remove that attachment.'))
     }
   }
 
@@ -56,6 +95,37 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
       </div>
       {error ? <ErrorState error={error} /> : null}
       {chat.lastError ? <div className="banner danger" role="alert">{chat.lastError}</div> : null}
+
+      <div className="card">
+        <div className="stack" style={{ justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0 }}>Attachments</h3>
+          <button className="action" type="button" onClick={() => setAttaching(true)}>Attach file or folder…</button>
+        </div>
+        {attachError ? <ErrorState error={attachError} /> : null}
+        {chat.attachments.length === 0 ? (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            None yet. An attached file is re-read and folded into the message as context every time you
+            send; an attached folder is listed by name only, not its contents.
+          </p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
+            {chat.attachments.map((item) => (
+              <li key={item.id} className="stack" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+                <span className="mono">{item.path}{item.kind === 'directory' ? '/' : ''}</span>
+                <button className="action" type="button" onClick={() => void detach(item.id)}>Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {attaching ? (
+        <PathBrowser
+          title="Attach a file or folder"
+          mode="any"
+          onSelect={(picked) => void attach(picked)}
+          onClose={() => setAttaching(false)}
+        />
+      ) : null}
       <div className="chat-thread" aria-live="polite">
         {chat.messages.length === 0 ? <p className="muted">Send the first message.</p> : null}
         {chat.messages.map((item) => (

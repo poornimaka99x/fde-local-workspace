@@ -30,9 +30,9 @@ export function ClaudeSettings({
   const selectedModel = models.find((option) => option.id === model) ?? models[0] ?? null
 
   useEffect(() => {
-    if (accountId !== '' || !availableAccounts[0]) return
+    if (accountId === 'codex' || selected !== null || !availableAccounts[0]) return
     onAccount(availableAccounts[0].id)
-  }, [accountId, availableAccounts, onAccount])
+  }, [accountId, availableAccounts, onAccount, selected])
 
   useEffect(() => {
     if (accountId === 'codex') return

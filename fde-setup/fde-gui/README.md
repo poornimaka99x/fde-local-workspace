@@ -14,14 +14,18 @@ driven from its own Codex task.
 
 General chats are deliberately separate from FDE runs. A chat stores its own
 metadata and messages under `~/.claude-shared/chats`, resumes one opaque Claude
-conversation, and starts Claude in bare print mode with all tools disabled.
+conversation, and starts Claude in restricted print mode with all tools disabled,
+permission prompts denied and MCP configuration ignored.
 Account status comes from `claude auth status`; the Login action opens an
 isolated `claude auth login` terminal for only the selected profile. The GUI
 never receives a password, OAuth token or credential file.
 
 Both New run and New chat expose the selected Claude profile, model and the
 effort levels supported by that model. Run choices are persisted in the run
-manifest and reapplied by `fde-start` on every resume.
+manifest and reapplied by `fde-start` on every resume. After a Claude-led run is
+created, the console opens its Session tab and starts the orchestrator so the
+plan conversation actually begins; a logged-out account is refused before an
+orphan run can be created.
 
 Approving is still yours. Assigning roles, approving a plan, granting a Codex
 write, deploying and publishing all happen in that conversation, typed by you —
@@ -129,9 +133,10 @@ The rules it is built to:
   `claude auth login` for a configured, validated profile. Its PTY uses the same
   one-time WebSocket tickets as run sessions. Bedrock remains externally
   authenticated through AWS credentials.
-- **General chat has no FDE authority.** Claude starts with `--bare`,
-  `--tools ""`, `--no-chrome`, disabled slash commands and plan-only
-  permissions. No run-scoped MCP configuration is loaded.
+- **General chat has no FDE authority.** Claude starts with `--restricted`,
+  `--strict-mcp-config`, `--tools ""`, `--permission-prompts none`,
+  `--no-chrome`, disabled slash commands and plan-only permissions. This keeps
+  profile OAuth/Keychain login available without loading run-scoped MCP tools.
 - **Terminal changes show up.** The server watches the run and project roots
   (falling back to the nearest directory that exists, so a fresh install is
   covered) and keeps a change counter; the console polls that counter and

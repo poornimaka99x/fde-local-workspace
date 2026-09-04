@@ -189,6 +189,40 @@ describe('the session panel', () => {
     expect(await screen.findByText(/exited with code 0/)).toBeInTheDocument()
   })
 
+  it('starts a newly-created run once and removes the reload trigger', async () => {
+    const running = {
+      runId: '20260903-max-1-aaaa', status: 'running', pid: 4242,
+      startedAt: '2026-09-03T10:00:00+00:00', exitedAt: null, exitCode: null,
+      cwd: '/tmp/repo', command: [], envKeys: [], stopRequestedAt: null, attachedClients: 0,
+    }
+    stubFetch({ available: true, session: null }, () => ({
+      status: 'started', ticket: 'new-run-ticket', session: running,
+    }))
+    window.history.pushState(null, '', '/runs/20260903-max-1-aaaa?startSession=1')
+    render(<SessionPanel run={runFixture()} autoStart />)
+
+    await waitFor(() => expect(posted.filter((call) => call.url.includes('/session/resume'))).toHaveLength(1))
+    expect(FakeSocket.instances[0]?.url).toContain('ticket=new-run-ticket')
+    expect(window.location.search).toBe('')
+  })
+
+  it('can attach to a session that is already running', async () => {
+    const running = {
+      runId: '20260903-max-1-aaaa', status: 'running', pid: 7,
+      startedAt: '2026-09-03T10:00:00+00:00', exitedAt: null, exitCode: null,
+      cwd: '/tmp/repo', command: [], envKeys: [], stopRequestedAt: null, attachedClients: 0,
+    }
+    stubFetch({ available: true, session: running }, () => ({
+      status: 'existing', ticket: 'fresh-ticket', session: running,
+    }))
+    const user = userEvent.setup()
+    render(<SessionPanel run={runFixture()} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Attach' }))
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
+    expect(FakeSocket.instances[0]?.url).toContain('ticket=fresh-ticket')
+  })
+
   it('interrupts first, and only force-stops behind a confirmation', async () => {
     {
       const running = {

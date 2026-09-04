@@ -9,6 +9,7 @@ import { problem } from './problem'
 import { registerAuth } from './security/auth'
 import { registerSecurityHeaders } from './security/headers'
 import { registerHealthRoutes } from './routes/health'
+import { registerFsRoutes } from './routes/fs'
 import { registerProjectRoutes } from './routes/projects'
 import { registerRunRoutes } from './routes/runs'
 import { ControllerError } from './services/controller'
@@ -89,6 +90,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   registerSecurityHeaders(app, config)
   registerAuth(app, config, resolved)
   registerHealthRoutes(app, config, resolved)
+  registerFsRoutes(app, config)
   registerProjectRoutes(app, config, resolved)
   registerRunRoutes(app, config, resolved)
 
@@ -185,7 +187,13 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     }
     const statusCode = (error as { statusCode?: unknown }).statusCode
     const status = typeof statusCode === 'number' && statusCode >= 400 && statusCode < 600 ? statusCode : 500
-    // Deliberately no stack, no message from an unexpected exception.
+    // Deliberately no stack, no message in the response body. The operator
+    // running this console still needs to see what broke, so it goes to this
+    // process's own stderr rather than nowhere at all.
+    process.stderr.write(
+      `fde-gui: unexpected error on ${_request.method} ${_request.url}: ` +
+        `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    )
     return problem(reply, status, 'internal-error', 'The console hit an unexpected error.')
   })
 

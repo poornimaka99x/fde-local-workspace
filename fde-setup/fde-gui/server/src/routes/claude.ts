@@ -6,8 +6,8 @@ import type { GuiConfig } from '../config'
 import { problem } from '../problem'
 import { projectDetailSchema } from '../schemas/controller'
 import { block, describeZod, line } from '../schemas/input'
-import { ACCOUNT_ID_PATTERN, EFFORTS, MODEL_PATTERN, type Effort } from '../services/accounts'
-import { ChatBusy, CHAT_ID_PATTERN, ChatNotFound } from '../services/chats'
+import { ACCOUNT_ID_PATTERN, EFFORTS, MODEL_PATTERN, ProfileDirectoryError, type Effort } from '../services/accounts'
+import { ChatBusy, CHAT_ID_PATTERN, ChatNotFound, InvalidAttachment } from '../services/chats'
 import { PROJECT_ID_PATTERN, runControllerJson } from '../services/controller'
 import { NoSuchSession, SessionExists, sessionCwd } from '../services/sessions'
 import type { Services } from '../services/types'
@@ -24,6 +24,13 @@ const createChatBody = z.object({
 const messageBody = z.object({ message: block(20_000).transform((value) => value.trim()).pipe(z.string().min(1)) })
 const titleBody = z.object({ title: line(120).transform((value) => value.trim()).pipe(z.string().min(1)) })
 const stopBody = z.object({ force: z.boolean().default(false) }).default({ force: false })
+const attachmentBody = z.object({
+  path: line(4096).transform((value) => value.trim()).pipe(z.string().min(1, 'a path is required')),
+})
+const attachmentParams = z.object({
+  chatId: z.string().regex(CHAT_ID_PATTERN),
+  attachmentId: z.string().regex(/^[0-9a-fA-F-]{1,64}$/),
+})
 
 function attachTerminal(
   socket: WebSocket,
@@ -105,7 +112,22 @@ export function registerClaudeRoutes(
     if (services.sessions.isRunning(key)) {
       return { status: 'existing', session: services.sessions.get(key), ticket: services.sessions.issueTicket(key) }
     }
-    const spec = services.accounts.prepareLogin(account.id)
+    let spec: ReturnType<typeof services.accounts.prepareLogin>
+    try {
+      spec = services.accounts.prepareLogin(account.id)
+    } catch (error) {
+      if (error instanceof ProfileDirectoryError) {
+        process.stderr.write(`fde-gui: ${error.message}\n`)
+        return problem(
+          reply,
+          500,
+          'profile-directory-error',
+          'Could not prepare the Claude profile folder for this account.',
+          error.message,
+        )
+      }
+      throw error
+    }
     if (spec === null) return problem(reply, 409, 'login-unavailable', 'Login is not available for this account.')
     try {
       const session = services.sessions.startCommand({ sessionId: key, ...spec })
@@ -211,6 +233,39 @@ export function registerClaudeRoutes(
       throw error
     }
   })
+
+  app.post<{ Params: { chatId: string } }>('/api/chats/:chatId/attachments', async (request, reply) => {
+    const params = chatParams.safeParse(request.params)
+    const body = attachmentBody.safeParse(request.body)
+    if (!params.success || !body.success) {
+      return problem(reply, 400, 'invalid-body', 'A valid absolute path is required.')
+    }
+    try {
+      const chat = await services.chats.addAttachment(params.data.chatId, body.data.path)
+      services.watcher.touch()
+      return await reply.status(201).send({ chat })
+    } catch (error) {
+      if (error instanceof ChatNotFound) return problem(reply, 404, 'chat-not-found', 'No such chat.')
+      if (error instanceof InvalidAttachment) return problem(reply, 400, 'invalid-attachment', error.message)
+      throw error
+    }
+  })
+
+  app.delete<{ Params: { chatId: string; attachmentId: string } }>(
+    '/api/chats/:chatId/attachments/:attachmentId',
+    async (request, reply) => {
+      const parsed = attachmentParams.safeParse(request.params)
+      if (!parsed.success) return problem(reply, 400, 'invalid-params', 'That is not a valid attachment.')
+      try {
+        const chat = services.chats.removeAttachment(parsed.data.chatId, parsed.data.attachmentId)
+        services.watcher.touch()
+        return { chat }
+      } catch (error) {
+        if (error instanceof ChatNotFound) return problem(reply, 404, 'not-found', 'No such chat or attachment.')
+        throw error
+      }
+    },
+  )
 
   app.post<{ Params: { chatId: string } }>('/api/chats/:chatId/stop', async (request, reply) => {
     const params = chatParams.safeParse(request.params)

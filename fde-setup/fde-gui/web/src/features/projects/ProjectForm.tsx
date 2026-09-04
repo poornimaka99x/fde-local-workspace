@@ -4,6 +4,7 @@ import { announceChange } from '../../lib/changes'
 import { useApi } from '../../lib/useApi'
 import type { ProjectDetailResponse, ProjectRecord } from '../../lib/types'
 import { ErrorState, Loading } from '../../components/States'
+import { PathBrowser } from '../../components/PathBrowser'
 
 interface Saved {
   project: ProjectRecord
@@ -24,6 +25,7 @@ export function ProjectForm({ projectId }: { projectId?: string }): JSX.Element 
   const [repos, setRepos] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
+  const [browsing, setBrowsing] = useState(false)
 
   useEffect(() => {
     const project = existing.data?.project
@@ -108,7 +110,25 @@ export function ProjectForm({ projectId }: { projectId?: string }): JSX.Element 
               onChange={(event) => setRepos(event.target.value)}
             />
           </label>
+          <button className="action" type="button" style={{ marginTop: 6 }} onClick={() => setBrowsing(true)}>
+            Browse…
+          </button>
         </p>
+        {browsing ? (
+          <PathBrowser
+            title="Choose a repository folder"
+            mode="directory"
+            onSelect={(picked) => {
+              setRepos((current) => {
+                const lines = current.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+                if (!lines.includes(picked)) lines.push(picked)
+                return lines.join('\n')
+              })
+              setBrowsing(false)
+            }}
+            onClose={() => setBrowsing(false)}
+          />
+        ) : null}
         <div className="stack">
           <button className="action" type="submit" disabled={saving || name.trim() === ''}>
             {saving ? 'Saving…' : editing ? 'Save changes' : 'Create project'}

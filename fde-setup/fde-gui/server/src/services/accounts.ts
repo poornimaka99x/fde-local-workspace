@@ -10,6 +10,19 @@ export const EFFORTS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as cons
 export type Effort = (typeof EFFORTS)[number]
 export type AuthState = 'authenticated' | 'login_required' | 'external' | 'unavailable'
 
+/**
+ * The profile directory could not be created or verified before starting a
+ * login terminal. This is always surfaced to the caller rather than left to
+ * bubble into the generic 500 handler, which deliberately hides the real
+ * cause from the response body.
+ */
+export class ProfileDirectoryError extends Error {
+  constructor(readonly accountId: string, readonly directory: string, readonly sourceError: unknown) {
+    const reason = sourceError instanceof Error ? sourceError.message : String(sourceError)
+    super(`could not prepare profile directory for '${accountId}' at ${directory}: ${reason}`)
+  }
+}
+
 export interface ModelOption {
   id: string
   label: string
@@ -190,7 +203,12 @@ export class AccountService {
   prepareLogin(id: string): { file: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } | null {
     const account = this.getConfigured(id)
     if (account === null || account.provider === 'bedrock') return null
-    mkdirSync(this.profileDirectory(id), { recursive: true, mode: 0o700 })
+    const directory = this.profileDirectory(id)
+    try {
+      mkdirSync(directory, { recursive: true, mode: 0o700 })
+    } catch (error) {
+      throw new ProfileDirectoryError(id, directory, error)
+    }
     this.cache.delete(id)
     return {
       file: this.config.claudeBin,

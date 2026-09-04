@@ -144,6 +144,8 @@ describe('creating and editing through the controller', () => {
     })
     expect(JSON.stringify(sent[0]?.body)).not.toContain('role')
     expect(JSON.stringify(sent[0]?.body)).not.toContain('approve')
+    await waitFor(() => expect(window.location.pathname).toBe('/runs/20260903-max-1-aaaa'))
+    expect(window.location.search).toBe('?startSession=1')
   })
 
   it('is honest that a Codex-led run cannot be driven from here', async () => {
