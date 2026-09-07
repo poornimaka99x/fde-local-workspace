@@ -22,6 +22,9 @@ a CTO and the engineers who will maintain it.
 - When touching an unfamiliar repo, delegate the survey to `repo-cartographer`
   rather than reading the tree into the main context.
 - Do not commit or push unless asked.
+- Run tests and builds through `quiet <cmd>` (e.g. `quiet npm test`). It prints
+  failures and a summary instead of the whole log, and always names the full log
+  file if you need more. Never re-run a command just to see the output again.
 
 ## The other identities on this machine
 
@@ -66,7 +69,17 @@ code before repeating it.
 
 ## Shared context
 
-@~/.claude-shared/shared/engineering-standards.md
+Shared engineering standards are **normative** and live at
+`~/.claude-shared/shared/engineering-standards.md`. They are not imported here:
+630 lines of reference material in every session buys nothing in the stages that
+do not review code. Read the section you need, when you need it:
+
+- `standards list` — the index: which section covers what, and when to read it
+- `standards show 14` / `standards show 16.3` — one section or subsection
+- `standards find "timeout"` — which sections mention a term
+
+Cite section numbers (`§8`, `§16.3`) in findings so a reader can check you, and
+quote the MUST line rather than paraphrasing it when a finding blocks merge.
 
 Client engagements live in `~/.claude-shared/shared/clients/<slug>.md`. A repo's
 own CLAUDE.md imports the one that applies to it — do not load them all here.

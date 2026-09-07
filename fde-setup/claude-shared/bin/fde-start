@@ -144,16 +144,28 @@ run_claude() {
 
 state="$(read_json_field "$run_dir/manifest.json" state)"
 if [[ "$state" == "awaiting_plan" || "$state" == "awaiting_roles" ]]; then
+  if [[ -s "$run_dir/requirement.md" ]]; then
+    request_scope="The controller already has this run's request in requirement.md.
+Inspect fde status $run_id and use its recorded requirement as authoritative.
+Do not ask me to repeat or re-record the request. Ask only targeted clarification
+questions that are genuinely needed to propose the plan and roles."
+  else
+    request_scope="The controller does not yet have a recorded request. Ask for my
+request in my own words and record it verbatim before proposing the plan."
+  fi
   scope_prompt="/engage $run_id
-Hold an interactive scoping conversation. Ask for my request, propose the
-smallest suitable plan and the specialist agents/roles it needs, let me choose
-the identities, then show one combined plan-and-role summary. Do not record the
-plan or roles as approved until I type APPROVE PLAN $run_id exactly. Read no
-connected system or repository during scoping. After approval, tell me to type
-/exit so fde-start can resume this same conversation with run-scoped access."
+Hold an interactive scoping conversation. $request_scope
+Propose the smallest suitable plan and the specialist agents/roles it needs,
+let me choose the identities, then show one combined plan-and-role summary. Do
+not record the plan or roles as approved until I type APPROVE PLAN $run_id
+exactly. Read no connected system or repository during scoping. After approval,
+tell me to type /exit so fde-start can resume this same conversation with
+run-scoped access."
   scope_system="This is the scoping process for FDE run $run_id. Accounts have
 capabilities, not fixed roles. Ask whenever intent, scope, target, authority or
-acceptance criteria are ambiguous. Do not access connected systems or source
+acceptance criteria are ambiguous. The controller's status is authoritative for
+whether this run already has a request; never claim it is missing when status
+reports requirement.hasFile=true. Do not access connected systems or source
 repositories before combined plan approval."
   if (( have_session )); then
     run_claude --resume "$session_id" --name "FDE $run_id" \

@@ -16,8 +16,11 @@ checkpoints and approvals.
 - For a requirement, Jira key or no argument, start a run and read
   [scoping-and-roles.md](references/scoping-and-roles.md). Scoping itself reads
   no connected systems or repository.
-- For an existing run ID, call `fde status <run-id>`. If roles are not confirmed,
-  read the scoping reference. Otherwise read
+- For an existing run ID, call `fde status <run-id> --json`. Its persisted state
+  is authoritative. When `requirement.hasFile` is true, use the recorded request
+  and do not ask the user to repeat or re-record it. Ask for the request only
+  when status reports it missing. If roles are not confirmed, read the scoping
+  reference. Otherwise read
   [lifecycle-stages.md](references/lifecycle-stages.md) and continue only the
   planned stage.
 
@@ -43,6 +46,9 @@ fde resume <run-id> --next
   adds work.
 - Read nothing connected—not Jira, documents, Figma, client context or source
   repositories—until the user confirms roles for this run.
+- Never describe an existing run as having no request when controller status
+  reports `requirement.hasFile=true`; its summary and `requirement.md` are the
+  durable user input for scoping.
 - Accounts have capabilities, not defaults. Ask again every run; copy prior
   roles only when the user explicitly requests it.
 - Keep the proposed stages and assignments in the conversation until the user

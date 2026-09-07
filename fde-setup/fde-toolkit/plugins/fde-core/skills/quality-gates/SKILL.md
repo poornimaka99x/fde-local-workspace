@@ -7,8 +7,10 @@ allowed-tools: Read, Grep, Glob, Bash, Task
 
 # Quality gates
 
-Read the complete shared `engineering-standards.md`; its RFC 2119 MUST/MUST NOT
-rules are merge blockers and SHOULD deviations require written PR rationale.
+The shared `engineering-standards.md` is normative: RFC 2119 MUST/MUST NOT rules
+are merge blockers and SHOULD deviations require written PR rationale. Do not read
+the whole document — `standards list` maps sections to purpose; pull the ones this
+gate run actually tests (typically `standards show 17`, then 14, 10, 19 and 20).
 Read repository overrides and tool configuration, then establish which checks
 are executable. Delegate semantic review to `standards-reviewer`, security to
 `security-reviewer`, and test evidence to `test-engineer`. Run, where applicable:

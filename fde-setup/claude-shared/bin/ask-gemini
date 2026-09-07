@@ -7,10 +7,38 @@
 set -uo pipefail
 command -v gemini >/dev/null || { echo "gemini CLI not installed: npm i -g @google/gemini-cli" >&2; exit 127; }
 model="${GEMINI_MODEL:-flash}"
+
+# The standing brief goes FIRST and byte-identical on every call: both Gemini and
+# Codex do automatic prefix caching, and a prefix that shifts by one byte is a
+# full cache miss. The variable question goes LAST, after the separator, for the
+# same reason. Set FDE_NO_PREAMBLE=1 to send the bare question.
+compose_prompt() {  # compose_prompt <question>
+  local pre="${FDE_SIDECAR_PREAMBLE:-${CLAUDE_SHARED:-$HOME/.claude-shared}/prompts/sidecar-preamble.md}"
+  if [[ "${FDE_NO_PREAMBLE:-}" == "1" || ! -r "$pre" ]]; then
+    printf '%s' "$1"; return 0
+  fi
+  printf '%s' "$(cat "$pre")"
+  # FDE_SIDECAR_CONTEXT: colon-separated files of reference material that is the
+  # same for every call of this kind — a standards section, an ADR, an API spec.
+  # It sits in the cacheable position, so both providers' minimum cacheable
+  # prefix (~1k tokens; the brief alone is under it) is reached on a review or
+  # implementation call, and every later call in the run reads from cache.
+  #   FDE_SIDECAR_CONTEXT="$(standards path)" ask-codex --read-only "..."
+  local IFS=:
+  local f
+  for f in ${FDE_SIDECAR_CONTEXT:-}; do
+    [[ -r "$f" ]] || continue
+    printf '\n\n# Reference: %s\n\n%s' "$(basename "$f")" "$(cat "$f")"
+  done
+  printf '\n\n# Question\n\n%s' "$1"
+}
+
+prompt="$(compose_prompt "$*")"
+
 if [[ -p /dev/stdin ]]; then
-  gemini -p "$*" -m "$model" --approval-mode=default
+  gemini -p "$prompt" -m "$model" --approval-mode=default
 else
-  gemini -p "$*" -m "$model" --approval-mode=default </dev/null
+  gemini -p "$prompt" -m "$model" --approval-mode=default </dev/null
 fi
 rc=$?
 # 0 ok | 1 API error | 42 bad input | 53 turn limit

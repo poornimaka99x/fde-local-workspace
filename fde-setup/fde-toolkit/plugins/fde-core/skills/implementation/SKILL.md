@@ -9,8 +9,10 @@ allowed-tools: Read, Grep, Glob, Bash, Task, Write, Edit
 
 Require confirmed roles and an approved design/plan or explicitly recorded
 reason why one is unnecessary. Delegate to `implementation-engineer`. Read the
-repo's `AGENTS.md`/`CLAUDE.md` and the complete shared
-`engineering-standards.md`. Classify the work as greenfield or brownfield:
+repo's `AGENTS.md`/`CLAUDE.md`, then the standards sections this slice touches
+(`standards list` to choose, `standards show <n>` to read — §3 or §4 for
+architecture, §6 for complexity, §14 for tests). Classify the work as greenfield
+or brownfield:
 greenfield follows the prescribed architecture; brownfield preserves existing
 structure, adds characterization tests and separates refactor from behaviour.
 Search the repository and its dependency graph before creating a new utility or

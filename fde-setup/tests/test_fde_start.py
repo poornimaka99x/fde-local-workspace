@@ -102,6 +102,7 @@ class FdeStartTest(unittest.TestCase):
         self.assertGreaterEqual(log.count("ARG=opus"), 2)
         self.assertGreaterEqual(log.count("ARG=--effort"), 2)
         self.assertGreaterEqual(log.count("ARG=xhigh"), 2)
+        self.assertIn("controller does not yet have a recorded request", log)
         runs = list((self.shared / "runs").iterdir())
         self.assertEqual(len(runs), 1)
         manifest = json.loads((runs[0] / "manifest.json").read_text())
@@ -110,6 +111,44 @@ class FdeStartTest(unittest.TestCase):
         self.assertEqual(manifest["sessionConfig"], {"model": "opus", "effort": "xhigh"})
         self.assertIn("executionApprovedAt", plan)
         self.assertTrue((runs[0] / "mcp/claude-work.mcp.json").is_file())
+
+    def test_resume_uses_an_existing_recorded_request_without_asking_again(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+        })
+        created = subprocess.run(
+            [str(FDE), "start", "design a prototype from the supplied context",
+             "--orchestrator", "work", "--model", "opus", "--effort", "high",
+             "--json"],
+            text=True, capture_output=True, env=env,
+        )
+        self.assertEqual(
+            created.returncode, 0,
+            msg=f"stdout:\n{created.stdout}\nstderr:\n{created.stderr}",
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        log = self.log.read_text()
+        self.assertIn("controller already has this run's request", log)
+        self.assertIn("Do not ask me to repeat or re-record the request", log)
+        self.assertNotIn("Hold an interactive scoping conversation. Ask for my request", log)
 
 
 if __name__ == "__main__":

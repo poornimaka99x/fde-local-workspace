@@ -12,7 +12,12 @@ as a list of commands for them to execute.
 2. Ask who orchestrates. Candidates are the three Claude profiles, Claude Code
    on Bedrock and ChatGPT/Codex. Do not choose because the current session uses
    that identity.
-3. Ask for the request in chat and record it verbatim with `fde request`.
+3. Inspect the controller status before asking for the request. If
+   `requirement.hasFile` is true, use its recorded summary and
+   `requirement.md` as authoritative user input; do not ask the user to repeat
+   it and do not overwrite it with `fde request`. Ask only focused clarification
+   questions needed for the plan. If `requirement.hasFile` is false, ask for the
+   request in chat and record it verbatim with `fde request`.
 4. Propose the smallest stage slice that produces the requested outcome. Use
    `fde plan --preview` if useful; previewing must not write plan state.
 5. Show one table containing each required role, why it is needed, the focused

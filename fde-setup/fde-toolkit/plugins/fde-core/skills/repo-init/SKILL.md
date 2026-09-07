@@ -25,9 +25,10 @@ yourself. Ask it for:
 
 ## 2. Verify the commands
 
-Before writing a command into CLAUDE.md, run it. A build command that does not
-work is worse than no command, because Claude will keep retrying it. Mark
-anything you could not verify as `# unverified`.
+Before writing a command into AGENTS.md, run it — bare, not through `quiet`, so
+you see the real output once. A build command that does not work is worse than no
+command, because Claude will keep retrying it. Mark anything you could not verify
+as `# unverified`.
 
 ## 3. Write the files
 
@@ -56,24 +57,43 @@ Claude Code…" phrasing.
 this section rather than padding it>
 ```
 
-`CLAUDE.md` — a stub, and nothing else. Claude Code does not read AGENTS.md:
+`CLAUDE.md` — a stub plus the agent-only command forms. Claude Code does not
+read AGENTS.md, and `quiet` is a local wrapper the client's team will not have,
+so it belongs here rather than in AGENTS.md:
 
 ```markdown
 @AGENTS.md
 @~/.claude-shared/CLAUDE.md
 @~/.claude-shared/shared/clients/<client-slug>.md
+
+Run the AGENTS.md commands through `quiet`: `quiet <test cmd>`,
+`quiet <build cmd>`. It prints failures and a summary instead of the whole log
+and names the full log file.
 ```
 
-`.claude/settings.json` — permissions for this repo's real commands only:
+`.claude/settings.json` — permissions for this repo's real commands, and denies
+for the files an agent should never spend context on:
 
 ```json
 {
   "permissions": {
-    "allow": ["Bash(<test cmd>:*)", "Bash(<lint cmd>:*)"],
-    "deny": ["Read(./.env)", "Read(./.env.*)", "Read(./**/secrets/**)"]
+    "allow": ["Bash(quiet:*)", "Bash(<test cmd>:*)", "Bash(<lint cmd>:*)"],
+    "deny": [
+      "Read(./.env)", "Read(./.env.*)", "Read(./**/secrets/**)",
+      "Read(./**/node_modules/**)", "Read(./**/dist/**)",
+      "Read(./**/build/**)", "Read(./**/.next/**)",
+      "Read(./**/*-lock.json)", "Read(./**/*.lock)",
+      "Read(./**/__pycache__/**)", "Read(./**/*.min.js)",
+      "Read(./**/*.map)"
+    ]
   }
 }
 ```
+
+Tune the deny list to the repo — a repo whose only build output is `out/` needs
+that instead of `dist/`. The point is that a generated bundle or a lockfile is
+never worth the tokens: it is derived, and the manifest beside it says the same
+thing in a hundredth of the size.
 
 `.mcp.json` — only servers specific to this repo (a local database, a client's
 own MCP endpoint). Shared servers come from the toolkit; do not repeat them. If

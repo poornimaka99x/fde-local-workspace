@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Print one section of the shared engineering standards instead of the whole
+# 630-line document. The document is normative reference material; loading it
+# eagerly cost ~11k tokens in every session for rules that matter in three
+# stages out of the pipeline.
+#
+#   standards list            # the index
+#   standards show 14         # section 14 up to section 15
+#   standards show 16.3       # subsection 16.3 up to the next heading
+#   standards find timeout    # sections whose text mentions a term
+#
+# Section matching is by heading text, not line number, so a local amendment to
+# the standards does not silently shift what this prints.
+set -uo pipefail
+
+shared="${CLAUDE_SHARED:-$HOME/.claude-shared}"
+doc="${FDE_STANDARDS:-$shared/shared/engineering-standards.md}"
+index="$shared/shared/standards-index.md"
+
+die() { printf 'standards: %s\n' "$*" >&2; exit 1; }
+[[ -f "$doc" ]] || die "no standards document at $doc"
+
+usage() { sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+cmd="${1:-list}"; shift || true
+
+case "$cmd" in
+  list|index)
+    if [[ -f "$index" ]]; then cat "$index"; else grep -nE '^#{2,3} ' "$doc"; fi
+    ;;
+
+  show|section)
+    sec="${1:-}"; [[ -n "$sec" ]] || die "which section? try: standards list"
+    # A heading is '## 14. Testing standards' or '### 16.3 Reviewer checklist'.
+    # The section ends at the next heading of the same or shallower depth.
+    awk -v want="$sec" '
+      function esc(s) { gsub(/\./, "\\.", s); return s }
+      BEGIN { pat = "^(#+)[ \t]+" esc(want) "[.)]?([ \t]|$)"; depth = 0 }
+      {
+        if (match($0, /^#+/)) { d = RLENGTH } else { d = 0 }
+        if (!depth && $0 ~ pat) { depth = d; print; next }
+        if (depth) {
+          if (d && d <= depth) { exit }
+          print
+        }
+      }
+      END { if (!depth) exit 3 }
+    ' "$doc" || die "no section '$sec' in $(basename "$doc") — try: standards list"
+    ;;
+
+  find|grep)
+    term="${1:-}"; [[ -n "$term" ]] || die "find what?"
+    # Report the owning heading for each hit, once, rather than raw line matches.
+    awk -v term="$term" '
+      BEGIN { IGNORECASE = 1; h = "(front matter)" }
+      /^#+[ \t]/ { h = $0; sub(/^#+[ \t]+/, "", h) }
+      index(tolower($0), tolower(term)) && $0 !~ /^#+[ \t]/ {
+        if (h != last) { print h; last = h }
+      }
+    ' "$doc"
+    ;;
+
+  path)    printf '%s\n' "$doc" ;;
+  -h|--help|help) usage ;;
+  *)       die "unknown command '$cmd' — try: standards list" ;;
+esac

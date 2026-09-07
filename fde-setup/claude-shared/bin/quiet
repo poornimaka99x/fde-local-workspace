@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# quiet — run a command and put only the useful part of its output in context.
+#
+#   quiet npm test
+#   quiet pytest -q
+#   quiet dotnet build
+#   quiet -- npx vitest run --reporter=dot
+#
+# Why: a passing test suite's output is a few thousand tokens that say "nothing
+# is wrong", and a failing one buries the three lines that matter under the
+# hundred that do not. This prints failures plus a summary, and ALWAYS names the
+# full log, so filtering is recoverable rather than lossy. Read the log when the
+# filtered view is not enough; do not re-run the command to see it again.
+#
+# Environment:
+#   QUIET_MAX_LINES=60   cap on printed failure lines
+#   QUIET_TAIL=15        trailing lines of the log to show on failure
+#   QUIET_LOG_DIR        where logs go (default ${TMPDIR}/quiet-logs)
+#   QUIET_KEEP=1         print everything (escape hatch, same log path)
+set -uo pipefail
+
+[[ $# -gt 0 ]] || { echo "usage: quiet [--] <command> [args...]" >&2; exit 64; }
+[[ "${1:-}" == "--" ]] && shift
+[[ $# -gt 0 ]] || { echo "quiet: nothing to run" >&2; exit 64; }
+
+max_lines="${QUIET_MAX_LINES:-60}"
+tail_lines="${QUIET_TAIL:-15}"
+log_dir="${QUIET_LOG_DIR:-${TMPDIR:-/tmp}/quiet-logs}"
+mkdir -p "$log_dir" 2>/dev/null || log_dir="${TMPDIR:-/tmp}"
+
+slug="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+log="$log_dir/${slug}-$(date +%Y%m%d-%H%M%S)-$$.log"
+
+started=$SECONDS
+"$@" >"$log" 2>&1
+rc=$?
+elapsed=$(( SECONDS - started ))
+total=$(wc -l <"$log" | tr -d ' ')
+
+# The echoed command is a label, not a reproduction. A long inline script would
+# otherwise cost more context than the output being filtered.
+cmd="$*"
+(( ${#cmd} > 120 )) && cmd="${cmd:0:117}..."
+
+if [[ "${QUIET_KEEP:-}" == "1" ]]; then
+  cat "$log"
+  printf '\nquiet: %s exit=%d %ds %s lines log: %s\n' "$cmd" "$rc" "$elapsed" "$total" "$log"
+  exit $rc
+fi
+
+# A summary line is the one line a human would read first. Runner-agnostic on
+# purpose: matching the words rather than a specific reporter's format means a
+# new test runner does not need a new branch here.
+summary_re='([0-9]+ (passed|failed|skipped|pending|error))|(Tests?:.*[0-9])|(Test Run (Successful|Failed))|(Build (succeeded|FAILED))|([0-9]+ (passing|failing))|(=+ .*(passed|failed).* =+)|(Ran [0-9]+ tests?)|(OK \([0-9]+ tests?\))|(Coverage: )'
+
+if (( rc == 0 )); then
+  printf 'quiet: OK  %s  (exit 0, %ds, %s lines suppressed)\n' "$cmd" "$elapsed" "$total"
+  grep -Eih "$summary_re" "$log" | tail -3 | sed 's/^/  /'
+  printf '  log: %s\n' "$log"
+  exit 0
+fi
+
+# Failure. Lines that carry a fault, with a little following context, deduped
+# and capped. Compiler codes are included because a build failure's first useful
+# line is usually the code, not the word "error".
+fail_re='(FAIL|FAILED|FAILURE|Failing tests|error:|Error:|ERROR|Exception|Traceback \(most recent call last\)|AssertionError|assert |panic:|Segmentation fault|npm ERR!|error [A-Z]+[0-9]{2,}|warning [A-Z]+[0-9]{2,}|MSB[0-9]+|SyntaxError|TypeError|ReferenceError|Cannot find|Module not found|No such file|Expected|Received|not ok |✕|✗|×|✘|[0-9]+\) )'
+
+printf 'quiet: FAILED  %s  (exit %d, %ds, %s lines)\n' "$cmd" "$rc" "$elapsed" "$total"
+grep -Eh "$summary_re" -i "$log" | tail -2 | sed 's/^/  /'
+
+hits="$(grep -nEh -A3 "$fail_re" "$log" 2>/dev/null | head -"$max_lines")"
+if [[ -n "$hits" ]]; then
+  printf '\n-- faults (line numbers are into the log; capped at %s) --\n' "$max_lines"
+  printf '%s\n' "$hits"
+  # The faults are already shown; the tail is only here in case the real cause
+  # is the last thing the runner said. A short one is enough.
+  show_tail=$(( tail_lines / 2 )); (( show_tail < 5 )) && show_tail=5
+else
+  printf '\n-- no recognisable fault lines; showing more of the tail --\n'
+  show_tail=$(( tail_lines * 2 ))
+fi
+
+(( show_tail > total )) && show_tail=$total
+printf '\n-- last %s lines --\n' "$show_tail"
+tail -"$show_tail" "$log"
+printf '\nlog: %s   (read it rather than re-running)\n' "$log"
+exit $rc

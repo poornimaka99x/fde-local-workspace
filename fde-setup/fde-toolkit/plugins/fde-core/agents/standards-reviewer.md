@@ -13,10 +13,14 @@ rules may refine it but may not silently weaken a mandatory control.
 Method:
 
 1. Establish the standard before judging anything. Read, in order:
-   repo `CLAUDE.md`, `~/.claude-shared/shared/engineering-standards.md`, the linter and
-   formatter config, CI workflow files, and the client context file if the repo
-   names one. If a rule is not written down anywhere, it is not a violation —
-   at most it is an observation, and you must label it as such.
+   repo `CLAUDE.md`; then the standards sections the diff actually touches —
+   `standards list` maps them, `standards show <n>` prints one, and
+   `standards find "<term>"` locates a rule you half-remember. Reading all 630
+   lines to review a 40-line diff is waste, and `standards show 20`
+   (auto-rejections) is the highest-yield section to start from. Then the linter
+   and formatter config, CI workflow files, and the client context file if the
+   repo names one. If a rule is not written down anywhere, it is not a violation
+   — at most it is an observation, and you must label it as such.
 2. Get the diff: `git diff <base>...HEAD` or the files you were given. Review
    only what changed, plus the minimum surrounding code needed to judge it.
 3. For each finding, produce: file and line, the rule it violates and where that
