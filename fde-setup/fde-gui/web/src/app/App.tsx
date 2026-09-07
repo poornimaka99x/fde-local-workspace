@@ -4,6 +4,7 @@ import { captureToken } from '../lib/token'
 import { useApi } from '../lib/useApi'
 import type { HealthResponse } from '../lib/types'
 import { startChangePolling } from '../lib/changes'
+import { AppSidebar } from '../components/AppSidebar'
 import { RunsView } from '../features/runs/RunsView'
 import { NewRunForm } from '../features/runs/NewRunForm'
 import { ProjectForm } from '../features/projects/ProjectForm'
@@ -76,33 +77,11 @@ export function App(): JSX.Element {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <nav className="sidebar" aria-label="Sections">
-        <div className="brand">
-          FDE Control Center
-          <small>local agent workspace</small>
-        </div>
-        <div className="nav">
-          <Link to="/projects" current={section === 'projects'}>
-            Projects
-          </Link>
-          <Link to="/runs" current={section === 'runs'}>
-            All runs
-          </Link>
-          <Link to="/chats" current={section === 'chats'}>
-            Chats
-          </Link>
-          <Link to="/sessions" current={section === 'sessions'}>
-            Active sessions
-          </Link>
-          <Link to="/health" current={section === 'health'}>
-            System health
-          </Link>
-        </div>
-      </nav>
+      <AppSidebar path={path} />
 
       <div>
         <header className="topbar">
-          <span className="root">
+          <span className="root" title="The runs directory this console reads">
             {health.data ? health.data.roots.runs : 'connecting…'}
           </span>
           <form
@@ -118,8 +97,8 @@ export function App(): JSX.Element {
             }}
           >
             <label>
-              <span className="muted">Find a run </span>
-              <input type="search" name="q" placeholder="run id, requirement or Jira key" />
+              <span className="visually-hidden">Find a run</span>
+              <input type="search" name="q" placeholder="Search runs…" />
             </label>
             <button className="action" type="submit">
               Search

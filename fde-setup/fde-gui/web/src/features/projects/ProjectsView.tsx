@@ -14,7 +14,7 @@ export function ProjectsView(): JSX.Element {
           <h1>Projects</h1>
           <p className="lede">Projects group runs. They hold no workflow state of their own.</p>
         </div>
-        <Link className="action" to="/projects/new">
+        <Link className="action primary" to="/projects/new">
           New project
         </Link>
       </div>

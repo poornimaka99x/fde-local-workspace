@@ -336,7 +336,9 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
               ) : null}
               <div className="stack">
                 <button
-                  className="action"
+                  // Primary only while it is actually the thing to do: a
+                  // disabled primary button still shouts.
+                  className={canStart ? 'action primary' : 'action'}
                   type="button"
                   disabled={!canStart || busy !== null}
                   onClick={() => void act(`${base}/start`, `Start ${participant.label}`)}
@@ -407,7 +409,7 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
         ) : null}
         <div className="stack">
           <button
-            className="action"
+            className="action primary"
             type="button"
             disabled={!canReconcile || busy !== null || reconciliationState === 'running'}
             onClick={() => void act(

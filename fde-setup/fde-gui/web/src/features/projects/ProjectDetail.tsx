@@ -30,7 +30,7 @@ export function ProjectDetail({ projectId }: { projectId: string }): JSX.Element
             New run
           </Link>
           <Link
-            className="action"
+            className="action primary"
             to={`/design-panel/new?projectId=${encodeURIComponent(project.projectId)}`}
           >
             Start design panel

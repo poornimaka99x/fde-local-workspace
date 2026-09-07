@@ -130,7 +130,7 @@ export function ProjectForm({ projectId }: { projectId?: string }): JSX.Element 
           />
         ) : null}
         <div className="stack">
-          <button className="action" type="submit" disabled={saving || name.trim() === ''}>
+          <button className="action primary" type="submit" disabled={saving || name.trim() === ''}>
             {saving ? 'Saving…' : editing ? 'Save changes' : 'Create project'}
           </button>
           <a className="action" href={editing ? `/projects/${projectId}` : '/projects'}>

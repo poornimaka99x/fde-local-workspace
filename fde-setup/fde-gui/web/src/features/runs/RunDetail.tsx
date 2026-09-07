@@ -61,7 +61,7 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
                 {(run.designPanel.state ?? 'unknown').replace(/_/g, ' ')}
               </span>
             </span>
-            <Link className="action" to={`/runs/${run.runId}/design-panel`}>
+            <Link className="action primary" to={`/runs/${run.runId}/design-panel`}>
               Open the design panel
             </Link>
           </div>

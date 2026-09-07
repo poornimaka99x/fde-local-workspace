@@ -118,7 +118,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
           </label>
         </p>
         <div className="stack">
-          <button className="action" type="submit" disabled={saving || requirement.trim() === ''}>
+          <button className="action primary" type="submit" disabled={saving || requirement.trim() === ''}>
             {saving ? 'Creating…' : 'Create run'}
           </button>
           <a className="action" href="/runs">

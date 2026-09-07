@@ -30,3 +30,21 @@ export function stateTone(state: string | null | undefined): 'ok' | 'warn' | 'da
   if (state.startsWith('awaiting_')) return 'warn'
   return ''
 }
+
+/** A short "when", for a list that has no room for a full timestamp. */
+export function formatSince(value: string | null | undefined): string {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const seconds = Math.max(0, Math.round((Date.now() - parsed.getTime()) / 1000))
+  if (seconds < 60) return 'now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `${days}d`
+  const weeks = Math.round(days / 7)
+  if (weeks < 5) return `${weeks}w`
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}

@@ -143,7 +143,7 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
         <label htmlFor="chat-message"><strong>Message</strong></label>
         <textarea id="chat-message" rows={4} maxLength={20000} value={message} onChange={(event) => setMessage(event.target.value)} disabled={sending} />
         <div className="stack">
-          <button className="action" type="submit" disabled={sending || message.trim() === ''}>{sending ? 'Sending…' : 'Send'}</button>
+          <button className="action primary" type="submit" disabled={sending || message.trim() === ''}>{sending ? 'Sending…' : 'Send'}</button>
           {(sending || chat.status === 'running') ? <button className="action" type="button" onClick={() => void stop()}>Stop</button> : null}
         </div>
       </form>

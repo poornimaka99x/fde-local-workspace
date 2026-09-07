@@ -303,7 +303,7 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
             />
           </fieldset>
           <div className="stack">
-            <button className="action" type="submit" disabled={busy || project === '' || brief.trim() === ''}>
+            <button className="action primary" type="submit" disabled={busy || project === '' || brief.trim() === ''}>
               {busy ? 'Creating…' : 'Create the run'}
             </button>
             <a className="action" href={project === '' ? '/projects' : `/projects/${project}`}>Cancel</a>
@@ -686,7 +686,7 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
           </fieldset>
 
           <div className="stack">
-            <button className="action" type="submit" disabled={!canSubmit}>
+            <button className="action primary" type="submit" disabled={!canSubmit}>
               {busy ? 'Sealing…' : 'Seal context and create the panel'}
             </button>
             <a className="action" href={`/runs/${runId}`}>Open the run instead</a>

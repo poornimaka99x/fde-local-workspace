@@ -98,6 +98,8 @@ server/src/
   services/design-panel.ts  bounded, isolated participant execution
   routes/             health, projects, runs, files, sessions, Claude, chats, design panels
 web/src/              React UI: projects, runs, chats, design panels, sessions and health
+  components/AppSidebar.tsx  the rail: new run, recents, projects, sections
+  components/FileBrowser.tsx a run's files as a keyboard-operable tree and preview
 tests/                server tests (stub controller) and component tests
 ```
 
@@ -121,6 +123,19 @@ The rules it is built to:
   response is refused as an unexpected shape. Only documented controller exit
   codes have their stderr forwarded; an undocumented failure never sends its
   text — or a traceback — to the browser.
+- **The rail is a read, and creation lives in one place.** It merges recent
+  runs and chats, lists projects, and marks the page you are on. Everything in
+  it is a link; it starts nothing and approves nothing. On a narrow screen it
+  collapses behind one native disclosure so the page still begins on the first
+  screen.
+- **Files are a tree, and a refusal looks like one.** Folders expand, arrow keys
+  walk the rows, and a symlink or an empty folder is labelled rather than
+  rendered as a dead control. The server still refuses to follow a symlink; the
+  tree only says so before you click.
+- **One design, two palettes.** Light and dark are the same semantic tokens with
+  different values, following `prefers-color-scheme`. Interactive fills use a
+  darkened accent so text on them clears 4.5:1, and no state is carried by
+  colour alone.
 - **Nothing active is rendered.** Text, Markdown, JSON, PNG/JPEG/WebP/GIF and PDF
   preview; everything else downloads as `application/octet-stream`. Markdown is
   rendered by building React elements — the app contains no `innerHTML` anywhere.

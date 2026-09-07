@@ -76,6 +76,13 @@ export function Markdown({ source }: { source: string }): JSX.Element {
       else blocks.push(<h3 key={key}>{renderInline(text, key)}</h3>)
       return
     }
+    // A thematic break. Every artifact this console renders puts its metadata
+    // above one, so leaving it as literal dashes reads like a mistake.
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushList(`${key}-l`)
+      blocks.push(<hr key={key} />)
+      return
+    }
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line)
     if (bullet) {
       list.push(bullet[1] ?? '')

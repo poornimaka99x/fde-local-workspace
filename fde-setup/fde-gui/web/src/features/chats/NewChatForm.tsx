@@ -69,7 +69,7 @@ export function NewChatForm(): JSX.Element {
           Claude chats have tools disabled. Codex chats ignore personal tools and configuration and run read-only without approvals. Select a project only to set the conversation’s working directory.
         </p>
         <div className="stack">
-          <button className="action" type="submit" disabled={saving || accountId === ''}>{saving ? 'Creating…' : 'Create chat'}</button>
+          <button className="action primary" type="submit" disabled={saving || accountId === ''}>{saving ? 'Creating…' : 'Create chat'}</button>
           <a className="action" href="/chats">Cancel</a>
         </div>
       </form>
