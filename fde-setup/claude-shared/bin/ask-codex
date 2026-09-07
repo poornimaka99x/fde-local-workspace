@@ -18,6 +18,10 @@
 # is non-interactive by default; never pass an auto-approval or sandbox-bypass
 # option here.
 #
+# Optional --model and --effort come from the controller's approved route. They
+# are validated and passed as separate arguments; there is no shell
+# interpolation, and a value cannot smuggle an option through them.
+#
 # There is no bypass flag here and there must never be one.
 set -uo pipefail
 
@@ -53,7 +57,7 @@ command -v codex >/dev/null || die "codex CLI not installed: npm i -g @openai/co
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FDE="$here/fde"; [[ -x "$FDE" ]] || FDE="$(command -v fde || true)"
 
-mode=""; run=""; stage=""; task_file=""; prompt=""
+mode=""; run=""; stage=""; task_file=""; prompt=""; model=""; effort=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,16 +66,39 @@ while [[ $# -gt 0 ]]; do
     --run)       run="${2:-}"; shift 2 ;;
     --stage)     stage="${2:-}"; shift 2 ;;
     --task-file) task_file="${2:-}"; shift 2 ;;
+    --model)     model="${2:-}"; shift 2 ;;
+    --effort)    effort="${2:-}"; shift 2 ;;
     --yolo|--dangerously-bypass-approvals-and-sandbox|--sandbox) # fde-safety-exempt: refusal, not an invocation
       die "refusing: '$1' is not available through this toolkit. Sandbox and approval
             policy are decided here, not by the caller." ;;
-    -h|--help)   sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --)          shift; prompt="$prompt $*"; break ;;
     *)           prompt="$prompt $1"; shift ;;
   esac
 done
 prompt="${prompt# }"
 [[ -z "$mode" ]] && mode="read"   # bare `ask-codex "..."` stays read-only
+
+# Model and reasoning effort come from the controller's approved route, or not at
+# all. They are validated here and appended as separate argv elements: nothing is
+# interpolated into a shell string, so a value cannot carry an option or a
+# command with it. An empty value leaves the CLI's own default alone.
+model_options=()
+if [[ -n "$model" && "$model" != "default" ]]; then
+  [[ "$model" =~ ^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$ ]] || die "unusable --model value"
+  model_options+=(--model "$model")
+fi
+if [[ -n "$effort" && "$effort" != "auto" ]]; then
+  case "$effort" in
+    minimal|low|medium|high|xhigh|max) ;;
+    *) die "unusable --effort value: $effort" ;;
+  esac
+  # A config override rather than a flag: Codex exposes reasoning effort as
+  # model_reasoning_effort, and which values a given build accepts is the CLI's
+  # business. If it refuses one, that refusal is the honest answer and is not
+  # swallowed here.
+  model_options+=(-c "model_reasoning_effort=$effort")
+fi
 
 # ---------------------------------------------------------------- read-only --
 if [[ "$mode" == "read" ]]; then
@@ -83,6 +110,7 @@ if [[ "$mode" == "read" ]]; then
   exec codex exec \
     --sandbox read-only \
     --skip-git-repo-check \
+    ${model_options[@]+"${model_options[@]}"} \
     "$(compose_prompt "$prompt")"
 fi
 
@@ -130,4 +158,5 @@ cd "$writable" || die "cannot enter $writable"
 exec codex exec \
   --sandbox workspace-write \
   --skip-git-repo-check \
+  ${model_options[@]+"${model_options[@]}"} \
   "$(cat "$task_file")"

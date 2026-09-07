@@ -76,6 +76,8 @@ class Sandbox:
             shutil.copy2(SRC_SHARED / "bin" / name, dst)
             dst.chmod(0o755)
         shutil.copy2(SRC_SHARED / "config/agents.json", self.shared / "config/agents.json")
+        shutil.copy2(SRC_SHARED / "config/routing-policy.json",
+                     self.shared / "config/routing-policy.json")
         shutil.copy2(SRC_SHARED / "mcp/mcp-servers.json", self.shared / "mcp/mcp-servers.json")
         shutil.copytree(
             REPO / "fde-toolkit" / "plugins" / "fde-core",

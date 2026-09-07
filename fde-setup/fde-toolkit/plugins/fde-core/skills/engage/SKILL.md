@@ -33,6 +33,9 @@ fde request <run-id> "<user's words>"
 fde plan <run-id> --preview --stages <stages>
 fde plan <run-id> --require-approval --stages <stages>
 fde roles <run-id> --set <role>=<identity>
+fde routing show <run-id> --json
+fde routing explain <run-id> [--task-id <task-id>] --json
+fde routing override <run-id> --task-id <task-id> --reason "<why>"
 fde approve-plan <run-id>
 fde status <run-id>
 fde checkpoint <run-id> --stage <stage> --status <status> --evidence <item>
@@ -54,6 +57,23 @@ fde resume <run-id> --next
 - Keep the proposed stages and assignments in the conversation until the user
   has seen one combined summary. Require the literal `APPROVE PLAN <run-id>`
   before recording them as executable; never infer it from general agreement.
+- On an automatically routed run (`fde status --json` reports
+  `routing.mode: "auto"`), the combined summary must also show the proposed
+  execution matrix from `fde routing show <run-id> --json`: for every task, the
+  account identity, the specialist method, the selected model and effort, the
+  quality floor, the dependency, the estimated cost units and the escalation
+  ceiling. Those are four different things and must be presented as four
+  different things. Costs are relative estimates, never money — say so.
+  `fde routing explain` is the answer to "why that one"; do not invent a
+  rationale. Approval covers the route as well as the plan and the roles, and if
+  the controller refuses because the route recomputed differently, show the
+  revision and ask again rather than retrying.
+- Never adjust a route yourself. `fde routing override` is the only path, it
+  needs a reason, and raising a tier, effort or account needs the user to type
+  `APPROVE ROUTING <run-id>`. A quality floor is not negotiable.
+- Invoke a routed run only with `--task-id <task-id>` naming an approved task.
+  The frozen decision is the authority for the model and effort; never pass your
+  own.
 - Guard connector/repository access with `fde guard` and invoke only identities
   assigned to the applicable role/stage.
 - `APPROVE CODEX <run-id>` is required for each exact Codex write task.

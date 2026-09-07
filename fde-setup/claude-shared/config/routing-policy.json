@@ -1,0 +1,490 @@
+{
+  "_comment": "Routing policy: what the controller is allowed to choose automatically, and why. This file is data on purpose \u2014 tiers, cost weights, quality floors and ceilings belong to the operator, not to code. The installer treats it as CONFIRM: a shipped change is shown as a diff and applied only with your say-so, so local cost and entitlement customisations are never overwritten silently.",
+  "_costUnits": "costWeight and effortCostMultiplier are RELATIVE weights, not money. There are no provider prices in this file and none may be added as bare numbers: if monetary pricing is ever configured it must carry a source, a currency and an effectiveAt date, and estimates stay labelled estimates until it does.",
+  "_specialistCaps": "maxSpecialistsPerStage is the fan-out allowed on ONE stage: one method for standard work, two complementary ones for complex work, three (including an independent reviewer) for critical work. maxSpecialists bounds the whole run so a wide plan cannot accumulate an unbounded agent count.",
+  "schemaVersion": 1,
+  "policyRevision": "2026-09-07.1",
+  "strategies": [
+    "balanced",
+    "quality_first",
+    "cost_first",
+    "manual"
+  ],
+  "defaultStrategy": "balanced",
+  "tiers": {
+    "economy": 0,
+    "standard": 1,
+    "premium": 2
+  },
+  "efforts": [
+    "auto",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "effortCostMultiplier": {
+    "auto": 1.0,
+    "low": 0.6,
+    "medium": 1.0,
+    "high": 1.8,
+    "xhigh": 3.0,
+    "max": 4.5
+  },
+  "_expectedRetry": "Probability that an attempt at this tier, for this band, has to be repeated. This is what stops 'minimise cost' from meaning 'always pick the cheapest model': expected cost is costUnits x (1 + p), so an underpowered attempt on complex work is correctly scored as the expensive option.",
+  "expectedRetry": {
+    "tierBelowBand": 0.65,
+    "tierAtBand": 0.15,
+    "tierAboveBand": 0.05
+  },
+  "_providers": "The catalogue the router may select from. It is deliberately a SUBSET of what the console's AccountService offers: the ambiguous 'default' model is absent because its quality and cost cannot be compared, and 'ultra' is absent because no automatic route may reach it. Every entry here must be accepted by AccountService.validateSelection \u2014 a test enforces that.",
+  "providers": {
+    "anthropic": {
+      "label": "Claude (Anthropic account)",
+      "models": [
+        {
+          "id": "haiku",
+          "label": "Claude Haiku",
+          "tier": "economy",
+          "efforts": [
+            "auto"
+          ],
+          "costWeight": 1,
+          "contextTokens": null,
+          "strengths": [
+            "classification",
+            "extraction",
+            "bounded-formatting",
+            "mechanical-low-risk"
+          ],
+          "limitations": [
+            "not for ambiguous synthesis, architecture or security judgement"
+          ]
+        },
+        {
+          "id": "sonnet",
+          "label": "Claude Sonnet",
+          "tier": "standard",
+          "efforts": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "costWeight": 4,
+          "contextTokens": null,
+          "strengths": [
+            "research",
+            "planning",
+            "implementation",
+            "test-engineering",
+            "presentation"
+          ],
+          "limitations": [
+            "thin on novel architecture and adversarial reconciliation"
+          ]
+        },
+        {
+          "id": "opus",
+          "label": "Claude Opus",
+          "tier": "premium",
+          "efforts": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "costWeight": 15,
+          "contextTokens": null,
+          "strengths": [
+            "architecture",
+            "ambiguous-synthesis",
+            "reconciliation",
+            "security-review",
+            "reliability-review"
+          ],
+          "limitations": [
+            "xhigh is Opus-specific; it is not a routine default"
+          ]
+        }
+      ]
+    },
+    "bedrock": {
+      "label": "Claude Code on Bedrock",
+      "models": [
+        {
+          "id": "haiku",
+          "label": "Claude Haiku (Bedrock)",
+          "tier": "economy",
+          "efforts": [
+            "auto"
+          ],
+          "costWeight": 1,
+          "contextTokens": null,
+          "strengths": [
+            "classification",
+            "extraction",
+            "bounded-formatting"
+          ],
+          "limitations": [
+            "no WebSearch on Bedrock \u2014 local evidence only",
+            "not for ambiguous synthesis"
+          ]
+        },
+        {
+          "id": "sonnet",
+          "label": "Claude Sonnet (Bedrock)",
+          "tier": "standard",
+          "efforts": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "costWeight": 4,
+          "contextTokens": null,
+          "strengths": [
+            "research",
+            "planning",
+            "implementation",
+            "test-engineering"
+          ],
+          "limitations": [
+            "no WebSearch on Bedrock \u2014 pair with a second researcher for external evidence"
+          ]
+        },
+        {
+          "id": "opus",
+          "label": "Claude Opus (Bedrock)",
+          "tier": "premium",
+          "efforts": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "costWeight": 15,
+          "contextTokens": null,
+          "strengths": [
+            "architecture",
+            "ambiguous-synthesis",
+            "reconciliation",
+            "security-review"
+          ],
+          "limitations": [
+            "no WebSearch on Bedrock"
+          ]
+        }
+      ]
+    },
+    "codex": {
+      "label": "ChatGPT / Codex",
+      "_note": "A different provider family, not a rank-for-rank equivalent of the Claude tiers. Tiers here say what this policy is willing to spend on which class of work; they do not assert parity between vendors.",
+      "models": [
+        {
+          "id": "gpt-5.2",
+          "label": "GPT-5.2",
+          "tier": "standard",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "costWeight": 3,
+          "contextTokens": null,
+          "strengths": [
+            "bounded-implementation",
+            "mechanical-low-risk",
+            "independent-read"
+          ],
+          "limitations": [
+            "no 'auto' effort \u2014 an effort is always explicit for Codex"
+          ]
+        },
+        {
+          "id": "gpt-5.5",
+          "label": "GPT-5.5",
+          "tier": "standard",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "costWeight": 5,
+          "contextTokens": null,
+          "strengths": [
+            "implementation",
+            "test-engineering",
+            "independent-read"
+          ],
+          "limitations": [
+            "no 'auto' effort"
+          ]
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "label": "GPT-5.6-Luna",
+          "tier": "standard",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "costWeight": 7,
+          "contextTokens": null,
+          "strengths": [
+            "implementation",
+            "research",
+            "review"
+          ],
+          "limitations": [
+            "no 'auto' effort"
+          ]
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "label": "GPT-5.6-Terra",
+          "tier": "premium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "costWeight": 12,
+          "contextTokens": null,
+          "strengths": [
+            "architecture",
+            "ambiguous-synthesis",
+            "security-review"
+          ],
+          "limitations": [
+            "no 'auto' effort"
+          ]
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "label": "GPT-5.6-Sol",
+          "tier": "premium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "costWeight": 14,
+          "contextTokens": null,
+          "strengths": [
+            "architecture",
+            "reconciliation",
+            "security-review"
+          ],
+          "limitations": [
+            "no 'auto' effort"
+          ]
+        }
+      ]
+    }
+  },
+  "_unroutable": "Identities whose surface exposes no model or effort choice. They remain fully assignable to roles; the router simply reports that it has nothing to select for them rather than inventing a combination.",
+  "unroutableKinds": {
+    "gemini": "one-shot headless call with no model or effort selection through this toolkit",
+    "copilot-studio": "a chat endpoint over the Microsoft estate; model and effort are the tenant's, not this controller's"
+  },
+  "_floors": "A quality floor is the lowest tier and effort an automatic route may use. It is a floor, never a target: a higher choice is always permitted, a lower one never is.",
+  "floors": {
+    "low": {
+      "minimumTier": "economy",
+      "minimumEffort": "auto"
+    },
+    "standard": {
+      "minimumTier": "standard",
+      "minimumEffort": "medium"
+    },
+    "high": {
+      "minimumTier": "standard",
+      "minimumEffort": "high"
+    },
+    "critical": {
+      "minimumTier": "premium",
+      "minimumEffort": "high"
+    }
+  },
+  "taskFloors": {
+    "intake": "low",
+    "research": "standard",
+    "solutioning": "high",
+    "review": "high",
+    "reconciliation": "high",
+    "presentation": "standard",
+    "planning": "standard",
+    "implementation": "standard",
+    "verification": "high",
+    "deployment": "critical",
+    "observability": "standard",
+    "publication": "high"
+  },
+  "riskFloors": {
+    "security": "critical",
+    "authentication": "critical",
+    "production": "critical",
+    "destructive": "critical",
+    "dataMigration": "critical",
+    "legalCompliance": "critical",
+    "payments": "critical",
+    "irreversible": "critical",
+    "deployment": "high",
+    "publication": "high",
+    "privacy": "high",
+    "codeChange": "standard"
+  },
+  "bands": {
+    "simple": {
+      "maxScore": 3,
+      "recommendedTier": "economy",
+      "preferredEffort": "auto",
+      "floor": "low"
+    },
+    "standard": {
+      "maxScore": 7,
+      "recommendedTier": "standard",
+      "preferredEffort": "medium",
+      "floor": "standard"
+    },
+    "complex": {
+      "maxScore": 10,
+      "recommendedTier": "premium",
+      "preferredEffort": "high",
+      "floor": "high"
+    },
+    "critical": {
+      "maxScore": 14,
+      "recommendedTier": "premium",
+      "preferredEffort": "high",
+      "floor": "critical"
+    }
+  },
+  "limits": {
+    "simple": {
+      "maxSpecialists": 1,
+      "maxSpecialistsPerStage": 1,
+      "maxParallel": 1,
+      "maxRetries": 1,
+      "maxCostUnits": 15,
+      "maxAutomaticTier": "standard",
+      "maxAutomaticEffort": "medium",
+      "requireIndependentReview": false
+    },
+    "standard": {
+      "maxSpecialists": 6,
+      "maxSpecialistsPerStage": 1,
+      "maxParallel": 2,
+      "maxRetries": 1,
+      "maxCostUnits": 60,
+      "maxAutomaticTier": "standard",
+      "maxAutomaticEffort": "high",
+      "requireIndependentReview": false
+    },
+    "complex": {
+      "maxSpecialists": 8,
+      "maxSpecialistsPerStage": 2,
+      "maxParallel": 3,
+      "maxRetries": 1,
+      "maxCostUnits": 180,
+      "maxAutomaticTier": "premium",
+      "maxAutomaticEffort": "high",
+      "requireIndependentReview": false
+    },
+    "critical": {
+      "maxSpecialists": 10,
+      "maxSpecialistsPerStage": 3,
+      "maxParallel": 3,
+      "maxRetries": 2,
+      "maxCostUnits": 400,
+      "maxAutomaticTier": "premium",
+      "maxAutomaticEffort": "xhigh",
+      "requireIndependentReview": true
+    }
+  },
+  "_escalation": "The only ladder an automatic escalation may climb, in order. A rung above the band's maxAutomaticTier/maxAutomaticEffort is unreachable without an explicit operator approval, and no rung exists above the last one here.",
+  "escalation": {
+    "ladder": [
+      {
+        "tier": "economy",
+        "effort": "auto"
+      },
+      {
+        "tier": "standard",
+        "effort": "low"
+      },
+      {
+        "tier": "standard",
+        "effort": "medium"
+      },
+      {
+        "tier": "standard",
+        "effort": "high"
+      },
+      {
+        "tier": "premium",
+        "effort": "high"
+      },
+      {
+        "tier": "premium",
+        "effort": "xhigh"
+      },
+      {
+        "tier": "premium",
+        "effort": "max"
+      }
+    ],
+    "requireRecordedFailureAbove": {
+      "tier": "premium",
+      "effort": "high"
+    }
+  },
+  "_specialists": "role -> the focused method (a toolkit sub-agent definition) that role uses. A null method means the work is done by the account holding the role directly; the controller does not invent a specialist to have one.",
+  "specialists": {
+    "orchestrator": null,
+    "productManagement": "product-analyst",
+    "research": "researcher",
+    "solutioning": "solutioner",
+    "uiUxDesign": "ui-ux-designer",
+    "designSystem": "design-system-steward",
+    "review": "reviewer",
+    "prReview": "pr-analyst",
+    "standardsReview": "standards-reviewer",
+    "securityReview": "security-reviewer",
+    "deliveryPlanning": "delivery-manager",
+    "presentation": null,
+    "implementation": "implementation-engineer",
+    "testEngineering": "test-engineer",
+    "ciInvestigation": "ci-investigator",
+    "releaseManagement": "release-manager",
+    "observability": "sre-observability",
+    "microsoftContext": null
+  },
+  "_independentReview": "The method used when a critical run needs a check whose value is that it did not come from the producer. It is only called independent when a DIFFERENT eligible identity holds it; otherwise the route says so and the existing degraded-operation approval applies.",
+  "independentReviewMethods": {
+    "default": "reliability-reviewer",
+    "security": "security-reviewer",
+    "authentication": "security-reviewer",
+    "payments": "security-reviewer",
+    "dataMigration": "reliability-reviewer",
+    "production": "reliability-reviewer",
+    "deployment": "reliability-reviewer"
+  }
+}

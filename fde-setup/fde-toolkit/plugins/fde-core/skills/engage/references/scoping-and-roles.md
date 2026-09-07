@@ -28,12 +28,23 @@ as a list of commands for them to execute.
    orchestrator recommendation into an assignment.
 7. Show a combined summary: request, included stages, skipped stages,
    deliverables, role assignments, access needed and explicit approval gates.
-   Resolve every ambiguity before asking for approval.
+   On an automatically routed run, include the proposed execution matrix from
+   `fde routing show <run-id> --json` — task id, stage, required role,
+   specialist method, account identity, model and effort, quality floor,
+   dependency, estimated cost units and escalation ceiling — plus the complexity
+   band, the confidence, and anything the controller listed as not scheduled or
+   as missing information. If the assessment returned a clarification question,
+   ask it before asking for approval. Resolve every ambiguity before asking for
+   approval.
 8. Ask the user to type `APPROVE PLAN <run-id>` exactly. General agreement is
    not approval. If anything changes, show the revised summary and ask again.
 9. Only after the exact phrase, record the plan with `--require-approval`, save
    the role selections, and pass the same phrase to `fde approve-plan`. The
-   controller then confirms roles and creates run-scoped connector config.
+   controller then confirms roles, freezes the routing decision against the
+   approved plan, and creates run-scoped connector config. If it refuses because
+   the route recomputed differently from the one displayed, show the revised
+   matrix and ask for the phrase again — never approve a route the user has not
+   seen.
 
 Nothing before step 9 authorizes connector/repository access. The user's own
 request is input; it is not permission to fetch the referenced Jira item.

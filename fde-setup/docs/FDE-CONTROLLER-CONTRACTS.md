@@ -34,7 +34,20 @@ fde attachments <run-id> [--json]
 fde start [requirement] --project <project-id>
 fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>]
           [--model <alias-or-id>] [--effort auto|low|medium|high|xhigh|max]
+          [--routing manual|auto] [--strategy balanced|quality_first|cost_first]
           [-- <requirement>]
+
+fde routing preview --orchestrator <who> [--strategy <s>] [--shape <name>]
+          [--stages a,b,c] [--project <project-id>]
+          (--requirement-stdin | --requirement -- <text>) --json
+fde routing propose <run-id> [--strategy <s>] --json
+fde routing show <run-id> --json
+fde routing explain <run-id> [--task-id <task-id>] --json
+fde routing override <run-id> (--task-id <task-id> | --orchestrator)
+          [--model <id>] [--effort <e>] [--account <identity>]
+          --reason <text> [--approve] --json
+fde invoke <run-id> <identity> (<task-file> | --task-file <path>)
+          [--stage <stage>] [--task-id <task-id>]
 
 fde design-panel create <run-id> --json [--brief <text> | --brief-file <path> | --brief-stdin]
           --participant <agent>:<lens>[:<effort>[:<model>]] ...
@@ -69,9 +82,29 @@ fde design-panel lenses --json
 {
   "schemaVersion": 1,
   "toolkit": "fde-core",
-  "contracts": ["list --json", "status --json", "projects --json", "..."]
+  "contracts": ["list --json", "status --json", "projects --json", "..."],
+  "capabilities": ["routing.policy.v1", "routing.preview", "routing.propose",
+                   "routing.show", "routing.explain", "routing.override",
+                   "routing.start-auto", "routing.invoke-task-id",
+                   "routing.status-summary"],
+  "routingPolicy": {
+    "state": "available",
+    "policyRevision": "2026-09-07.1",
+    "schemaVersion": 1,
+    "strategies": ["balanced", "quality_first", "cost_first"],
+    "providers": ["anthropic", "bedrock", "codex"],
+    "costUnitsAreEstimates": true,
+    "monetaryPricing": "not configured"
+  }
 }
 ```
+
+Feature-detect on `capabilities`, not on a version number. Each string is added
+when its contract ships and is never repurposed. `routingPolicy.state` is
+`"unavailable"` with a `code` and a `message` when the policy on disk is missing
+or invalid — `fde version --json` still answers 0 in that case, because
+"automatic routing is unavailable and here is why" is a useful answer and a
+traceback is not.
 
 Ask this before depending on a contract. A controller that predates them answers
 argparse's own refusal — `invalid choice: 'version'`, or
@@ -502,3 +535,223 @@ choose from. They read only the vendored tree under
 `fde-toolkit/plugins/fde-core/vendor/`, verify each file against
 `design-sources.lock.json` before using it, and refuse anything that has drifted
 (exit 2) or is not in the lock at all.
+
+## Routing
+
+Routing chooses the orchestrator's model and effort, the smallest useful set of
+specialist tasks, the model and effort for each, and the ceiling on all of it.
+Three properties matter to a reader:
+
+- **The controller decides.** A client may ask for a preview and render an
+  explanation. It must not score complexity, select a model, invent a specialist
+  plan, or write `routing.json`. `fde start --routing auto` recomputes the
+  decision from the run's own files rather than trusting anything sent to it.
+- **A route is a preview until the plan is approved.** Before
+  `APPROVE PLAN <run-id>` it authorises nothing, and it is recomputed whenever
+  the plan or the role assignment moves. The approval freezes the exact
+  displayed decision. Because that gate is what freezes the route, recording a
+  plan on an auto-routed run always sets `approvalRequired`, whether or not
+  `--require-approval` was passed.
+- **Costs are relative estimates.** Every figure is in `costUnits` and every
+  payload carries `costUnitsAreEstimates: true`. There are no provider prices in
+  this toolkit. If monetary pricing is ever configured it must carry a source, a
+  currency and an `effectiveAt` date; a bare number is refused by policy
+  validation.
+
+### The policy
+
+`~/.claude-shared/config/routing-policy.json` holds the model catalogue, tier
+assignments, relative cost weights, quality floors, per-band ceilings and the
+escalation ladder. It is validated strictly on every load: an unknown effort, a
+tier below its own band's floor, a descending escalation ladder, the ambiguous
+`default` model, or a price without provenance are each refused with the field
+named.
+
+The catalogue is deliberately a **subset** of what the console's
+`AccountService` offers. `default` is absent because a decision naming it cannot
+be compared or audited, and `ultra` is absent because no automatic route may
+reach it. A test asserts that every combination the policy offers is one
+`validateSelection` accepts; nothing else guarantees two files agree.
+
+The installer treats the policy as **confirm**: a shipped change is shown as a
+diff and applied only with the operator's say-so, so local cost and entitlement
+customisations survive an update.
+
+### `routing preview --json`
+
+Non-mutating and deterministic. It creates no run, writes no file, and reads
+nothing connected — not the Jira item the request names, not a repository, not a
+connector. Same request plus same policy gives the same `decisionHash` every
+time, so a difference between preview and creation is a real difference.
+
+```json
+{
+  "schemaVersion": 1,
+  "preview": {
+    "policyRevision": "2026-09-07.1",
+    "mode": "auto",
+    "strategy": "balanced",
+    "effectiveBand": "standard",
+    "assessment": {
+      "score": 4, "maxScore": 14, "band": "standard", "bandFromScore": "standard",
+      "confidence": "medium", "qualityFloor": "standard", "riskFloor": "standard",
+      "strictestStageFloor": "high",
+      "dimensions": [{"id": "scopeBreadth", "label": "scope breadth", "score": 1,
+                      "evidence": "3 stages planned"}],
+      "riskFlags": [{"flag": "codeChange", "floor": "standard", "evidence": "..."}],
+      "overrides": [], "missingInformation": [], "clarification": null
+    },
+    "orchestrator": {"accountId": "claude_work", "account": "work",
+                     "provider": "anthropic", "routable": true,
+                     "model": "sonnet", "effort": "medium", "tier": "standard",
+                     "qualityFloor": "standard", "costUnits": 4.0,
+                     "retryProbability": 0.15, "expectedCostUnits": 4.6,
+                     "reason": "...", "strategyRule": "...",
+                     "escalationCeiling": {"tier": "standard", "effort": "high",
+                                           "maxRetries": 1, "rungsAbove": 1,
+                                           "requiresRecordedFailureAbove": {"...": "..."}},
+                     "alternatives": [], "rejected": []},
+    "tasks": [],
+    "limits": {"maxSpecialists": 6, "maxSpecialistsPerStage": 1, "maxParallel": 2,
+               "maxRetries": 1, "maxCostUnits": 60,
+               "maxAutomaticTier": "standard", "maxAutomaticEffort": "high",
+               "requireIndependentReview": false},
+    "estimatedCostUnits": 4.6, "costUnitsAreEstimates": true,
+    "notScheduled": [], "unroutable": [], "warnings": [],
+    "specialistCount": 0, "discretionaryCount": 0,
+    "decisionHash": "sha256:...",
+    "provisional": true,
+    "provisionalReason": "no role assignment exists yet, ..."
+  }
+}
+```
+
+`provisional` is always true here: at preview time no role has been assigned, so
+only the orchestrator's own stages carry tasks. The authoritative matrix is
+computed when the plan and roles are recorded.
+
+The assessment reads only what is already on this disk — the recorded request,
+the stage slice, attachment **metadata**, and the project's repository count. It
+never infers anything about the contents of a repository, a connector or a
+client system.
+
+Two rules are load-bearing. **Risk overrides the arithmetic score**: a security,
+authentication, production, destructive, migration, compliance or payment
+concern raises the band and the floor whatever the dimensions added up to.
+**Low confidence never lowers quality**: an uncertain assessment is routed one
+tier higher *and* returns the question that would settle it, in
+`assessment.clarification`.
+
+### Task records
+
+Each entry in `tasks` describes one unit of work and is the thing an invocation
+is later checked against:
+
+| Field | Meaning |
+|---|---|
+| `taskId` | stable within a plan; `<stage>-<n>` |
+| `stage`, `objective` | the FDE stage and what this task is for |
+| `requiredRole`, `roleLabel` | the role that authorises it |
+| `specialist`, `specialistReason` | the focused method, or `null` when the role's own account does the stage directly — and why |
+| `accountId`, `accountAvailable` | the identity, and whether it is available on this machine |
+| `model`, `effort`, `tier`, `provider`, `routable` | the concrete selection |
+| `qualityFloor`, `band` | the floor it must clear and the band its ceilings come from |
+| `dependsOn`, `parallelizable` | ordering |
+| `estimatedCostUnits`, `escalationCeiling` | the estimate and the bound |
+| `independence` | present only on an independent check: `independent`, `of`, `reason`, `requiresDegradedApproval` |
+
+Account identity, specialist method, model and effort are four different things
+and are always four different fields. A check is only described as independent
+when a **different** eligible identity holds it; otherwise `independent` is
+false, `requiresDegradedApproval` is true, and the run's existing
+degraded-operation approval applies before relying on it.
+
+### `routing show|explain|override --json`
+
+`show` returns the stored record plus the same bounded summary `status --json`
+carries. `explain` returns the assessment with per-dimension evidence, the
+alternatives considered, and each rejected combination with the reason it was
+rejected; when the policy on disk has moved since the decision was made,
+`policyDrift` says so rather than pretending today's candidate set is the one
+that was approved.
+
+`override` changes one decision on the record. It refuses a model the policy does
+not offer (`routing-not-in-catalog`), refuses anything below the target's quality
+floor (`routing-below-floor`), and requires the operator to type
+`APPROVE ROUTING <run-id>` before raising a tier, an effort or an account —
+`--approve` records that this already happened. Each change appends an entry with
+`at`, `operator`, `target`, `field`, `from`, `to`, `reason`, `escalation`,
+`previousDecisionHash` and `decisionHash`. History is never overwritten.
+
+### Approval binding
+
+`APPROVE PLAN <run-id>` covers the plan, the roles and the route together. On
+approval the controller recomputes the route; if the recomputation differs from
+the one last displayed it **refuses** with `routing-decision-changed` (exit 5)
+and prints the revised proposal instead of approving something nobody saw.
+
+The freeze records `approvedAt`, `approvedBy` and `approvedWithPlanHash` — a
+hash of the exact stage slice and role assignment. If either changes afterwards,
+`status --json` reports `routing.planHashMatches: false` with a warning, and
+every invocation is refused with `routing-plan-changed` until the combined plan
+is approved again.
+
+### `invoke --task-id`
+
+On an automatically routed run, `--task-id` is required and names the approved
+task the invocation carries out. The controller resolves the frozen route and
+checks the stage, the role, the identity, the model and the effort against it; a
+mismatch is refused, never reconciled, and no identity is ever substituted for
+another. The selection reaches the CLI as separate argument-array elements
+(`claude --model <m> --effort <e> -p <body>`; `ask-codex ... --model <m>
+--effort <e>`), so the task body is always the value of a preceding option and a
+task file beginning with `-` is text, not a flag. `invoke.start` and
+`invoke.end` record the resolved route.
+
+A run with no `routing.json` keeps the original behaviour exactly: `claude -p
+<body>`, no `--task-id`, `route.source: "manual"`. Passing `--task-id` to such a
+run is refused rather than ignored.
+
+### `status --json`
+
+Gains one additive field, `routing`: `null` for a run with no routing record, a
+bounded summary otherwise — mode, strategy, `policyRevision`, band, score,
+confidence, quality floor, risk flags, the orchestrator's selection, up to 50
+task rows, limits, `estimatedCostUnits`, `approved`, `decisionHash`,
+`approvedWithPlanHash`, `planHashMatches`, `overrideCount`, `notScheduled`,
+`unroutable` and `warnings`. Task prompts, telemetry logs and full candidate sets
+are deliberately absent; `routing explain` is where those live. A record written
+by a schema this controller does not speak answers `{"readable": false}` rather
+than a guess.
+
+`routing.usage` reports provider usage, and reports it honestly. Until a provider
+actually returns figures it is `{"state": "unavailable", "reason": "..."}`.
+Nothing here is ever written as zero, and no token or monetary value is inferred.
+
+### Events
+
+`<run>/routing-events.jsonl` is append-only and uses a closed vocabulary:
+`routing.assessed`, `routing.proposed`, `routing.approved`, `routing.overridden`,
+`routing.escalated`, `routing.budget_exhausted`. A bounded line for each is also
+appended to the run's own `events.jsonl`, so "what did this run decide" does not
+need a second log to answer. Neither file is ever rewritten.
+
+### Routing exit codes and error codes
+
+JSON callers get `{"schemaVersion": 1, "error": {"code", "message", "hint"}}` on
+stdout with a documented exit code; a terminal gets the controller's usual
+one-line refusal. Neither gets a traceback.
+
+| Exit | Codes |
+|---|---|
+| 2 | `routing-policy-invalid`, `routing-policy-missing`, `routing-mode-unknown`, `routing-strategy-unknown`, `routing-no-orchestrator`, `routing-unknown-identity`, `routing-not-in-catalog`, `routing-task-id-required`, `routing-task-id-invalid`, `routing-override-no-reason`, `routing-override-incomplete`, `routing-override-noop`, `routing-account-unroutable`, `routing-schema-unsupported`, `routing-requirement-too-large` |
+| 3 | `routing-account-unavailable`, `routing-no-qualifying-model` |
+| 4 | `routing-absent`, `routing-task-unknown` |
+| 5 | `routing-manual`, `routing-already-approved`, `routing-below-floor`, `routing-decision-changed`, `routing-frozen-route-unavailable` |
+| 6 | `routing-task-stage-mismatch`, `routing-task-identity-mismatch`, `routing-task-role-mismatch` |
+| 7 | `routing-not-approved`, `routing-plan-changed` |
+| 9 | `routing-budget-exceeded` |
+
+Automatic routing **fails closed**. When it cannot meet a quality floor it says
+so and stops; it does not fall back to `default`, reduce effort, omit a required
+reviewer, or swap one account identity for another to make an answer possible.

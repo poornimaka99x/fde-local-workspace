@@ -306,6 +306,60 @@ Only you saying "same as the previous task" makes `--same-as <run-id>` valid.
 
 ---
 
+## Phase 6b — let the controller pick the model (5 min, optional)
+
+By default you choose the model and effort. `--routing auto` hands that one
+decision to the controller: you still choose the account, because authentication,
+organisational access and provider choice are yours, and it selects a concrete
+model and effort from that account plus the smallest useful set of specialist
+tasks.
+
+```bash
+# What would it choose, and why? Creates nothing, writes nothing, reads nothing
+# connected — not even the Jira item the request names.
+fde routing preview --orchestrator work --strategy balanced --requirement-stdin <<<'
+MAX-142 Add a paginated /orders endpoint to the NestJS API; 50 per page, keep the
+existing response envelope.'
+
+fde start --routing auto --strategy balanced --orchestrator work -- 'MAX-142 ...'
+```
+
+Strategies: `balanced` (the default), `quality_first`, `cost_first`. All three
+respect the quality floor — `cost_first` buys the cheapest choice that still
+clears it, never one below it. Security, authentication, production,
+destructive, migration, compliance and payment work carries a high or critical
+floor whatever the request's complexity score said, and an assessment the engine
+is unsure about is routed one tier *higher* along with the question that would
+settle it.
+
+Everything is a preview until you approve it. `APPROVE PLAN <run-id>` now
+approves the plan, the roles and the route together, and freezes the exact route
+you were shown — if it recomputed differently in the meantime, the approval is
+refused and you are shown the revision. After that:
+
+```bash
+fde routing show <run-id>                      # the route as it stands
+fde routing explain <run-id> --task-id review-1  # why this, why not the others
+fde routing override <run-id> --task-id review-1 --model opus --effort high \
+  --reason 'an auth design needs the stronger model'
+```
+
+An override is recorded with who, when, the old value, the new value and the
+reason, and nothing is overwritten. It will not go below a task's quality floor,
+and raising a tier, an effort or an account makes you type
+`APPROVE ROUTING <run-id>`.
+
+Costs are shown in **cost units** — relative weights from
+`~/.claude-shared/config/routing-policy.json`, not money. There are no provider
+prices in this toolkit, and every figure is labelled an estimate. Edit that file
+to match your own entitlements and costs; `./install.sh` shows you a diff before
+it would replace it.
+
+Runs created without `--routing auto` behave exactly as they always have, and
+runs created before this existed keep working untouched.
+
+---
+
 ## Phase 7 — implementation, behind the gate (10 min)
 
 Assigning Codex the implementation role does **not** authorise it to write. That

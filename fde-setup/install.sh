@@ -96,6 +96,7 @@ PRESERVE=(
 )
 CONFIRM=(
   "config/agents.json"          # you may add or relabel identities
+  "config/routing-policy.json"  # cost weights, tiers and entitlement ceilings are yours
   "mcp/mcp-servers.json"        # you edit this by design
   "shared/engineering-standards.md"
   "shared/standards-index.md"       # you may amend it alongside the standards

@@ -345,6 +345,29 @@ unknown run or project. Events are paginated rather than dumped. Human output is
 unchanged. The full shapes are in
 [`docs/FDE-CONTROLLER-CONTRACTS.md`](docs/FDE-CONTROLLER-CONTRACTS.md).
 
+## Automatic model and effort selection
+
+`fde start --routing auto --orchestrator <who>` lets the controller choose the
+orchestrator's model and effort and propose the specialist matrix, instead of you
+picking them. You still choose the account. The choice is deterministic and
+explainable — no model is asked for a score — and it optimises in one order:
+meet the capability, safety and quality requirements first; then minimise
+*expected* cost, which is cost times the chance the attempt has to be repeated,
+so an underpowered attempt on hard work is correctly priced as the expensive
+option; then minimise latency and agent count.
+
+Nothing it decides authorises anything. `APPROVE PLAN <run-id>` approves the
+plan, the roles and the route together and freezes the exact route you saw;
+after that every invocation is checked against it. `fde routing preview`,
+`show`, `explain` and `override` are the rest of the surface, and
+`~/.claude-shared/config/routing-policy.json` holds the tiers, relative cost
+weights, quality floors and ceilings — yours to edit, and preserved across
+updates. Costs are relative cost units, never money.
+
+Manual selection is still the default and still works exactly as before, as do
+runs created before any of this existed. See
+[docs/FDE-CONTROLLER-CONTRACTS.md](docs/FDE-CONTROLLER-CONTRACTS.md#routing).
+
 ## Design panels
 
 One design brief, two or three Claude accounts, the same sealed context, one

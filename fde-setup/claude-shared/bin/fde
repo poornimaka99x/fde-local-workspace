@@ -1115,7 +1115,8 @@ def run_output_hygiene(run: Run, *, apply=True, service_url=None, trigger="manua
     return report_path, report
 
 
-def new_run(requirement: str = "", project_id=None, model=None, effort=None) -> Run:
+def new_run(requirement: str = "", project_id=None, model=None, effort=None,
+            routing_mode="manual", routing_strategy=None) -> Run:
     key = (requirement or "").strip()
     m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
     jira_key = m.group(1) if m else None
@@ -1140,13 +1141,23 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None) -> 
             "model": model or "default",
             "effort": effort or "auto",
         },
+        # How this run chooses its models: 'manual' is the original behaviour and
+        # stays the default, so nothing that already worked changes shape. 'auto'
+        # tells the controller to compute and persist a route once it knows who
+        # orchestrates. A reader that has never heard of routing sees one extra
+        # key and carries on.
+        "routing": {
+            "mode": routing_mode if routing_mode in ROUTING_MODES else "manual",
+            "strategy": routing_strategy,
+        },
         "toolkit": "fde-core",
     })
     r = Run(stem)
     if key:
         r.write_requirement(key)
     r.event("run.created", jiraKey=jira_key, hasRequirement=bool(key),
-            projectId=project_id, model=model or "default", effort=effort or "auto")
+            projectId=project_id, model=model or "default", effort=effort or "auto",
+            routingMode=routing_mode, routingStrategy=routing_strategy)
     if project_id:
         project_event(project_id, "run.created", runId=stem)
     r.event("note", note="Created in awaiting_orchestrator. Choosing an orchestrator and "
@@ -1227,6 +1238,50 @@ def emit_json(payload):
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
+
+
+class RoutingError(Exception):
+    """A refusal a caller can act on.
+
+    Every routing failure carries a stable machine code, a sentence for a human
+    and, where there is one, the thing to do next. Automatic routing fails
+    closed: it never silently selects the ambiguous default, reduces effort,
+    drops a required reviewer or swaps an account identity to make a decision
+    possible."""
+
+    def __init__(self, code, message, hint="", exit_code=2):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+        self.exit_code = exit_code
+
+    def payload(self):
+        return {
+            "schemaVersion": ROUTING_SCHEMA_VERSION,
+            "error": {"code": self.code, "message": self.message,
+                      "hint": self.hint or None},
+        }
+
+
+def routing_command(fn):
+    """Turn a RoutingError into the shape the caller asked for.
+
+    JSON callers get a typed error object on stdout and a documented exit code;
+    a terminal gets the controller's usual one-line refusal. Neither gets a
+    traceback."""
+    def wrapper(args):
+        try:
+            return fn(args)
+        except RoutingError as exc:
+            if getattr(args, "json", False):
+                emit_json(exc.payload())
+                return exc.exit_code
+            hint = f"\n       {exc.hint}" if exc.hint else ""
+            die(f"{exc.message}{hint}", exc.exit_code)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
 
 
 def read_jsonl_report(path: pathlib.Path):
@@ -2040,6 +2095,22 @@ def status_payload(run: Run, agents, events_limit=50, events_cursor=None):
             warnings.append(f"run names project '{project_id}', which is not in the "
                             f"registry")
 
+    routing = None
+    try:
+        routing = routing_status_summary(run)
+    except Exception as exc:  # a broken policy must not make a run unreadable
+        routing = {"present": True, "readable": False, "error": "routing-unreadable",
+                   "message": _safe_line(str(exc), 200),
+                   "warnings": [_safe_line(str(exc), 200)]}
+        warnings.append("this run's routing record could not be summarised; "
+                        "fde routing show names the reason")
+    if routing is not None and routing.get("readable") and routing.get("approved") \
+            and not routing.get("planHashMatches"):
+        warnings.append(
+            f"the plan or role assignment changed after the route was approved, so the "
+            f"frozen route no longer describes this run; re-approve it with "
+            f"'fde approve-plan {run.id} --reapprove' before invoking anything")
+
     requirement_path = run.dir / "requirement.md"
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -2078,6 +2149,11 @@ def status_payload(run: Run, agents, events_limit=50, events_cursor=None):
         "outputHygiene": hygiene_view,
         "session": session_view(run.dir, roles, agents),
         "designPanel": design_panel_summary(run),
+        # Additive and bounded: a run with no routing record answers null, and an
+        # older console simply ignores the field. Task prompts, telemetry logs
+        # and full candidate sets are deliberately not here — `fde routing
+        # explain` is where that lives.
+        "routing": routing,
         "warnings": warnings,
     }
 
@@ -2650,8 +2726,27 @@ def _start(args):
     effort = getattr(args, "effort", None)
     if model and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}", model):
         die("model contains unsupported characters", 2)
+    routing_mode = getattr(args, "routing", None) or "manual"
+    strategy = getattr(args, "strategy", None)
+    if routing_mode not in ROUTING_MODES:
+        die(f"--routing takes {' or '.join(ROUTING_MODES)}", 2)
+    if routing_mode == "auto":
+        # The account is an operator decision — authentication, organisational
+        # access and provider choice are not this engine's to make — so it is
+        # required up front rather than guessed.
+        if not args.orchestrator:
+            die("--routing auto needs --orchestrator: which account holds the run is an "
+                "operator decision, not a routed one", 2)
+        if model or effort:
+            die("--routing auto selects the model and effort. Pass --routing manual to "
+                "choose them yourself.", 2)
+        if strategy and strategy not in AUTO_STRATEGIES:
+            die(f"--strategy takes {', '.join(AUTO_STRATEGIES)}", 2)
+    elif strategy:
+        die("--strategy applies to --routing auto", 2)
     run = new_run(req, project_id=project["projectId"] if project else None,
-                  model=model, effort=effort)
+                  model=model, effort=effort, routing_mode=routing_mode,
+                  routing_strategy=strategy)
     print(f"run    {run.id}")
     if project:
         print(f"project {project['projectId']}  ({project.get('name')})")
@@ -2700,6 +2795,10 @@ def _set_orchestrator(run, token, shape=None):
         run.set_state("awaiting_plan", f"orchestrator: {aid}")
 
     print(f"orchestrator  {agent_label(agents, aid)}")
+
+    # An automatically routed run gets its route the moment the account is
+    # known: everything before this point had nothing to route.
+    initialise_routing(run, agents, quiet=False)
 
     if shape:
         return _record_plan(run, resolve_shape(shape), intent=f"--shape {shape}", source="shape")
@@ -2781,6 +2880,16 @@ def _record_plan(run, stages, intent="", source="flags", amend=False,
     if not stages:
         die("a plan needs at least one stage", 2)
     warnings = prereq_warnings(stages)
+    # An automatically routed run always goes through the combined gate. The
+    # route is frozen by that approval and every invocation is checked against
+    # the frozen decision, so a plan confirmed without it would leave the run
+    # with a proposal it can never act on.
+    if not approval_required and (run.manifest().get("routing") or {}).get(
+            "mode") == "auto":
+        approval_required = True
+        warnings.append("automatic routing requires the combined approval, so this plan "
+                        "is proposed rather than confirmed: the route is frozen by "
+                        f"APPROVE PLAN {run.id}")
 
     stamp = iso()
     plan = {
@@ -2804,6 +2913,17 @@ def _record_plan(run, stages, intent="", source="flags", amend=False,
         print(f"skip   {', '.join(STAGE_LABEL[s] for s in plan['skipped'])}")
     for w in warnings:
         print(f"note   {w}")
+
+    # The stage slice is an assessment input, so an unapproved proposal is
+    # recomputed rather than left describing the plan this run used to have.
+    _routing_after_change(run, quiet=False)
+    try:
+        stale, _why = routing_needs_reapproval(run)
+    except RoutingError:
+        stale = False
+    if stale:
+        print(f"note   this run's route was approved against the previous plan. "
+              f"Re-approve it: fde approve-plan {run.id} --reapprove")
 
     if run.state == "awaiting_plan":
         reason = "plan proposed; awaiting roles and combined approval" if approval_required \
@@ -2910,6 +3030,13 @@ def cmd_plan(args):
 
 CONTRACTS = [
     "list --json",
+    "routing preview --json",
+    "routing propose --json",
+    "routing show --json",
+    "routing explain --json",
+    "routing override --json",
+    "start --routing --strategy",
+    "invoke --task-id",
     "delete --json",
     "status --json",
     "projects --json",
@@ -2936,12 +3063,40 @@ CONTRACTS = [
 ]
 
 
+def _routing_policy_capability():
+    """Whether automatic routing is actually usable, without raising to say so.
+
+    `fde version` is the command a client calls to find out what it may ask for.
+    It answers that question even when the policy on disk is broken, because
+    "automatic routing is unavailable and here is why" is a useful answer and a
+    traceback is not."""
+    try:
+        policy = load_routing_policy()
+    except RoutingError as exc:
+        return {"state": "unavailable", "code": exc.code, "message": exc.message,
+                "policyRevision": None}
+    return {
+        "state": "available",
+        "policyRevision": policy["policyRevision"],
+        "schemaVersion": policy["schemaVersion"],
+        "strategies": list(AUTO_STRATEGIES),
+        "providers": sorted(policy["providers"]),
+        "costUnitsAreEstimates": True,
+        "monetaryPricing": "not configured",
+    }
+
+
 def cmd_version(args):
     """What this controller is, and which machine-readable contracts it speaks."""
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "toolkit": "fde-core",
         "contracts": CONTRACTS,
+        # Capability strings exist so a client can ask "can this controller do
+        # X" instead of parsing a version and guessing. They are additive: a
+        # capability is added when its contract ships and never repurposed.
+        "capabilities": ROUTING_CAPABILITIES,
+        "routingPolicy": _routing_policy_capability(),
     }
     if getattr(args, "json", False):
         return emit_json(payload)
@@ -2949,9 +3104,15 @@ def cmd_version(args):
     print(f"controller    {pathlib.Path(__file__).resolve()}")
     print(f"runs          {RUNS}")
     print(f"projects      {PROJECTS}")
+    policy_state = _routing_policy_capability()
+    print(f"routing       policy {policy_state.get('policyRevision') or 'unreadable'} "
+          f"({policy_state.get('state')})")
     print("contracts")
     for contract in CONTRACTS:
         print(f"  fde {contract}")
+    print("capabilities")
+    for capability in ROUTING_CAPABILITIES:
+        print(f"  {capability}")
     return 0
 
 
@@ -3109,6 +3270,7 @@ def cmd_roles(args):
 
     if not approval_required:
         _sync_run_mcp(run)
+    _routing_after_change(run, agents, quiet=True)
 
     verb = "selected" if approval_required else "confirmed"
     print(f"\nroles {verb} for {run.id}")
@@ -3118,6 +3280,11 @@ def cmd_roles(args):
         shown = ", ".join(agent_label(agents, x) for x in v) if isinstance(v, list) else (
             agent_label(agents, v) if v else "none")
         print(f"  {label:<28} {shown or 'none'}")
+    routing_doc = load_routing(run)
+    if routing_doc is not None and routing_doc.get("mode") == "auto":
+        print("\nproposed route")
+        print_routing_matrix(routing_doc, indent="  ")
+
     print(f"\nstate  {run.state}")
     if approval_required:
         print("access blocked  no connector, repository or execution access yet")
@@ -3127,15 +3294,26 @@ def cmd_roles(args):
     return 0
 
 
+@routing_command
 def cmd_approve_plan(args):
-    """Approve the exact proposed plan and selected role assignment together."""
+    """Approve the exact proposed plan, roles and route together."""
     run = Run(args.run_id)
     plan = run.plan() or {}
     roles = run.roles() or {}
     if not plan.get("approvalRequired"):
         die(f"run {run.id} does not require a separate combined plan approval", 5)
-    if plan.get("executionApprovedAt"):
+    stale, why = routing_needs_reapproval(run)
+    if plan.get("executionApprovedAt") and not (stale and args.reapprove):
+        if stale:
+            die(f"{why}.\n"
+                f"       The frozen route no longer describes this run, so nothing can be "
+                f"invoked against it.\n"
+                f"       Re-approve the combined plan, roles and route: "
+                f"fde approve-plan {run.id} --reapprove", 5)
         die(f"run {run.id}'s plan is already approved", 5)
+    if args.reapprove and not stale:
+        die(f"run {run.id}'s approved route still matches its plan and roles; there is "
+            f"nothing to re-approve", 5)
     assignments = roles.get("assignments") or {}
     missing = _missing_required_roles(run, assignments)
     if missing:
@@ -3162,8 +3340,20 @@ def cmd_approve_plan(args):
         shown = ", ".join(agent_label(agents, aid) for aid in value) \
             if isinstance(value, list) else (agent_label(agents, value) if value else "none")
         print(f"    {label:<28} {shown or 'none'}")
+    # The exact combined gate covers the plan, the roles AND the route. If the
+    # route recomputes differently from the one last shown, the approval cannot
+    # stand for it, and the operator is shown the revised proposal instead.
+    routing_doc = freeze_routing_for_approval(run, agents)
+    if routing_doc is not None:
+        print("\n  route")
+        print_routing_matrix(routing_doc, indent="    ")
+        print(f"\n    decision  {routing_doc.get('decisionHash')}")
+
     print("\n  Approval unlocks planned local work and role-scoped configured read access.")
     print("  Codex writes, deployments and external publication keep their own gates.")
+    if routing_doc is not None:
+        print("  It also freezes the route above: every invocation is checked against it,")
+        print("  and raising a tier, effort, agent count or ceiling needs its own approval.")
 
     expected = f"APPROVE PLAN {run.id}"
     print(f"\nType exactly: {expected}")
@@ -3180,6 +3370,7 @@ def cmd_approve_plan(args):
     write_json(run.roles_path, roles)
     run.event("plan.execution-approved", assignments=assignments,
               stages=plan.get("stages", []))
+    confirm_routing_freeze(run, plan.get("stages", []), assignments)
     if run.state == "awaiting_roles":
         run.set_state("roles_confirmed", "combined plan and roles approved by the user")
     _sync_run_mcp(run)
@@ -3214,6 +3405,13 @@ STAGE_HINT = {
 def next_action(run):
     state = run.state
     plan = run.plan() or {}
+    try:
+        stale, _why = routing_needs_reapproval(run)
+    except RoutingError:
+        stale = False
+    if stale:
+        return (f"fde approve-plan {run.id} --reapprove   — the plan or roles changed "
+                f"after the route was frozen")
     if plan.get("approvalRequired") and not plan.get("executionApprovedAt"):
         assignments = (run.roles() or {}).get("assignments", {})
         if not _missing_required_roles(run, assignments):
@@ -3321,6 +3519,23 @@ def cmd_status(args):
             shown = ", ".join(agent_label(agents, x) for x in v) if isinstance(v, list) else (
                 agent_label(agents, v) if v else "none")
             print(f"  {label:<28} {shown or 'none'}")
+
+    try:
+        routing_doc = load_routing(run)
+    except RoutingError as exc:
+        routing_doc = None
+        print(f"\nrouting\n  unreadable — {exc.message}")
+    if routing_doc is not None:
+        approved = routing_doc.get("approvedAt")
+        print("\nrouting")
+        print(f"  mode       {routing_doc.get('mode')}  ·  "
+              f"strategy {routing_doc.get('strategy')}  ·  "
+              f"{'approved ' + str(approved) if approved else 'proposed, not approved'}")
+        print_routing_matrix(routing_doc, indent="  ")
+        if routing_doc.get("overrides"):
+            print(f"  overrides  {len(routing_doc['overrides'])} recorded — "
+                  f"fde routing show {run.id}")
+        print("  usage      unavailable — no provider has reported usage for this run")
 
     report = artifact_report(run)
     print("\nartifacts")
@@ -3674,23 +3889,51 @@ def _bin(name):
     return str(local) if local.exists() else (shutil.which(name) or str(local))
 
 
-def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path, write: bool):
+def _routed_options(route):
+    """The approved model and effort as separate argv elements, or nothing.
+
+    Separate elements, never a formatted string: the task body is the last
+    argument and always the value of a preceding option, so a task file that
+    begins with a dash is text and can never become a flag. 'default' and 'auto'
+    are omitted rather than sent, so an unrouted invocation reaches the CLI
+    exactly as it did before routing existed."""
+    if not route:
+        return []
+    options = []
+    model = route.get("model")
+    effort = route.get("effort")
+    if model and model != ROUTING_AMBIGUOUS_MODEL:
+        if not ROUTING_MODEL_RE.match(str(model)):
+            die("the approved route names an unusable model identifier", 2)
+        options += ["--model", str(model)]
+    if effort and effort != "auto":
+        if effort not in ROUTING_EFFORT_NAMES:
+            die(f"the approved route names an unsupported effort '{effort}'", 2)
+        options += ["--effort", str(effort)]
+    return options
+
+
+def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path,
+                     write: bool, route=None):
     a = agents["agents"][agent_id]
     kind = a.get("kind")
     body = task.read_text(encoding="utf-8", errors="replace")
     env = {}
+    options = _routed_options(route)
     if kind == "claude":
         prof = a["profile"]
         env["CLAUDE_CONFIG_DIR"] = str(PROFILES_DIR / prof)
         env["CLAUDE_PROFILE"] = prof
         if prof == "bedrock":
+            # Bedrock routing stays environment-driven exactly as before; the
+            # routed model rides in the argument array beside it.
             env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        return ["claude", "-p", body], env
+        return ["claude"] + options + ["-p", body], env
     if kind == "codex":
         if write:
             return [_bin("ask-codex"), "--write", "--run", run.id,
-                    "--stage", stage, "--task-file", str(task)], env
-        return [_bin("ask-codex"), "--read-only", "--task-file", str(task)], env
+                    "--stage", stage, "--task-file", str(task)] + options, env
+        return [_bin("ask-codex"), "--read-only", "--task-file", str(task)] + options, env
     if kind == "gemini":
         return [_bin("ask-gemini"), body], env
     if kind == "copilot-studio":
@@ -3698,6 +3941,7 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
     die(f"no invocation defined for kind '{kind}'", 2)
 
 
+@routing_command
 def cmd_invoke(args):
     agents = load_agents()
     run = Run(args.run_id)
@@ -3739,19 +3983,50 @@ def cmd_invoke(args):
             die(f"{agent_label(agents, agent_id)} must not act in the '{stage}' stage "
                 f"({forbidden} is forbidden for this identity).", 6)
 
-    task = _resolve_task_file(run, args.task_file)
-    argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write)
+    # An automatically routed run resolves the frozen route here. Nothing the
+    # caller passed decides the model or the effort: the approved decision does,
+    # and a stage, role, identity, model or effort that does not match it is
+    # refused rather than reconciled.
+    route = resolve_routed_task(
+        run, agents, task_id=getattr(args, "task_id", None), agent_id=agent_id,
+        stage=stage)
+    if route is None and getattr(args, "task_id", None):
+        raise RoutingError(
+            "routing-absent",
+            f"run {run.id} has no approved route, so there is no task '{args.task_id}' "
+            f"to carry out",
+            "This run selects its model and effort manually; drop --task-id.",
+            exit_code=2)
+
+    given = args.task_file or getattr(args, "task_file_option", None)
+    if not given:
+        die("give the task file, either positionally or with --task-file", 2)
+    if args.task_file and getattr(args, "task_file_option", None):
+        die("give the task file once, not both positionally and with --task-file", 2)
+    task = _resolve_task_file(run, given)
+    argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write,
+                                       route=route)
 
     if any(f in " ".join(argv) for f in FORBIDDEN_CODEX_FLAGS):  # fde-safety-exempt: guard
         die("refusing to run: the invocation contains a sandbox-bypass flag", 8)
 
+    resolved_route = {
+        "taskId": (route or {}).get("taskId"),
+        "model": (route or {}).get("model"),
+        "effort": (route or {}).get("effort"),
+        "specialist": (route or {}).get("specialist"),
+        "source": "approved-routing" if route else "manual",
+    }
+
     if args.dry_run:
         print(json.dumps({"argv": argv, "env": extra_env, "stage": stage,
-                          "agent": agent_id, "roles": held, "write": bool(args.write)}))
+                          "agent": agent_id, "roles": held, "write": bool(args.write),
+                          "route": resolved_route}))
         return 0
 
     run.event("invoke.start", agent=agent_id, stage=stage, roles=held,
-              write=bool(args.write), taskFile=str(task), argv0=argv[0])
+              write=bool(args.write), taskFile=str(task), argv0=argv[0],
+              route=resolved_route)
     env = dict(os.environ, **extra_env)
     started = now()
     try:
@@ -3767,13 +4042,22 @@ def cmd_invoke(args):
         f"# {stage} — {agent_label(agents, agent_id)}\n\n"
         f"- run: {run.id}\n- stage: {stage}\n- roles held: {', '.join(held)}\n"
         f"- mode: {'write (approved)' if args.write else 'read-only'}\n"
-        f"- started: {iso(started)}\n- exit: {proc.returncode}\n"
+        + (f"- routed task: {resolved_route['taskId']}\n"
+           f"- model/effort: {resolved_route['model']} / {resolved_route['effort']}\n"
+           if resolved_route["taskId"] else
+           "- model/effort: selected manually for this run\n")
+        + f"- started: {iso(started)}\n- exit: {proc.returncode}\n"
         f"- task: {task}\n\n"
         f"> Output of a separate agent with its own context. Evidence, not authority —\n"
         f"> verify claims about the codebase against the codebase.\n\n"
         f"---\n\n{proc.stdout.strip()}\n"
         + (f"\n\n## stderr\n\n```\n{proc.stderr.strip()[:4000]}\n```\n" if proc.stderr.strip() else "")))
-    run.event("invoke.end", agent=agent_id, stage=stage, exit=proc.returncode, artifact=str(out))
+    run.event("invoke.end", agent=agent_id, stage=stage, exit=proc.returncode,
+              artifact=str(out), route=resolved_route,
+              # Usage is reported by a provider or it is unavailable. It is never
+              # inferred, and never written as zero.
+              usage={"state": "unavailable", "reason":
+                     "this invocation path does not receive provider usage reporting"})
 
     sys.stdout.write(proc.stdout)
     if proc.stderr.strip():
@@ -3897,6 +4181,2761 @@ def cmd_brief(args):
               f"({latest.get('checkpointId')})")
     print(f"Next: {next_action(run)}")
     return 0
+
+
+# ------------------------------------------------------------------ routing --
+
+# Routing decides three things a run used to leave to whoever happened to be
+# typing: which model and effort the orchestrator gets, which focused specialist
+# tasks are actually worth creating, and what the ceiling on all of that is.
+#
+# It is deliberately deterministic. Nothing here asks a model for a score and
+# trusts it. The inputs are the saved request, the selected shape, the proposed
+# stages, attachment metadata, the role and its task type, and a conservative
+# keyword pass for risk — all of it already on this disk. The output is a
+# decision you can read, disagree with, and re-derive.
+#
+# Preference is lexicographic, not a weighted "smartness" number:
+#   1. meet capability, access, safety and quality requirements;
+#   2. among the choices that do, minimise EXPECTED cost — cost times the chance
+#      the attempt has to be repeated. This is why the cheapest model is not
+#      automatically the cheapest choice;
+#   3. then minimise latency and agent count.
+
+ROUTING_SCHEMA_VERSION = 1
+ROUTING_POLICY_FILE = SHARED / "config" / "routing-policy.json"
+
+ROUTING_MODES = ("auto", "manual")
+ROUTING_STRATEGIES = ("balanced", "quality_first", "cost_first", "manual")
+AUTO_STRATEGIES = ("balanced", "quality_first", "cost_first")
+ROUTING_TIER_NAMES = ("economy", "standard", "premium")
+ROUTING_FLOOR_NAMES = ("low", "standard", "high", "critical")
+ROUTING_BAND_NAMES = ("simple", "standard", "complex", "critical")
+ROUTING_EFFORT_NAMES = ("auto", "low", "medium", "high", "xhigh", "max")
+
+# The band a quality floor implies. Risk overrides arithmetic: a floor may raise
+# a run's band, and it may never lower it.
+ROUTING_FLOOR_BAND = {
+    "low": "simple", "standard": "standard", "high": "complex", "critical": "critical",
+}
+
+ROUTING_TASK_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+ROUTING_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
+ROUTING_MAX_REQUIREMENT_BYTES = 64 * 1024
+ROUTING_MAX_REASON_CHARS = 500
+ROUTING_MAX_EVIDENCE_CHARS = 200
+ROUTING_MAX_ALTERNATIVES = 3
+ROUTING_MAX_REJECTED = 6
+ROUTING_MAX_STATUS_TASKS = 50
+
+# The ambiguous account default is never selected automatically: its quality and
+# its cost cannot be compared with anything, so a decision naming it explains
+# nothing and cannot be audited.
+ROUTING_AMBIGUOUS_MODEL = "default"
+
+# What this controller can be asked. The console feature-detects on these rather
+# than guessing from a version string.
+ROUTING_CAPABILITIES = [
+    "routing.policy.v1",
+    "routing.preview",
+    "routing.propose",
+    "routing.show",
+    "routing.explain",
+    "routing.override",
+    "routing.start-auto",
+    "routing.invoke-task-id",
+    "routing.status-summary",
+]
+
+ROUTING_EVENT_KINDS = (
+    "routing.assessed",
+    "routing.proposed",
+    "routing.approved",
+    "routing.overridden",
+    "routing.escalated",
+    "routing.budget_exhausted",
+)
+
+
+# ----------------------------------------------------------- routing policy --
+
+_ROUTING_POLICY_CACHE = {}
+
+
+def _policy_fail(detail):
+    raise RoutingError(
+        "routing-policy-invalid",
+        f"the routing policy is not usable: {detail}",
+        f"Fix {ROUTING_POLICY_FILE}, or reinstall it with ./install.sh",
+        exit_code=2,
+    )
+
+
+def _req(mapping, key, kind, where):
+    if not isinstance(mapping, dict) or key not in mapping:
+        _policy_fail(f"{where} is missing '{key}'")
+    value = mapping[key]
+    if not isinstance(value, kind) or isinstance(value, bool) and kind is not bool:
+        _policy_fail(f"{where}.{key} is not a {kind.__name__ if not isinstance(kind, tuple) else 'valid value'}")
+    return value
+
+
+def _positive(value, where):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        _policy_fail(f"{where} must be a positive number")
+    return float(value)
+
+
+def _str_list(value, where):
+    if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
+        _policy_fail(f"{where} must be a list of non-empty strings")
+    return [x.strip() for x in value]
+
+
+def _validate_price(model_id, price):
+    """Monetary pricing is allowed only when it says where it came from.
+
+    A bare number in a config file becomes a fact nobody can date or check, and
+    provider prices move. Until a price carries a source, a currency and the day
+    it took effect, every estimate this engine produces stays in costUnits and
+    is labelled an estimate."""
+    if price is None:
+        return None
+    if not isinstance(price, dict):
+        _policy_fail(f"providers[].models[{model_id}].price must be an object")
+    for field in ("source", "currency", "effectiveAt"):
+        if not isinstance(price.get(field), str) or not price[field].strip():
+            _policy_fail(
+                f"providers[].models[{model_id}].price has no '{field}'. Monetary "
+                f"pricing needs a source, a currency and an effectiveAt date, or it "
+                f"is not a fact this controller will repeat")
+    return None
+
+
+def validate_routing_policy(raw):
+    """Strict, and noisy about exactly what is wrong.
+
+    A half-understood cost policy is worse than none: it would silently produce
+    decisions the operator never sanctioned. Anything unexpected is refused
+    here, once, with the field named."""
+    if not isinstance(raw, dict):
+        _policy_fail("the file does not contain a JSON object")
+    version = raw.get("schemaVersion")
+    if version != ROUTING_SCHEMA_VERSION:
+        _policy_fail(
+            f"schemaVersion is {version!r}; this controller reads "
+            f"{ROUTING_SCHEMA_VERSION}")
+    revision = raw.get("policyRevision")
+    if not isinstance(revision, str) or not revision.strip():
+        _policy_fail("policyRevision must be a non-empty string")
+
+    strategies = _str_list(raw.get("strategies"), "strategies")
+    if set(strategies) != set(ROUTING_STRATEGIES):
+        _policy_fail(f"strategies must be exactly {', '.join(ROUTING_STRATEGIES)}")
+    default_strategy = raw.get("defaultStrategy")
+    if default_strategy not in AUTO_STRATEGIES:
+        _policy_fail(f"defaultStrategy must be one of {', '.join(AUTO_STRATEGIES)}")
+
+    tiers = raw.get("tiers")
+    if not isinstance(tiers, dict) or set(tiers) != set(ROUTING_TIER_NAMES):
+        _policy_fail(f"tiers must name exactly {', '.join(ROUTING_TIER_NAMES)}")
+    for name, rank in tiers.items():
+        if isinstance(rank, bool) or not isinstance(rank, int):
+            _policy_fail(f"tiers.{name} must be an integer rank")
+    if len(set(tiers.values())) != len(tiers):
+        _policy_fail("tiers must have distinct ranks")
+
+    efforts = _str_list(raw.get("efforts"), "efforts")
+    if set(efforts) != set(ROUTING_EFFORT_NAMES):
+        _policy_fail(
+            f"efforts must be exactly {', '.join(ROUTING_EFFORT_NAMES)} — an effort "
+            f"this controller cannot pass to a provider must not appear in a route")
+    effort_rank = {name: index for index, name in enumerate(ROUTING_EFFORT_NAMES)}
+
+    multiplier = raw.get("effortCostMultiplier")
+    if not isinstance(multiplier, dict) or set(multiplier) != set(ROUTING_EFFORT_NAMES):
+        _policy_fail("effortCostMultiplier must give a weight for every effort")
+    for name, value in multiplier.items():
+        _positive(value, f"effortCostMultiplier.{name}")
+
+    retry = raw.get("expectedRetry")
+    if not isinstance(retry, dict) or set(retry) != {
+            "tierBelowBand", "tierAtBand", "tierAboveBand"}:
+        _policy_fail("expectedRetry must give tierBelowBand, tierAtBand and tierAboveBand")
+    for name, value in retry.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value < 1:
+            _policy_fail(f"expectedRetry.{name} must be a probability in [0, 1)")
+
+    providers = raw.get("providers")
+    if not isinstance(providers, dict) or not providers:
+        _policy_fail("providers must name at least one provider")
+    for provider_id, provider in providers.items():
+        where = f"providers.{provider_id}"
+        if not isinstance(provider, dict):
+            _policy_fail(f"{where} must be an object")
+        _req(provider, "label", str, where)
+        models = provider.get("models")
+        if not isinstance(models, list) or not models:
+            _policy_fail(f"{where}.models must list at least one model")
+        seen = set()
+        for model in models:
+            if not isinstance(model, dict):
+                _policy_fail(f"{where}.models must contain objects")
+            model_id = model.get("id")
+            if not isinstance(model_id, str) or not ROUTING_MODEL_RE.match(model_id):
+                _policy_fail(f"{where}.models has a model with no usable id")
+            if model_id == ROUTING_AMBIGUOUS_MODEL:
+                _policy_fail(
+                    f"{where}.models names '{ROUTING_AMBIGUOUS_MODEL}'. The account "
+                    f"default is not comparable on quality or cost, so it is never "
+                    f"an automatic choice — name concrete models")
+            if model_id in seen:
+                _policy_fail(f"{where}.models lists '{model_id}' twice")
+            seen.add(model_id)
+            _req(model, "label", str, f"{where}.models[{model_id}]")
+            if model.get("tier") not in tiers:
+                _policy_fail(f"{where}.models[{model_id}].tier is not a known tier")
+            model_efforts = _str_list(model.get("efforts"), f"{where}.models[{model_id}].efforts")
+            if not model_efforts:
+                _policy_fail(f"{where}.models[{model_id}].efforts is empty")
+            unknown = [e for e in model_efforts if e not in effort_rank]
+            if unknown:
+                _policy_fail(
+                    f"{where}.models[{model_id}].efforts names {', '.join(unknown)}, "
+                    f"which this controller cannot pass to a provider")
+            _positive(model.get("costWeight"), f"{where}.models[{model_id}].costWeight")
+            context = model.get("contextTokens")
+            if context is not None and (isinstance(context, bool) or not isinstance(context, int) or context <= 0):
+                _policy_fail(f"{where}.models[{model_id}].contextTokens must be null or a positive integer")
+            _str_list(model.get("strengths", []), f"{where}.models[{model_id}].strengths")
+            _str_list(model.get("limitations", []), f"{where}.models[{model_id}].limitations")
+            _validate_price(model_id, model.get("price"))
+
+    unroutable = raw.get("unroutableKinds", {})
+    if not isinstance(unroutable, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in unroutable.items()):
+        _policy_fail("unroutableKinds must map an identity kind to a reason")
+
+    floors = raw.get("floors")
+    if not isinstance(floors, dict) or set(floors) != set(ROUTING_FLOOR_NAMES):
+        _policy_fail(f"floors must name exactly {', '.join(ROUTING_FLOOR_NAMES)}")
+    for name, spec in floors.items():
+        if not isinstance(spec, dict):
+            _policy_fail(f"floors.{name} must be an object")
+        if spec.get("minimumTier") not in tiers:
+            _policy_fail(f"floors.{name}.minimumTier is not a known tier")
+        if spec.get("minimumEffort") not in effort_rank:
+            _policy_fail(f"floors.{name}.minimumEffort is not a known effort")
+
+    for field in ("taskFloors", "riskFloors"):
+        mapping = raw.get(field)
+        if not isinstance(mapping, dict) or not mapping:
+            _policy_fail(f"{field} must map a class to a quality floor")
+        for key, value in mapping.items():
+            if value not in floors:
+                _policy_fail(f"{field}.{key} is not a known quality floor")
+    missing_stages = [s for s in STAGE_ORDER if s not in raw["taskFloors"]]
+    if missing_stages:
+        _policy_fail(f"taskFloors has no floor for {', '.join(missing_stages)}")
+
+    bands = raw.get("bands")
+    if not isinstance(bands, dict) or set(bands) != set(ROUTING_BAND_NAMES):
+        _policy_fail(f"bands must name exactly {', '.join(ROUTING_BAND_NAMES)}")
+    last = -1
+    for name in ROUTING_BAND_NAMES:
+        spec = bands[name]
+        if not isinstance(spec, dict):
+            _policy_fail(f"bands.{name} must be an object")
+        max_score = spec.get("maxScore")
+        if isinstance(max_score, bool) or not isinstance(max_score, int) or max_score <= last:
+            _policy_fail("bands maxScore values must increase from simple to critical")
+        last = max_score
+        if spec.get("recommendedTier") not in tiers:
+            _policy_fail(f"bands.{name}.recommendedTier is not a known tier")
+        if spec.get("preferredEffort") not in effort_rank:
+            _policy_fail(f"bands.{name}.preferredEffort is not a known effort")
+        if spec.get("floor") not in floors:
+            _policy_fail(f"bands.{name}.floor is not a known quality floor")
+
+    limits = raw.get("limits")
+    if not isinstance(limits, dict) or set(limits) != set(ROUTING_BAND_NAMES):
+        _policy_fail(f"limits must name exactly {', '.join(ROUTING_BAND_NAMES)}")
+    for name, spec in limits.items():
+        where = f"limits.{name}"
+        if not isinstance(spec, dict):
+            _policy_fail(f"{where} must be an object")
+        for field in ("maxSpecialists", "maxSpecialistsPerStage", "maxParallel", "maxCostUnits"):
+            value = spec.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                _policy_fail(f"{where}.{field} must be a positive number")
+        retries = spec.get("maxRetries")
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+            _policy_fail(f"{where}.maxRetries must be a non-negative integer")
+        if spec.get("maxAutomaticTier") not in tiers:
+            _policy_fail(f"{where}.maxAutomaticTier is not a known tier")
+        if spec.get("maxAutomaticEffort") not in effort_rank:
+            _policy_fail(f"{where}.maxAutomaticEffort is not a known effort")
+        if not isinstance(spec.get("requireIndependentReview"), bool):
+            _policy_fail(f"{where}.requireIndependentReview must be true or false")
+        band_floor = floors[bands[name]["floor"]]
+        if tiers[band_floor["minimumTier"]] > tiers[spec["maxAutomaticTier"]]:
+            _policy_fail(
+                f"{where}.maxAutomaticTier is below the '{name}' band's own quality "
+                f"floor, so no automatic route could ever satisfy it")
+        if effort_rank[band_floor["minimumEffort"]] > effort_rank[spec["maxAutomaticEffort"]]:
+            _policy_fail(
+                f"{where}.maxAutomaticEffort is below the '{name}' band's own quality "
+                f"floor, so no automatic route could ever satisfy it")
+
+    escalation = raw.get("escalation")
+    if not isinstance(escalation, dict):
+        _policy_fail("escalation must be an object")
+    ladder = escalation.get("ladder")
+    if not isinstance(ladder, list) or not ladder:
+        _policy_fail("escalation.ladder must list at least one rung")
+    previous = (-1, -1)
+    for rung in ladder:
+        if not isinstance(rung, dict) or rung.get("tier") not in tiers \
+                or rung.get("effort") not in effort_rank:
+            _policy_fail("every escalation.ladder rung needs a known tier and effort")
+        current = (tiers[rung["tier"]], effort_rank[rung["effort"]])
+        if current <= previous:
+            _policy_fail("escalation.ladder must ascend; a ladder that repeats or "
+                         "descends is not an escalation path")
+        previous = current
+    above = escalation.get("requireRecordedFailureAbove")
+    if above is not None and (not isinstance(above, dict) or above.get("tier") not in tiers
+                              or above.get("effort") not in effort_rank):
+        _policy_fail("escalation.requireRecordedFailureAbove needs a known tier and effort")
+
+    specialists = raw.get("specialists")
+    if not isinstance(specialists, dict):
+        _policy_fail("specialists must map a role to a method or null")
+    for role, method in specialists.items():
+        if role not in ALL_ROLES:
+            _policy_fail(f"specialists names '{role}', which is not a role this controller has")
+        if method is not None and (not isinstance(method, str) or not method.strip()):
+            _policy_fail(f"specialists.{role} must be a method name or null")
+    missing_roles = [r for r in ALL_ROLES if r not in specialists]
+    if missing_roles:
+        _policy_fail(f"specialists has no entry for {', '.join(missing_roles)}")
+
+    reviewers = raw.get("independentReviewMethods")
+    if not isinstance(reviewers, dict) or not isinstance(reviewers.get("default"), str):
+        _policy_fail("independentReviewMethods needs at least a 'default' method")
+
+    policy = dict(raw)
+    policy["_effortRank"] = effort_rank
+    return policy
+
+
+def load_routing_policy(path=None):
+    """The policy, validated once per process and per path."""
+    target = pathlib.Path(path) if path else ROUTING_POLICY_FILE
+    key = str(target)
+    cached = _ROUTING_POLICY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise RoutingError(
+            "routing-policy-missing",
+            f"no routing policy at {target}",
+            "Reinstall it with ./install.sh, or route manually with "
+            "--routing manual.",
+            exit_code=2)
+    except json.JSONDecodeError as exc:
+        _policy_fail(f"it is not valid JSON ({exc})")
+    policy = validate_routing_policy(raw)
+    _ROUTING_POLICY_CACHE[key] = policy
+    return policy
+
+
+def _tier_rank(policy, tier):
+    return policy["tiers"][tier]
+
+
+def _effort_rank(policy, effort):
+    return policy["_effortRank"][effort]
+
+
+def _max_floor(policy, *floors):
+    """The strictest of several quality floors. Floors combine upward only."""
+    best = None
+    for floor in floors:
+        if floor is None:
+            continue
+        if floor not in policy["floors"]:
+            _policy_fail(f"'{floor}' is not a known quality floor")
+        if best is None or ROUTING_BAND_NAMES.index(ROUTING_FLOOR_BAND[floor]) > \
+                ROUTING_BAND_NAMES.index(ROUTING_FLOOR_BAND[best]):
+            best = floor
+    return best or "low"
+
+
+def _max_band(*bands):
+    present = [b for b in bands if b]
+    if not present:
+        return "simple"
+    return max(present, key=ROUTING_BAND_NAMES.index)
+
+
+def _next_band(band):
+    index = min(ROUTING_BAND_NAMES.index(band) + 1, len(ROUTING_BAND_NAMES) - 1)
+    return ROUTING_BAND_NAMES[index]
+
+
+# ------------------------------------------------- complexity and risk --
+
+def _rx(*parts):
+    return re.compile("|".join(parts), re.IGNORECASE)
+
+
+# Conservative, word-bounded and explainable. These decide only what to LOOK at
+# more carefully; they never conclude anything about a repository, a connector's
+# contents or the sensitivity of data FDE has not been approved to read.
+ROUTING_RISK_PATTERNS = (
+    ("security", _rx(r"\bsecurity\b", r"\bvulnerab\w*", r"\bcve-\d", r"\bxss\b", r"\bcsrf\b",
+                     r"\bsql\s+injection\b", r"\bsecrets?\b", r"\bcredentials?\b",
+                     r"\bencrypt\w*", r"\bpen(?:etration)?[- ]test\w*", r"\bthreat\s+model\w*")),
+    ("authentication", _rx(r"\bauthenticat\w*", r"\bauthoriz\w*", r"\bauthoris\w*", r"\boauth\b",
+                           r"\boidc\b", r"\bsaml\b", r"\bsso\b", r"\bmfa\b", r"\brbac\b",
+                           r"\blog[- ]?in\b", r"\bsign[- ]?in\b", r"\bpermissions?\b",
+                           r"\baccess\s+control\b", r"\bsession\s+tokens?\b")),
+    ("production", _rx(r"\bproduction\b", r"\bprod\b", r"\blive\s+(?:environment|traffic|system)\b",
+                       r"\bcustomer[- ]facing\b", r"\bgo[- ]live\b")),
+    ("deployment", _rx(r"\bdeploy\w*", r"\breleas\w*", r"\broll[- ]?out\b", r"\broll[- ]?back\b",
+                       r"\bcut[- ]?over\b", r"\bhotfix\b", r"\bci/?cd\b")),
+    ("publication", _rx(r"\bpublish\w*", r"\bconfluence\b", r"\bjira\b", r"\bsharepoint\b",
+                        r"\bbitbucket\b", r"\bgithub\b", r"\bteams\b", r"\be-?mail\b")),
+    ("destructive", _rx(r"\bdelet\w*", r"\bdrop\s+table\b", r"\btruncat\w*", r"\bpurg\w*",
+                        r"\bwipe\b", r"\bdestructive\b", r"\bforce[- ]push\b")),
+    ("dataMigration", _rx(r"\bmigrat\w*", r"\bbackfill\w*", r"\bschema\s+change\b",
+                          r"\bre-?index\w*", r"\bdata\s+loss\b")),
+    ("legalCompliance", _rx(r"\bgdpr\b", r"\bdpa\b", r"\bcompliance\b", r"\bregulat\w*",
+                            r"\blegal\b", r"\bliabilit\w*", r"\bcontractual\b", r"\bsox\b",
+                            r"\bhipaa\b")),
+    ("payments", _rx(r"\bpayments?\b", r"\bbilling\b", r"\binvoic\w*", r"\bpci\b",
+                     r"\brefund\w*", r"\bcheckout\b")),
+    ("privacy", _rx(r"\bpii\b", r"\bpersonal\s+data\b", r"\bpersonally\s+identifiable\b",
+                    r"\banonymis\w*", r"\banonymiz\w*", r"\bpseudonym\w*")),
+    ("irreversible", _rx(r"\birreversib\w*", r"\bcannot\s+be\s+undone\b",
+                         r"\bone[- ]way\s+door\b", r"\bno\s+rollback\b")),
+)
+
+ROUTING_VAGUE_RE = _rx(r"\bsomehow\b", r"\bfigure\s+(?:it\s+)?out\b", r"\bnot\s+sure\b",
+                       r"\btbd\b", r"\bexplore\b", r"\bmaybe\b", r"\betc\b", r"\bimprove\b",
+                       r"\bbetter\b", r"\boptimis\w*", r"\boptimiz\w*", r"\bmodernis\w*",
+                       r"\bsome\s+kind\s+of\b", r"\bas\s+needed\b", r"\bor\s+something\b",
+                       r"\bclean\s*up\b", r"\bhave\s+a\s+look\b", r"\bsort\s+out\b")
+
+ROUTING_CRITERIA_RE = _rx(r"\bmust\b", r"\bshould\b", r"\bacceptance\s+criteri\w*",
+                          r"\bdefinition\s+of\s+done\b", r"\bso\s+that\b",
+                          r"\bwithin\s+\d", r"\b\d{4}-\d{2}-\d{2}\b", r"\bgiven\b",
+                          r"\bexpected\b", r"\bconstraint\w*")
+
+# Evidence that a request names concrete things: a quoted value, a filename, a
+# Jira key, a from/to change, or an identifier written the way code is written.
+# A short request full of these is precise, not underspecified, and treating it
+# as ambiguous is how an engine ends up charging a premium for clarity.
+ROUTING_SPECIFIC_RE = _rx(r"'[^']{2,40}'", r'"[^"]{2,40}"', r"`[^`]{2,40}`",
+                          r"\b[A-Za-z0-9_.-]+\.(?:py|ts|tsx|js|jsx|json|md|csv|tsv|yml|"
+                          r"yaml|sql|sh|html|css|xml|toml|ini|tf|cs|java|go|rs)\b",
+                          r"\b[A-Z][A-Z0-9]+-\d+\b",
+                          r"\bfrom\s+\S+\s+to\s+\S+\b",
+                          r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b",
+                          r"\b[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*\b",
+                          r"\bv?\d+\.\d+(?:\.\d+)?\b")
+
+ROUTING_NOVELTY_RE = _rx(r"\barchitect\w*", r"\btrade[- ]?offs?\b", r"\bnovel\b",
+                         r"\bfrom\s+scratch\b", r"\bgreenfield\b", r"\bstrateg\w*",
+                         r"\breconcil\w*", r"\bcompare\s+(?:the\s+)?options\b",
+                         r"\bevaluat\w*", r"\bproof\s+of\s+concept\b", r"\badr\b",
+                         r"\bdecid\w*\s+between\b")
+
+ROUTING_SYSTEM_PATTERNS = (
+    ("jira", _rx(r"\bjira\b")),
+    ("confluence", _rx(r"\bconfluence\b")),
+    ("sharepoint", _rx(r"\bsharepoint\b")),
+    ("scm", _rx(r"\bbitbucket\b", r"\bgithub\b", r"\bgitlab\b")),
+    ("aws", _rx(r"\baws\b", r"\bbedrock\b", r"\bs3\b", r"\blambda\b", r"\bdynamodb\b")),
+    ("azure", _rx(r"\bazure\b", r"\bentra\b", r"\bapp\s+service\b")),
+    ("microsoft365", _rx(r"\bteams\b", r"\boutlook\b", r"\bm365\b", r"\bo365\b")),
+    ("database", _rx(r"\bdatabase\b", r"\bpostgres\w*", r"\bmysql\b", r"\bmongo\w*",
+                     r"\bsql\s+server\b", r"\bredis\b")),
+    ("api", _rx(r"\bapis?\b", r"\bwebhook\w*", r"\bintegration\w*", r"\bconnector\w*")),
+    ("ci", _rx(r"\bgithub\s+actions\b", r"\bjenkins\b", r"\bazure\s+devops\b", r"\bpipelines?\b")),
+)
+
+# Stages whose whole purpose is judgement rather than execution.
+ROUTING_JUDGEMENT_STAGES = {"solutioning", "review", "reconciliation"}
+ROUTING_WRITE_STAGES = {"implementation", "deployment", "publication"}
+
+
+def _evidence(text):
+    return _safe_line(text, ROUTING_MAX_EVIDENCE_CHARS)
+
+
+def _matched_terms(pattern, text, limit=4):
+    seen = []
+    for match in pattern.finditer(text):
+        term = match.group(0).strip().lower()
+        if term and term not in seen:
+            seen.append(term)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def _distinct_systems(text):
+    return [name for name, pattern in ROUTING_SYSTEM_PATTERNS if pattern.search(text)]
+
+
+def assess_routing(request):
+    """Score a request's complexity and risk. Pure: a dict in, a dict out.
+
+    Reads nothing. Every input is something already saved locally — the request
+    the user typed, the stages they chose, the metadata of files they attached,
+    and how many repositories their project names. Nothing is inferred about the
+    contents of a repository, a connector or a client system, because none of
+    those has been read at scoping time and guessing would be worse than saying
+    so.
+
+    `request` keys:
+      requirement   str   the recorded ask, verbatim
+      stages        list  the proposed stage slice
+      shape         str   the named shape, if one was used
+      attachments   list  [{"size": int, "mediaType": str}] metadata only
+      repoCount     int   repositories the run's project names
+    """
+    text = (request.get("requirement") or "")[:ROUTING_MAX_REQUIREMENT_BYTES]
+    stages = [s for s in STAGE_ORDER if s in set(request.get("stages") or [])]
+    attachments = [a for a in (request.get("attachments") or []) if isinstance(a, dict)]
+    repo_count = max(0, int(request.get("repoCount") or 0))
+    shape = request.get("shape") or None
+    words = len(text.split())
+    chars = len(text.strip())
+    attachment_bytes = sum(int(a.get("size") or 0) for a in attachments)
+
+    dimensions = []
+    missing = []
+
+    def dimension(key, label, score, evidence):
+        dimensions.append({"id": key, "label": label, "score": max(0, min(2, score)),
+                           "evidence": _evidence(evidence)})
+
+    # -- scope breadth
+    breadth, why = 0, []
+    if len(stages) > 5:
+        breadth += 2
+        why.append(f"{len(stages)} stages planned")
+    elif len(stages) >= 3:
+        breadth += 1
+        why.append(f"{len(stages)} stages planned")
+    else:
+        why.append(f"{len(stages) or 'no'} stage(s) planned")
+    if repo_count > 1:
+        breadth += 1
+        why.append(f"{repo_count} repositories in the project")
+    dimension("scopeBreadth", "scope breadth", breadth, "; ".join(why))
+
+    # -- ambiguity
+    ambiguity, why = 0, []
+    if chars == 0:
+        ambiguity = 2
+        why.append("no request has been recorded yet")
+        missing.append("the request itself — nothing has been recorded for this run")
+    else:
+        # Three signals, and the wording ones count once between them: a request
+        # that is both vague and short scores 2, a request that merely lacks a
+        # stated acceptance criterion does not.
+        brevity = 2 if chars < 40 else (1 if chars < 120 else 0)
+        specific = _matched_terms(ROUTING_SPECIFIC_RE, text)
+        vague = _matched_terms(ROUTING_VAGUE_RE, text)
+        no_criteria = not ROUTING_CRITERIA_RE.search(text)
+        if specific:
+            brevity = max(0, brevity - 1)
+            why.append("names concrete things: " + ", ".join(specific))
+        if brevity:
+            why.append(f"the request is {chars} characters")
+        if vague:
+            why.append("open-ended wording: " + ", ".join(vague))
+        elif no_criteria and not specific:
+            why.append("no acceptance criterion, constraint or concrete target is stated")
+        ambiguity = min(2, brevity + (1 if vague else (
+            1 if no_criteria and not specific else 0)))
+        if no_criteria and not specific:
+            missing.append("what 'done' looks like — no acceptance criterion, constraint "
+                           "or concrete target is stated")
+    dimension("ambiguity", "ambiguity or underspecification", ambiguity, "; ".join(why))
+    ambiguity_score = dimensions[-1]["score"]
+
+    # -- reasoning depth or novelty
+    depth, why = 0, []
+    judgement = sorted(ROUTING_JUDGEMENT_STAGES & set(stages))
+    if judgement:
+        depth += 1
+        why.append("plan includes " + ", ".join(STAGE_LABEL[s] for s in judgement))
+    novelty = _matched_terms(ROUTING_NOVELTY_RE, text)
+    if novelty:
+        depth += 1
+        why.append("open design question: " + ", ".join(novelty))
+    if not why:
+        why.append("execution of a stated ask; no architecture or synthesis stage")
+    dimension("reasoningDepth", "reasoning depth or novelty", depth, "; ".join(why))
+
+    # -- context volume
+    volume, why = 0, []
+    if len(attachments) > 3 or attachment_bytes > 1024 * 1024:
+        volume += 2
+        why.append(f"{len(attachments)} attachment(s), {attachment_bytes} bytes")
+    elif attachments:
+        volume += 1
+        why.append(f"{len(attachments)} attachment(s), {attachment_bytes} bytes")
+    else:
+        why.append("no attachments")
+    if words > 250:
+        volume += 1
+        why.append(f"{words}-word request")
+    dimension("contextVolume", "context volume", volume, "; ".join(why))
+
+    # -- cross-system coordination
+    systems = _distinct_systems(text)
+    coordination, why = 0, []
+    if len(systems) >= 3:
+        coordination += 2
+        why.append("names " + ", ".join(systems[:5]))
+    elif systems:
+        coordination += 1
+        why.append("names " + ", ".join(systems))
+    else:
+        why.append("no external system named")
+    external_stages = sorted({"deployment", "publication"} & set(stages))
+    if external_stages:
+        coordination += 1
+        why.append("plan includes " + ", ".join(STAGE_LABEL[s] for s in external_stages))
+    dimension("coordination", "cross-system coordination", coordination, "; ".join(why))
+
+    # -- risk flags. Detection is here; what a flag COSTS is policy data.
+    risk_flags = []
+    for flag, pattern in ROUTING_RISK_PATTERNS:
+        terms = _matched_terms(pattern, text)
+        if terms:
+            risk_flags.append({"flag": flag, "evidence": _evidence(
+                "request mentions " + ", ".join(terms))})
+    flagged = {entry["flag"] for entry in risk_flags}
+    for stage, flag in (("deployment", "deployment"), ("publication", "publication"),
+                        ("implementation", "codeChange")):
+        if stage in stages and flag not in flagged:
+            risk_flags.append({"flag": flag, "evidence": _evidence(
+                f"the plan includes {STAGE_LABEL[stage]}")})
+            flagged.add(flag)
+
+    # -- change reversibility and operational risk
+    severe = flagged & {"security", "authentication", "production", "destructive",
+                        "dataMigration", "legalCompliance", "payments", "irreversible"}
+    reversibility, why = 0, []
+    if severe:
+        reversibility = 2
+        why.append("irreversible or safety-sensitive work: " + ", ".join(sorted(severe)))
+    elif ROUTING_WRITE_STAGES & set(stages) or flagged & {"deployment", "publication"}:
+        reversibility = 1
+        why.append("the plan writes somewhere other people can see")
+    else:
+        why.append("read-only or advisory work")
+    dimension("reversibility", "change reversibility and operational risk", reversibility,
+              "; ".join(why))
+
+    # -- verification burden
+    verification, why = 0, []
+    if "verification" in stages:
+        verification += 1
+        why.append("verification is planned")
+    if {"review", "reconciliation"} & set(stages):
+        verification += 1
+        why.append("adversarial review or reconciliation is planned")
+    if severe and verification < 2:
+        verification += 1
+        why.append("safety-sensitive change needs independent evidence")
+    if not why:
+        why.append("no independent verification stage in the plan")
+    dimension("verification", "verification burden", verification, "; ".join(why))
+
+    score = sum(d["score"] for d in dimensions)
+    max_score = 2 * len(dimensions)
+
+    return {
+        "score": score,
+        "maxScore": max_score,
+        "dimensions": dimensions,
+        "riskFlags": risk_flags,
+        "shape": shape,
+        "stages": stages,
+        "signals": {
+            "requirementChars": chars,
+            "requirementWords": words,
+            "attachmentCount": len(attachments),
+            "attachmentBytes": attachment_bytes,
+            "repoCount": repo_count,
+            "systemsNamed": systems,
+        },
+        "_missing": missing,
+        "_ambiguity": ambiguity_score,
+    }
+
+
+def band_and_confidence(policy, raw):
+    """Turn scores into a band, a confidence and the reasons either moved.
+
+    Two rules matter here and both point the same way. Risk overrides the
+    arithmetic: a security, production, publication, destructive, migration,
+    compliance or payments concern raises the band whatever the score said. And
+    low confidence never lowers quality — an assessment this engine is unsure
+    about is routed one tier higher AND returns the question that would settle
+    it, rather than quietly picking something cheap and hoping."""
+    bands = policy["bands"]
+    score = raw["score"]
+    arithmetic = ROUTING_BAND_NAMES[-1]
+    for name in ROUTING_BAND_NAMES:
+        if score <= bands[name]["maxScore"]:
+            arithmetic = name
+            break
+
+    risk_floor = "low"
+    for entry in raw["riskFlags"]:
+        mapped = policy["riskFloors"].get(entry["flag"])
+        if mapped:
+            risk_floor = _max_floor(policy, risk_floor, mapped)
+    stage_floor = "low"
+    for stage in raw["stages"]:
+        stage_floor = _max_floor(policy, stage_floor, policy["taskFloors"].get(stage))
+
+    overrides = []
+    band = arithmetic
+    risk_band = ROUTING_FLOOR_BAND[risk_floor]
+    if ROUTING_BAND_NAMES.index(risk_band) > ROUTING_BAND_NAMES.index(band):
+        overrides.append(
+            f"risk raised the band from '{band}' to '{risk_band}': the "
+            f"'{risk_floor}' quality floor applies regardless of the score")
+        band = risk_band
+
+    chars = raw["signals"]["requirementChars"]
+    if chars == 0:
+        confidence = "low"
+    elif raw["_ambiguity"] >= 2:
+        confidence = "low"
+    elif raw["_ambiguity"] == 1 or chars < 200:
+        confidence = "medium"
+    else:
+        confidence = "high"
+
+    clarification = None
+    if confidence == "low":
+        raised = _next_band(band)
+        if raised != band:
+            overrides.append(
+                f"low assessment confidence raised the band from '{band}' to "
+                f"'{raised}'. An uncertain assessment is never routed downward")
+            band = raised
+        clarification = (
+            "Before this routes well, state the outcome you want and how you will "
+            "know it is done: the change, the systems it touches, and the "
+            "acceptance criterion.")
+
+    quality_floor = _max_floor(policy, bands[band]["floor"], risk_floor)
+
+    missing = list(raw["_missing"])
+    if not raw["stages"]:
+        missing.append("the stage slice — the plan has not been proposed yet, so the "
+                       "specialist matrix is provisional")
+    if raw["signals"]["attachmentCount"] == 0 and raw["signals"]["requirementChars"] < 200:
+        missing.append("supporting material — no attachment was recorded, so the route "
+                       "assumes the request is self-contained")
+
+    assessment = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "score": score,
+        "maxScore": raw["maxScore"],
+        "band": band,
+        "bandFromScore": arithmetic,
+        "dimensions": raw["dimensions"],
+        "confidence": confidence,
+        "riskFlags": [
+            {"flag": entry["flag"],
+             "floor": policy["riskFloors"].get(entry["flag"]),
+             "evidence": entry["evidence"]}
+            for entry in raw["riskFlags"]
+        ],
+        # The floor every task in this run must clear, whatever stage it is in.
+        "qualityFloor": quality_floor,
+        "riskFloor": risk_floor,
+        # The strictest floor any single planned stage carries. Informational
+        # here: it is applied to that stage's own tasks, not to the whole run.
+        "strictestStageFloor": stage_floor,
+        "overrides": overrides,
+        "missingInformation": missing,
+        "clarification": clarification,
+        "signals": raw["signals"],
+    }
+    return assessment
+
+
+def assess_run_request(policy, request):
+    """The whole assessment, in one call. Pure."""
+    return band_and_confidence(policy, assess_routing(request))
+
+
+# --------------------------------------------------------- model selection --
+
+def routing_provider_for(agents, agent_id):
+    """Which catalogue an identity draws from, or None if it has no model choice.
+
+    This mirrors the console's own account/provider split exactly: a Claude
+    identity on the bedrock profile is a bedrock account, every other Claude
+    identity is an anthropic account, Codex is Codex, and anything else has no
+    model or effort for this controller to select."""
+    agent = (agents or {}).get("agents", {}).get(agent_id) or {}
+    kind = agent.get("kind")
+    if kind == "claude":
+        return "bedrock" if agent.get("profile") == "bedrock" else "anthropic"
+    if kind == "codex":
+        return "codex"
+    return None
+
+
+def routing_account_id(agents, agent_id):
+    """The console's account id for this identity — its profile, or 'codex'.
+
+    The routing decision has to be checkable against `AccountService`, and that
+    service is keyed by profile, not by registry identity."""
+    agent = (agents or {}).get("agents", {}).get(agent_id) or {}
+    if agent.get("kind") == "claude":
+        return agent.get("profile")
+    if agent.get("kind") == "codex":
+        return "codex"
+    return None
+
+
+def model_candidates(policy, provider, *, band, floor, limits):
+    """Every (model, effort) this provider offers, split into kept and refused.
+
+    Filtering is the whole algorithm: capability and floor first, ceilings
+    second, and only then cost. The refusals are kept because "why not the
+    cheap one" is the question an operator actually asks."""
+    models = (policy["providers"].get(provider) or {}).get("models") or []
+    floor_spec = policy["floors"][floor]
+    min_tier = _tier_rank(policy, floor_spec["minimumTier"])
+    min_effort = _effort_rank(policy, floor_spec["minimumEffort"])
+    ceiling_tier = _tier_rank(policy, limits["maxAutomaticTier"])
+    ceiling_effort = _effort_rank(policy, limits["maxAutomaticEffort"])
+    recommended = _tier_rank(policy, policy["bands"][band]["recommendedTier"])
+    retry = policy["expectedRetry"]
+
+    accepted, rejected = [], []
+    for model in models:
+        tier = model["tier"]
+        tier_rank = _tier_rank(policy, tier)
+        for effort in model["efforts"]:
+            rank = _effort_rank(policy, effort)
+            reason = None
+            if tier_rank < min_tier:
+                reason = (f"tier '{tier}' is below the '{floor}' quality floor, which "
+                          f"requires at least '{floor_spec['minimumTier']}'")
+            elif rank < min_effort:
+                reason = (f"effort '{effort}' is below the '{floor}' quality floor, which "
+                          f"requires at least '{floor_spec['minimumEffort']}'")
+            elif tier_rank > ceiling_tier:
+                reason = (f"tier '{tier}' is above the automatic ceiling for '{band}' work "
+                          f"('{limits['maxAutomaticTier']}')")
+            elif rank > ceiling_effort:
+                reason = (f"effort '{effort}' is above the automatic ceiling for '{band}' "
+                          f"work ('{limits['maxAutomaticEffort']}')")
+            if reason:
+                rejected.append({"model": model["id"], "effort": effort, "tier": tier,
+                                 "reason": reason})
+                continue
+            cost = round(float(model["costWeight"])
+                         * float(policy["effortCostMultiplier"][effort]), 2)
+            if tier_rank < recommended:
+                probability = retry["tierBelowBand"]
+                note = (f"below the tier this policy recommends for '{band}' work, so a "
+                        f"repeat attempt is likely")
+            elif tier_rank == recommended:
+                probability = retry["tierAtBand"]
+                note = f"at the tier this policy recommends for '{band}' work"
+            else:
+                probability = retry["tierAboveBand"]
+                note = f"above the tier this policy recommends for '{band}' work"
+            accepted.append({
+                "model": model["id"],
+                "label": model.get("label") or model["id"],
+                "tier": tier,
+                "effort": effort,
+                "costUnits": cost,
+                "retryProbability": probability,
+                "expectedCostUnits": round(cost * (1.0 + probability), 2),
+                "note": note,
+                "strengths": list(model.get("strengths") or []),
+                "limitations": list(model.get("limitations") or []),
+                "contextTokens": model.get("contextTokens"),
+            })
+    return accepted, rejected
+
+
+def _strategy_pool(policy, accepted, strategy, band):
+    """The choices a strategy is willing to look at, and how it orders them."""
+    preferred = _effort_rank(policy, policy["bands"][band]["preferredEffort"])
+
+    def cheapest(candidate):
+        return (candidate["expectedCostUnits"],
+                _tier_rank(policy, candidate["tier"]),
+                _effort_rank(policy, candidate["effort"]),
+                candidate["model"])
+
+    if strategy == "quality_first":
+        return sorted(accepted, key=lambda c: (
+            -_tier_rank(policy, c["tier"]),
+            -_effort_rank(policy, c["effort"]),
+            c["expectedCostUnits"],
+            c["model"])), "highest tier and effort inside the approved ceiling"
+    if strategy == "cost_first":
+        return sorted(accepted, key=cheapest), (
+            "lowest expected cost that still clears the quality floor")
+    # balanced: the cheapest choice that also carries the band's preferred
+    # effort, falling back to the cheapest qualifying choice when no model this
+    # account offers reaches that effort.
+    at_or_above = [c for c in accepted
+                   if _effort_rank(policy, c["effort"]) >= preferred]
+    if at_or_above:
+        return sorted(at_or_above, key=cheapest), (
+            f"lowest expected cost at or above the effort this policy prefers for "
+            f"'{band}' work")
+    return sorted(accepted, key=cheapest), (
+        "lowest expected cost that clears the quality floor; no model this account "
+        "offers reaches the preferred effort")
+
+
+def escalation_ceiling(policy, *, tier, effort, limits):
+    """How far an automatic escalation may climb from here, and no further.
+
+    A ceiling is not a plan to spend it. It exists so a retry has somewhere
+    bounded to go and so nothing can quietly go past it."""
+    ladder = policy["escalation"]["ladder"]
+    ceiling_tier = _tier_rank(policy, limits["maxAutomaticTier"])
+    ceiling_effort = _effort_rank(policy, limits["maxAutomaticEffort"])
+    here = (_tier_rank(policy, tier), _effort_rank(policy, effort))
+    reachable = [
+        rung for rung in ladder
+        if _tier_rank(policy, rung["tier"]) <= ceiling_tier
+        and _effort_rank(policy, rung["effort"]) <= ceiling_effort
+        and (_tier_rank(policy, rung["tier"]), _effort_rank(policy, rung["effort"])) >= here
+    ]
+    top = reachable[-1] if reachable else {"tier": tier, "effort": effort}
+    above = [rung for rung in reachable
+             if (_tier_rank(policy, rung["tier"]),
+                 _effort_rank(policy, rung["effort"])) > here]
+    gate = policy["escalation"].get("requireRecordedFailureAbove")
+    return {
+        "tier": top["tier"],
+        "effort": top["effort"],
+        "maxRetries": limits["maxRetries"],
+        # How many rungs are strictly above where this decision sits, which is
+        # not the same as how many are reachable from it.
+        "rungsAbove": len(above),
+        "requiresRecordedFailureAbove": dict(gate) if gate else None,
+    }
+
+
+def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, purpose):
+    """One model-and-effort decision, with everything needed to argue about it."""
+    provider = routing_provider_for(agents, agent_id)
+    if provider is None:
+        kind = ((agents or {}).get("agents", {}).get(agent_id) or {}).get("kind") or "unknown"
+        return {
+            "accountId": agent_id,
+            "account": routing_account_id(agents, agent_id),
+            "provider": None,
+            "routable": False,
+            "model": None,
+            "effort": None,
+            "tier": None,
+            "qualityFloor": floor,
+            "costUnits": 0.0,
+            "expectedCostUnits": 0.0,
+            "confidenceNote": None,
+            "reason": (policy.get("unroutableKinds", {}).get(kind)
+                       or f"a '{kind}' identity exposes no model or effort to select"),
+            "escalationCeiling": None,
+            "alternatives": [],
+            "rejected": [],
+            "strategyRule": None,
+        }
+    accepted, rejected = model_candidates(
+        policy, provider, band=band, floor=floor, limits=limits)
+    if not accepted:
+        raise RoutingError(
+            "routing-no-qualifying-model",
+            f"{agent_label(agents, agent_id)} offers no model and effort that meets the "
+            f"'{floor}' quality floor for {purpose} without exceeding the automatic "
+            f"ceiling for '{band}' work",
+            "Choose a different account for this role, widen the ceiling in "
+            f"{ROUTING_POLICY_FILE}, or select the model and effort manually with "
+            "--routing manual.",
+            exit_code=3)
+    ordered, rule = _strategy_pool(policy, accepted, strategy, band)
+    chosen = ordered[0]
+    return {
+        "accountId": agent_id,
+        "account": routing_account_id(agents, agent_id),
+        "provider": provider,
+        "routable": True,
+        "model": chosen["model"],
+        "modelLabel": chosen["label"],
+        "effort": chosen["effort"],
+        "tier": chosen["tier"],
+        "qualityFloor": floor,
+        "costUnits": chosen["costUnits"],
+        "retryProbability": chosen["retryProbability"],
+        "expectedCostUnits": chosen["expectedCostUnits"],
+        "reason": (f"{chosen['label']} at '{chosen['effort']}' effort is the "
+                   f"{rule}; it is {chosen['note']}"),
+        "limitations": chosen["limitations"],
+        "escalationCeiling": escalation_ceiling(
+            policy, tier=chosen["tier"], effort=chosen["effort"], limits=limits),
+        "strategyRule": rule,
+        "alternatives": [
+            {"model": c["model"], "effort": c["effort"], "tier": c["tier"],
+             "costUnits": c["costUnits"], "expectedCostUnits": c["expectedCostUnits"]}
+            for c in ordered[1:1 + ROUTING_MAX_ALTERNATIVES]
+        ],
+        "rejected": rejected[:ROUTING_MAX_REJECTED],
+    }
+
+
+# ------------------------------------------------------- the specialist plan --
+
+# What an extra method on a stage is FOR. A specialist earns its place by
+# reducing a uncertainty that can be named, or by being an independent check the
+# task actually needs — never by existing.
+ROUTING_STAGE_EXTRAS = {
+    "intake": [
+        ("productManagement", "product framing is a different question from technical scope", None),
+        ("microsoftContext", "material that exists only inside the Microsoft estate", None),
+    ],
+    "research": [
+        ("microsoftContext", "tenant-only material a general researcher cannot reach", None),
+    ],
+    "solutioning": [
+        ("uiUxDesign", "interface direction is a different question from system architecture", None),
+        ("designSystem", "token and component reuse is a different question from architecture", None),
+    ],
+    "review": [
+        ("securityReview", "a security finding is not what a general reviewer is looking for",
+         "security"),
+        ("standardsReview", "conformance to the written standards is a separate, checkable question",
+         None),
+        ("prReview", "the change as a diff reads differently from the design it came from", None),
+    ],
+    "presentation": [
+        ("uiUxDesign", "how the answer reads to a stakeholder is a separate craft", None),
+    ],
+    "planning": [
+        ("productManagement", "sequencing against product priority is not the same as estimating",
+         None),
+    ],
+    "implementation": [
+        ("designSystem", "keeping the change inside the existing design system", None),
+        ("uiUxDesign", "interface fidelity while the change is being made", None),
+    ],
+    "verification": [
+        ("securityReview", "a security finding is not what a test engineer is looking for",
+         "security"),
+        ("standardsReview", "conformance to the written standards is a separate, checkable question",
+         None),
+        ("ciInvestigation", "a failing pipeline is its own investigation", None),
+    ],
+}
+
+# Which stage an independent check prefers to sit in, and which role it prefers
+# to be held under. The pair matters: a task is only invocable if its role covers
+# its stage in this controller's own role/stage map, so the reviewer is chosen as
+# a (stage, role, account) triple rather than a stage with a role pinned to it.
+# Only stages that CHECK. Solutioning and reconciliation produce and decide;
+# treating either as an independent check would let the producer sign off on its
+# own work under a name that says otherwise.
+ROUTING_REVIEW_STAGE_PREFERENCE = ("verification", "review")
+# Only roles that can hold a check in one of those stages. 'solutioning' and
+# 'orchestrator' cover neither, so listing them would be dead weight that reads
+# as though the orchestrator could sign off on its own work.
+ROUTING_REVIEW_ROLE_PREFERENCE = ("securityReview", "standardsReview", "review",
+                                  "prReview", "testEngineering", "ciInvestigation")
+
+# The risk families that unlock a security-gated specialist.
+ROUTING_SECURITY_FLAGS = {"security", "authentication", "payments", "privacy",
+                          "legalCompliance"}
+
+ROUTING_STAGE_OBJECTIVE = {
+    "intake": "establish what the ask actually is, and load the governed context for it",
+    "research": "gather evidence, prior art and gaps, with provenance",
+    "solutioning": "produce architecture options with their costs, and an ADR",
+    "review": "find what is wrong with the proposal, adversarially",
+    "reconciliation": "decide which objections stand, and say so",
+    "presentation": "produce the stakeholder presentation",
+    "planning": "produce the development plan and the Jira preview",
+    "implementation": "make the bounded code change under its own approval",
+    "verification": "produce independent test and quality evidence",
+    "deployment": "carry out the approved release and record rollback evidence",
+    "observability": "define telemetry, SLOs, alerts, dashboards and runbooks",
+    "publication": "publish exactly what was approved, and nothing else",
+}
+
+
+def _assignee_for(assignments, role):
+    value = (assignments or {}).get(role)
+    if value in (None, "none", ""):
+        return []
+    return [x for x in (value if isinstance(value, list) else [value]) if x and x != "none"]
+
+
+def plan_routing_tasks(policy, agents, *, stages, assignments, orchestrator, assessment,
+                       strategy):
+    """The smallest execution matrix that does the approved plan.
+
+    Three rules do the work. A stage the orchestrator is already going to do
+    itself, on simple work, gets no separate method — a specialist that adds no
+    quality is pure cost. An extra method on a stage has to name the uncertainty
+    it reduces. And the number of methods on one stage is capped by the band, so
+    a wide plan cannot quietly become a dozen agents, and three accounts existing
+    is never a reason to use three."""
+    band = assessment["band"]
+    run_floor = assessment["qualityFloor"]
+    flags = {entry["flag"] for entry in assessment["riskFlags"]}
+    security_relevant = bool(flags & ROUTING_SECURITY_FLAGS)
+
+    tasks, warnings, not_scheduled, unroutable = [], [], [], []
+    discretionary_total = 0
+    previous_stage_ids = []
+
+    for stage in stages:
+        stage_floor = _max_floor(policy, policy["taskFloors"].get(stage), run_floor)
+        stage_band = _max_band(band, ROUTING_FLOOR_BAND[stage_floor])
+        limits = policy["limits"][stage_band]
+        per_stage_cap = int(limits["maxSpecialistsPerStage"])
+        stage_ids = []
+        ordinal = 0
+
+        required_roles = STAGE_ROLES.get(stage, ["orchestrator"])
+        for role in required_roles:
+            holders = _assignee_for(assignments, role) or (
+                [orchestrator] if role == "orchestrator" and orchestrator else [])
+            if not holders:
+                not_scheduled.append({
+                    "stage": stage, "role": role, "reason":
+                        f"no identity holds the '{role}' role this stage needs, so no task "
+                        f"was created for it"})
+                warnings.append(
+                    f"{STAGE_LABEL[stage]} needs the '{role}' role and no identity holds it")
+                continue
+            account = holders[0]
+            ordinal += 1
+            task_id = f"{stage}-{ordinal}"
+            method = policy["specialists"].get(role)
+            same_as_orchestrator = account == orchestrator
+            if band == "simple" and same_as_orchestrator and stage not in ROUTING_JUDGEMENT_STAGES:
+                method = None
+                method_reason = ("the orchestrator holds this role and this is simple work, "
+                                 "so a separate specialist method would add cost and no quality")
+            elif method is None:
+                method_reason = (f"the account holding '{role}' does this stage directly; the "
+                                 f"toolkit has no separate method for it")
+            elif same_as_orchestrator:
+                method_reason = (f"a focused '{method}' method with its own output contract, "
+                                 f"run by the orchestrator's own account")
+            else:
+                method_reason = (f"a focused '{method}' method, run by a separate account, so "
+                                 f"its output is independent of the orchestrator's")
+            decision = select_model(
+                policy, agents, agent_id=account, band=stage_band, floor=stage_floor,
+                strategy=strategy, limits=limits,
+                purpose=f"the {STAGE_LABEL[stage]} stage")
+            if not decision["routable"]:
+                unroutable.append({"taskId": task_id, "accountId": account,
+                                   "reason": decision["reason"]})
+            available, detail = agent_available(agents, account)
+            if not available:
+                warnings.append(
+                    f"{agent_label(agents, account)} holds '{role}' for "
+                    f"{STAGE_LABEL[stage]} but is not available on this machine: {detail}")
+            tasks.append({
+                "taskId": task_id,
+                "stage": stage,
+                "stageLabel": STAGE_LABEL[stage],
+                "objective": ROUTING_STAGE_OBJECTIVE.get(stage, STAGE_LABEL[stage]),
+                "requiredRole": role,
+                "roleLabel": PROMPT_LABEL.get(role, role),
+                "specialist": method,
+                "specialistReason": method_reason,
+                "discretionary": False,
+                "accountId": account,
+                "accountLabel": agent_label(agents, account),
+                "accountAvailable": bool(available),
+                "provider": decision["provider"],
+                "routable": decision["routable"],
+                "model": decision["model"],
+                "effort": decision["effort"],
+                "tier": decision["tier"],
+                "qualityFloor": stage_floor,
+                "band": stage_band,
+                "dependsOn": list(previous_stage_ids),
+                "parallelizable": False,
+                "reason": decision["reason"],
+                "estimatedCostUnits": decision["expectedCostUnits"],
+                "costUnits": decision["costUnits"],
+                "escalationCeiling": decision["escalationCeiling"],
+                "strategyRule": decision["strategyRule"],
+                "alternatives": decision["alternatives"],
+                "rejected": decision["rejected"],
+                "independence": None,
+            })
+            stage_ids.append(task_id)
+
+        # -- extras: only ones whose purpose can be named, only inside the cap
+        for role, uncertainty, gate in ROUTING_STAGE_EXTRAS.get(stage, []):
+            holders = _assignee_for(assignments, role)
+            if not holders:
+                continue
+            if gate == "security" and not security_relevant:
+                not_scheduled.append({
+                    "stage": stage, "role": role, "reason":
+                        "no security, authentication, payment, privacy or compliance concern "
+                        "was detected in the request, so this check was not scheduled "
+                        "automatically"})
+                continue
+            scheduled_methods = sum(
+                1 for entry in tasks
+                if entry["taskId"] in stage_ids and entry["specialist"])
+            if scheduled_methods >= per_stage_cap:
+                not_scheduled.append({
+                    "stage": stage, "role": role, "reason":
+                        f"the '{stage_band}' band allows {per_stage_cap} specialist "
+                        f"method(s) on one stage and {scheduled_methods} are already "
+                        f"scheduled. Override the route to add it deliberately"})
+                continue
+            if discretionary_total >= int(limits["maxSpecialists"]):
+                not_scheduled.append({
+                    "stage": stage, "role": role, "reason":
+                        f"the '{stage_band}' band allows {limits['maxSpecialists']} "
+                        f"discretionary specialist(s) for the whole run and that is already "
+                        f"used"})
+                continue
+            account = holders[0]
+            ordinal += 1
+            task_id = f"{stage}-{ordinal}"
+            method = policy["specialists"].get(role)
+            decision = select_model(
+                policy, agents, agent_id=account, band=stage_band, floor=stage_floor,
+                strategy=strategy, limits=limits,
+                purpose=f"the {PROMPT_LABEL.get(role, role)} check in {STAGE_LABEL[stage]}")
+            if not decision["routable"]:
+                unroutable.append({"taskId": task_id, "accountId": account,
+                                   "reason": decision["reason"]})
+            available, detail = agent_available(agents, account)
+            if not available:
+                warnings.append(
+                    f"{agent_label(agents, account)} holds '{role}' for "
+                    f"{STAGE_LABEL[stage]} but is not available on this machine: {detail}")
+            tasks.append({
+                "taskId": task_id,
+                "stage": stage,
+                "stageLabel": STAGE_LABEL[stage],
+                "objective": ROUTING_STAGE_OBJECTIVE.get(stage, STAGE_LABEL[stage]),
+                "requiredRole": role,
+                "roleLabel": PROMPT_LABEL.get(role, role),
+                "specialist": method,
+                "specialistReason": f"it exists because {uncertainty}",
+                "discretionary": True,
+                "accountId": account,
+                "accountLabel": agent_label(agents, account),
+                "accountAvailable": bool(available),
+                "provider": decision["provider"],
+                "routable": decision["routable"],
+                "model": decision["model"],
+                "effort": decision["effort"],
+                "tier": decision["tier"],
+                "qualityFloor": stage_floor,
+                "band": stage_band,
+                "dependsOn": list(previous_stage_ids),
+                "parallelizable": True,
+                "reason": decision["reason"],
+                "estimatedCostUnits": decision["expectedCostUnits"],
+                "costUnits": decision["costUnits"],
+                "escalationCeiling": decision["escalationCeiling"],
+                "strategyRule": decision["strategyRule"],
+                "alternatives": decision["alternatives"],
+                "rejected": decision["rejected"],
+                "independence": None,
+            })
+            stage_ids.append(task_id)
+            discretionary_total += 1
+
+        if len(stage_ids) > 1:
+            for task in tasks:
+                if task["taskId"] in stage_ids:
+                    task["parallelizable"] = True
+        if stage_ids:
+            previous_stage_ids = stage_ids
+
+    return tasks, warnings, not_scheduled, unroutable, discretionary_total
+
+
+def add_independent_review(policy, agents, *, tasks, stages, assignments, orchestrator,
+                           assessment, strategy, limits):
+    """Make sure critical work is checked by someone who did not produce it.
+
+    One capable producer plus a genuinely independent reviewer beats several
+    cheap duplicate attempts, so this is the one place the engine adds an agent
+    on its own initiative — and the one place it refuses to.
+
+    Three outcomes, in order of preference. If a task already scheduled on a
+    checking stage is held by an account that produced none of the work, that
+    task *is* the independent check and is marked as one; nothing is added,
+    because a second agent with the same job is cost without evidence. Failing
+    that, a distinct eligible identity is scheduled. Failing that, no reviewer is
+    invented: an existing check is recorded as degraded — sharing the producer's
+    account and context lineage is not independence, and saying otherwise would
+    be the most expensive kind of wrong — and the gap is named so an operator can
+    close it or accept it under the existing degraded-operation approval.
+
+    A scheduled reviewer is always a (stage, role, account) triple where the role
+    genuinely covers the stage in this controller's role map. A task whose role
+    does not cover its stage could never be invoked, which would make the whole
+    guarantee decorative.
+
+    Returns (added_task_or_None, warnings, not_scheduled_entries) and may mark an
+    existing task in `tasks` in place.
+    """
+    if not limits.get("requireIndependentReview"):
+        return None, [], []
+    checking_stages = [stage for stage in ROUTING_REVIEW_STAGE_PREFERENCE
+                       if stage in stages]
+    if not checking_stages:
+        return None, [
+            "critical work with no adversarial review and no verification stage cannot "
+            "carry an independent check. Widen the plan, or accept that nothing in this "
+            "run checks it"], []
+
+    # Whoever made the thing: the orchestrator, plus every account working a
+    # stage that produces rather than checks.
+    producers = {orchestrator}
+    producers.update(task["accountId"] for task in tasks
+                     if task["stage"] not in checking_stages)
+
+    flags = [entry["flag"] for entry in assessment["riskFlags"]]
+    methods = policy["independentReviewMethods"]
+    preferred_method = next((methods[flag] for flag in flags if flag in methods),
+                            methods["default"])
+    # The risk decides which KIND of check is wanted, and that in turn decides
+    # which role to look for first — so the role and its method agree. Picking a
+    # method independently of the role is how a task ends up labelled
+    # 'securityReview' while claiming to run a reliability review.
+    roles_by_preference = sorted(
+        ROUTING_REVIEW_ROLE_PREFERENCE,
+        key=lambda role: 0 if policy["specialists"].get(role) == preferred_method else 1)
+    reason = ("critical work needs a check that did not come from the producer; one "
+              "capable producer plus one independent reviewer beats several cheap "
+              "duplicate attempts")
+
+    # 1. Something already scheduled does the job. Where more than one does, the
+    #    one whose method matches this run's risk is the better check: an
+    #    authentication problem wants the security reviewer, not whoever happened
+    #    to be listed first.
+    for stage in checking_stages:
+        candidates = [task for task in tasks
+                      if task["stage"] == stage and task["accountId"] not in producers]
+        candidates.sort(
+            key=lambda task: 0 if task["specialist"] == preferred_method else 1)
+        if candidates:
+            task = candidates[0]
+            task["independence"] = {
+                "independent": True,
+                "of": sorted(producers),
+                "reason": ("a different account with its own authentication and its own "
+                           "context lineage, already scheduled for this stage"),
+                "requiresDegradedApproval": False,
+            }
+            task["specialistReason"] = (
+                f"{task['specialistReason']}. It is also this run's independent check: "
+                f"{reason}")
+            return None, [], []
+
+    # 2. Schedule a distinct eligible identity, under a role that covers the stage.
+    existing = {(task["stage"], task["requiredRole"], task["accountId"])
+                for task in tasks}
+    for stage in checking_stages:
+        for role in roles_by_preference:
+            if stage not in ROLE_STAGES.get(role, set()):
+                continue
+            for account in _assignee_for(assignments, role):
+                if account in producers or (stage, role, account) in existing:
+                    continue
+                method = policy["specialists"].get(role) or preferred_method
+                floor = _max_floor(policy, "critical", assessment["qualityFloor"])
+                decision = select_model(
+                    policy, agents, agent_id=account, band="critical", floor=floor,
+                    strategy=strategy, limits=policy["limits"]["critical"],
+                    purpose="the independent review this critical work needs")
+                available, detail = agent_available(agents, account)
+                warnings = []
+                if not available:
+                    warnings.append(
+                        f"{agent_label(agents, account)} would hold the independent "
+                        f"review but is not available on this machine: {detail}")
+                ordinal = 1 + sum(1 for task in tasks if task["stage"] == stage)
+                return {
+                    "taskId": f"{stage}-{ordinal}",
+                    "stage": stage,
+                    "stageLabel": STAGE_LABEL[stage],
+                    "objective": "check this critical work independently of whoever "
+                                 "produced it",
+                    "requiredRole": role,
+                    "roleLabel": PROMPT_LABEL.get(role, role),
+                    "specialist": method,
+                    "specialistReason": reason,
+                    # Mandated by the band, not chosen on top of it. It is also
+                    # never trimmed for budget: a critical run without its check
+                    # is not a cheaper version of the same run.
+                    "discretionary": False,
+                    "accountId": account,
+                    "accountLabel": agent_label(agents, account),
+                    "accountAvailable": bool(available),
+                    "provider": decision["provider"],
+                    "routable": decision["routable"],
+                    "model": decision["model"],
+                    "effort": decision["effort"],
+                    "tier": decision["tier"],
+                    "qualityFloor": floor,
+                    "band": "critical",
+                    "dependsOn": [task["taskId"] for task in tasks
+                                  if task["stage"] == stage],
+                    "parallelizable": False,
+                    "reason": decision["reason"],
+                    "estimatedCostUnits": decision["expectedCostUnits"],
+                    "costUnits": decision["costUnits"],
+                    "escalationCeiling": decision["escalationCeiling"],
+                    "strategyRule": decision["strategyRule"],
+                    "alternatives": decision["alternatives"],
+                    "rejected": decision["rejected"],
+                    "independence": {
+                        "independent": True,
+                        "of": sorted(producers),
+                        "reason": "a different account with its own authentication and "
+                                  "its own context lineage",
+                        "requiresDegradedApproval": False,
+                    },
+                }, warnings, []
+
+    # 3. Nothing independent is available. Say so; do not manufacture a twin of a
+    #    task that already exists, which would cost a second agent and buy nothing.
+    gap = ("critical work: no identity outside this run's producers holds a role "
+           "covering its review or verification stages, so no independent check could "
+           "be scheduled. Assign a distinct reviewer, or proceed under the existing "
+           "degraded-operation approval")
+    for stage in checking_stages:
+        for task in tasks:
+            if task["stage"] != stage:
+                continue
+            task["independence"] = {
+                "independent": False,
+                "of": sorted(producers),
+                "reason": "shares the producer's account and conversation lineage",
+                "requiresDegradedApproval": True,
+            }
+            return None, [
+                "this run's only check shares the producer's account and context, so it "
+                "is recorded as degraded, not independent; the existing "
+                "degraded-operation approval applies before relying on it",
+                gap], []
+    return None, [gap], []
+
+
+
+# ------------------------------------------------------------ the decision --
+
+def _canonical(payload):
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _hashable_task(task):
+    """Exactly the fields an approval binds and an invocation is checked against."""
+    fields = {key: task.get(key) for key in
+              ("taskId", "stage", "requiredRole", "specialist", "accountId", "model",
+               "effort", "tier", "qualityFloor", "parallelizable")}
+    fields["dependsOn"] = sorted(task.get("dependsOn") or [])
+    fields["escalationCeiling"] = {
+        key: (task.get("escalationCeiling") or {}).get(key)
+        for key in ("tier", "effort", "maxRetries")}
+    independence = task.get("independence")
+    # Not just the boolean: a check recorded as degraded, and a task where
+    # independence was never in question, are different decisions and must not
+    # share a hash.
+    fields["independence"] = None if independence is None else {
+        "independent": bool(independence.get("independent")),
+        "requiresDegradedApproval": bool(independence.get("requiresDegradedApproval")),
+    }
+    return fields
+
+
+def routing_decision_hash(decision):
+    """A hash of the decision itself, and of nothing else.
+
+    Timestamps, narration, alternatives and rejection reasons are deliberately
+    outside it: they are how the decision is explained, not what was decided.
+    What is inside is exactly what an approval binds and what an invocation is
+    later checked against."""
+    canonical = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "policyRevision": decision.get("policyRevision"),
+        "mode": decision.get("mode"),
+        "strategy": decision.get("strategy"),
+        "assessment": {
+            "score": (decision.get("assessment") or {}).get("score"),
+            "band": (decision.get("assessment") or {}).get("band"),
+            "confidence": (decision.get("assessment") or {}).get("confidence"),
+            "qualityFloor": (decision.get("assessment") or {}).get("qualityFloor"),
+            "riskFlags": sorted(entry["flag"] for entry in
+                                (decision.get("assessment") or {}).get("riskFlags") or []),
+        },
+        "orchestrator": {
+            key: (decision.get("orchestrator") or {}).get(key)
+            for key in ("accountId", "model", "effort", "tier", "qualityFloor")
+        },
+        "tasks": [_hashable_task(task) for task in decision.get("tasks") or []],
+        "limits": {key: (decision.get("limits") or {}).get(key) for key in (
+            "maxSpecialists", "maxSpecialistsPerStage", "maxParallel", "maxRetries",
+            "maxCostUnits", "maxAutomaticTier", "maxAutomaticEffort",
+            "requireIndependentReview")},
+        "estimatedCostUnits": decision.get("estimatedCostUnits"),
+    }
+    return "sha256:" + sha256_bytes(_canonical(canonical))
+
+
+def routing_plan_hash(stages, assignments):
+    """The plan and role assignment an approved route was computed against.
+
+    Approval is combined, so the routing freeze has to be bound to the same
+    thing the operator saw: the exact stage slice and the exact assignment. If
+    either moves, the frozen route no longer describes this run and the
+    invocation checks would be validating against a decision nobody approved."""
+    canonical = {
+        "stages": [s for s in STAGE_ORDER if s in set(stages or [])],
+        "assignments": {
+            role: (sorted(value) if isinstance(value, list) else value)
+            for role, value in sorted((assignments or {}).items())
+            if value not in (None, "", "none", [])
+        },
+    }
+    return "sha256:" + sha256_bytes(_canonical(canonical))
+
+
+def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, request,
+                           stages=None, assignments=None):
+    """Assemble a complete, hashable routing decision. Writes nothing."""
+    if mode not in ROUTING_MODES:
+        raise RoutingError("routing-mode-unknown",
+                           f"'{mode}' is not a routing mode. Known: "
+                           f"{', '.join(ROUTING_MODES)}")
+    if mode == "manual":
+        strategy = "manual"
+    elif strategy not in AUTO_STRATEGIES:
+        raise RoutingError("routing-strategy-unknown",
+                           f"'{strategy}' is not an automatic routing strategy. Known: "
+                           f"{', '.join(AUTO_STRATEGIES)}")
+    if not orchestrator:
+        raise RoutingError("routing-no-orchestrator",
+                           "automatic routing needs the orchestrator identity: "
+                           "authentication, organisational access and provider choice are "
+                           "operator decisions, not this engine's",
+                           exit_code=2)
+    if orchestrator not in (agents or {}).get("agents", {}):
+        raise RoutingError("routing-unknown-identity",
+                           f"'{orchestrator}' is not an identity in this registry")
+
+    stages = [s for s in STAGE_ORDER if s in set(stages or [])]
+    assignments = dict(assignments or {})
+    if orchestrator and not _assignee_for(assignments, "orchestrator"):
+        assignments["orchestrator"] = orchestrator
+
+    assessment = assess_run_request(policy, dict(request, stages=stages))
+    band = assessment["band"]
+    floor = assessment["qualityFloor"]
+    # The band says how hard the work is; the floor says how good the answer has
+    # to be. A stage floor can exceed the band's own, so ceilings are taken from
+    # whichever is stricter — otherwise a satisfiable floor looks unsatisfiable.
+    effective_band = _max_band(band, ROUTING_FLOOR_BAND[floor])
+    limits = dict(policy["limits"][effective_band])
+
+    available, detail = agent_available(agents, orchestrator)
+    if not available:
+        raise RoutingError(
+            "routing-account-unavailable",
+            f"{agent_label(agents, orchestrator)} is not available on this machine: "
+            f"{detail}",
+            "Sign that account in, or choose a different orchestrator. Automatic "
+            "routing will not substitute one identity for another.",
+            exit_code=3)
+
+    orchestrator_decision = select_model(
+        policy, agents, agent_id=orchestrator, band=effective_band, floor=floor,
+        strategy=strategy, limits=limits, purpose="orchestrating this run")
+
+    tasks, warnings, not_scheduled, unroutable, discretionary = plan_routing_tasks(
+        policy, agents, stages=stages, assignments=assignments,
+        orchestrator=orchestrator, assessment=assessment, strategy=strategy)
+
+    reviewer, reviewer_warnings, reviewer_gaps = add_independent_review(
+        policy, agents, tasks=tasks, stages=stages, assignments=assignments,
+        orchestrator=orchestrator, assessment=assessment, strategy=strategy,
+        limits=limits)
+    warnings.extend(reviewer_warnings)
+    not_scheduled.extend(reviewer_gaps)
+    if reviewer is not None:
+        tasks.append(reviewer)
+        if not reviewer["routable"]:
+            unroutable.append({"taskId": reviewer["taskId"],
+                               "accountId": reviewer["accountId"],
+                               "reason": reviewer["reason"]})
+
+    # A stage/role the specialist pass declined can be scheduled afterwards by
+    # the independent-review pass. Saying both "this was not scheduled" and
+    # listing it as a task would make the approval screen contradict itself, so
+    # the record is reconciled against what actually ended up in the matrix.
+    scheduled_pairs = {(task["stage"], task["requiredRole"]) for task in tasks}
+    not_scheduled = [entry for entry in not_scheduled
+                     if (entry.get("stage"), entry.get("role")) not in scheduled_pairs]
+
+    # -- budget. Discretionary methods go first; a required stage never does.
+    cap = float(limits["maxCostUnits"])
+    trimmed = []
+
+    def total():
+        return round(orchestrator_decision["expectedCostUnits"]
+                     + sum(task["estimatedCostUnits"] for task in tasks), 2)
+
+    band_for_limits = effective_band
+    while total() > cap:
+        droppable = [task for task in tasks
+                     if task["discretionary"] and task.get("independence") is None]
+        if not droppable:
+            break
+        victim = max(droppable, key=lambda task: task["estimatedCostUnits"])
+        tasks.remove(victim)
+        trimmed.append(victim["taskId"])
+        for task in tasks:
+            if victim["taskId"] in (task.get("dependsOn") or []):
+                task["dependsOn"] = [dependency for dependency in task["dependsOn"]
+                                     if dependency != victim["taskId"]]
+        not_scheduled.append({
+            "stage": victim["stage"], "role": victim["requiredRole"], "reason":
+                f"dropped to stay inside the {cap:g} cost-unit ceiling for "
+                f"'{band_for_limits}' work"})
+    estimated = total()
+    if estimated > cap:
+        raise RoutingError(
+            "routing-budget-exceeded",
+            f"the smallest route that meets this run's quality floors is an estimated "
+            f"{estimated:g} cost units, and the ceiling for '{band_for_limits}' work is "
+            f"{cap:g}",
+            "Narrow the plan, raise limits."
+            f"{band_for_limits}.maxCostUnits in {ROUTING_POLICY_FILE}, or route manually. "
+            "Quality is not reduced to fit a budget.",
+            exit_code=9)
+    if trimmed:
+        warnings.append(
+            f"{len(trimmed)} discretionary specialist(s) were dropped to stay inside the "
+            f"cost ceiling: {', '.join(trimmed)}")
+
+    if assessment["confidence"] == "low":
+        warnings.append(
+            "the assessment confidence is low, so the band was raised one tier and a "
+            "clarification question is attached. Answer it and re-preview for a route "
+            "that is not paying for uncertainty")
+
+    parallel = 0
+    for stage in stages:
+        parallel = max(parallel, sum(1 for task in tasks
+                                     if task["stage"] == stage and task["parallelizable"]))
+    if parallel > int(limits["maxParallel"]):
+        warnings.append(
+            f"the plan puts {parallel} method(s) on one stage and the "
+            f"'{effective_band}' band allows {limits['maxParallel']} in parallel; the "
+            f"extra ones run in sequence")
+
+    decision = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "policyRevision": policy["policyRevision"],
+        "mode": mode,
+        "strategy": strategy,
+        "assessment": assessment,
+        "effectiveBand": effective_band,
+        "orchestrator": orchestrator_decision,
+        "tasks": tasks,
+        "limits": limits,
+        "estimatedCostUnits": estimated,
+        "costUnitsAreEstimates": True,
+        "notScheduled": not_scheduled,
+        "unroutable": unroutable,
+        "warnings": warnings,
+        "specialistCount": sum(1 for task in tasks if task["specialist"]),
+        # Counted from the tasks that survived, not from what was proposed
+        # before the cost ceiling was applied.
+        "discretionaryCount": sum(1 for task in tasks if task["discretionary"]),
+        "maxObservedParallel": parallel,
+    }
+    decision["decisionHash"] = routing_decision_hash(decision)
+    return decision
+
+
+# ------------------------------------------------------- durable routing --
+
+def routing_path(run: Run) -> pathlib.Path:
+    return run.dir / "routing.json"
+
+
+def routing_events_path(run: Run) -> pathlib.Path:
+    return run.dir / "routing-events.jsonl"
+
+
+def load_routing(run: Run, required=False):
+    """The run's routing record, or None.
+
+    A run created before routing existed simply has no file, and that is a
+    complete answer: it runs under the manual behaviour it was created with."""
+    doc = read_json(routing_path(run))
+    if not isinstance(doc, dict):
+        if required:
+            raise RoutingError(
+                "routing-absent",
+                f"run {run.id} has no routing record, so it runs under manual model and "
+                f"effort selection",
+                f"Create an automatically routed run with: fde start --routing auto, or "
+                f"select the model and effort yourself.",
+                exit_code=4)
+        return None
+    version = doc.get("schemaVersion")
+    if version != ROUTING_SCHEMA_VERSION:
+        raise RoutingError(
+            "routing-schema-unsupported",
+            f"run {run.id} has a routing record at schema {version!r}; this controller "
+            f"reads {ROUTING_SCHEMA_VERSION}",
+            "Update the controller, or route this run manually.",
+            exit_code=2)
+    return doc
+
+
+def save_routing(run: Run, doc):
+    write_json(routing_path(run), doc)
+
+
+def routing_event(run: Run, kind, **fields):
+    """Append-only, in two places on purpose.
+
+    routing-events.jsonl carries the detail a later calibration report needs;
+    events.jsonl carries a bounded line so the run's own timeline still reads as
+    one story. Neither is ever rewritten."""
+    if kind not in ROUTING_EVENT_KINDS:
+        die(f"unknown routing event '{kind}'", 2)
+    record = {"at": iso(), "event": kind, "runId": run.id, **fields}
+    append_jsonl(routing_events_path(run), record)
+    bounded = {key: value for key, value in fields.items()
+               if key in ("mode", "strategy", "band", "score", "confidence",
+                          "qualityFloor", "decisionHash", "taskId", "policyRevision",
+                          "estimatedCostUnits", "taskCount", "field", "from", "to")}
+    run.event(kind, **bounded)
+
+
+def routing_request_for(run: Run):
+    """Everything the assessor is allowed to see, read from this run's own files.
+
+    Attachment metadata, not attachment content. The recorded requirement, not
+    the Jira item it names. The project's repository count, not the
+    repositories."""
+    manifest = run.manifest()
+    requirement = ""
+    try:
+        raw = (run.dir / "requirement.md").read_text(encoding="utf-8", errors="replace")
+        _head, _sep, body = raw.partition("\n---\n")
+        requirement = (body or raw).strip()
+    except OSError:
+        requirement = manifest.get("requirement") or ""
+    if not requirement:
+        requirement = manifest.get("requirement") or ""
+    attachments, _bad = attachment_records(run)
+    repo_count = 0
+    project_id = manifest.get("projectId")
+    if isinstance(project_id, str) and valid_project_id(project_id):
+        doc = read_json(project_dir(project_id) / "project.json")
+        if isinstance(doc, dict):
+            repo_count = len(doc.get("repoPaths") or [])
+    plan = run.plan() or {}
+    return {
+        "requirement": requirement[:ROUTING_MAX_REQUIREMENT_BYTES],
+        "stages": list(plan.get("stages") or []),
+        "shape": (plan.get("intent") or None) if plan.get("source") == "shape" else None,
+        "attachments": [{"size": entry.get("size"), "mediaType": entry.get("mediaType")}
+                        for entry in attachments],
+        "repoCount": repo_count,
+    }
+
+
+def sync_routed_session_config(run: Run, decision):
+    """Keep the orchestrator session's model and effort in step with the route.
+
+    `fde-start` already reads sessionConfig on every resume, so an automatically
+    routed run reaches its own conversation through the path that was there
+    before routing existed. The launcher needs no knowledge of any of this, which
+    is the point: one place decides the model, and it is the controller."""
+    orchestrator = decision.get("orchestrator") or {}
+    if not orchestrator.get("routable"):
+        return
+    # sessionConfig is read by `fde-start`, which launches the *Claude* CLI. A
+    # Codex or other-provider model id there would be passed to the wrong
+    # binary, so only a Claude account's route is synced; a Codex-orchestrated
+    # run is resumed in its own Codex task, where its route is not this file's
+    # business.
+    if orchestrator.get("provider") not in ("anthropic", "bedrock"):
+        return
+    manifest = run.manifest()
+    config = dict(manifest.get("sessionConfig") or {})
+    if (config.get("model") == orchestrator["model"]
+            and config.get("effort") == orchestrator["effort"]):
+        return
+    config["model"] = orchestrator["model"]
+    config["effort"] = orchestrator["effort"]
+    config["source"] = "routing"
+    manifest["sessionConfig"] = config
+    run.save_manifest(manifest)
+
+
+def _routing_after_change(run: Run, agents=None, *, quiet=True):
+    """Recompute an unapproved proposal, and never break the caller doing it.
+
+    Scoping and role assignment are the commands an operator is in the middle
+    of; a routing policy problem is worth saying out loud there but is not worth
+    failing them over, because nothing has been authorised yet. The hard failure
+    belongs at approval, where the route stops being a preview — and that is
+    exactly where `freeze_routing_for_approval` refuses."""
+    try:
+        return initialise_routing(run, agents, quiet=quiet)
+    except RoutingError as exc:
+        print(f"  (routing not updated: {exc.message})", file=sys.stderr)
+        if exc.hint:
+            print(f"   {exc.hint}", file=sys.stderr)
+        return None
+
+
+def initialise_routing(run: Run, agents=None, *, quiet=True):
+    """Write a run's first routing record, once it has an orchestrator.
+
+    Called from the one place where the missing input arrives. Before an account
+    is chosen there is nothing to route: no catalogue, no availability, no
+    provider. A manual run returns None here and keeps the behaviour it was
+    created with."""
+    config = (run.manifest().get("routing") or {})
+    if config.get("mode") != "auto":
+        return None
+    if load_routing(run) is not None:
+        return refresh_routing_proposal(run, agents, quiet=quiet)
+    orchestrator = run.orchestrator()
+    if not orchestrator:
+        return None
+    policy = load_routing_policy()
+    agents = agents or load_agents()
+    assignments = (run.roles() or {}).get("assignments") or {}
+    request = routing_request_for(run)
+    decision = build_routing_decision(
+        policy, agents, mode="auto",
+        strategy=config.get("strategy") or policy["defaultStrategy"],
+        orchestrator=orchestrator, request=request,
+        stages=request["stages"], assignments=assignments)
+    decision["proposedAt"] = iso()
+    decision["approvedAt"] = None
+    decision["approvedWithPlanHash"] = None
+    decision["planHash"] = routing_plan_hash(request["stages"], assignments)
+    decision["overrides"] = []
+    save_routing(run, decision)
+    sync_routed_session_config(run, decision)
+    assessment = decision["assessment"]
+    routing_event(run, "routing.assessed", mode="auto", strategy=decision["strategy"],
+                  band=assessment["band"], score=assessment["score"],
+                  confidence=assessment["confidence"],
+                  qualityFloor=assessment["qualityFloor"],
+                  policyRevision=decision["policyRevision"],
+                  dimensions=assessment["dimensions"],
+                  riskFlags=assessment["riskFlags"],
+                  missingInformation=assessment["missingInformation"])
+    routing_event(run, "routing.proposed", mode="auto", strategy=decision["strategy"],
+                  band=assessment["band"], qualityFloor=assessment["qualityFloor"],
+                  decisionHash=decision["decisionHash"],
+                  policyRevision=decision["policyRevision"],
+                  estimatedCostUnits=decision["estimatedCostUnits"],
+                  taskCount=len(decision["tasks"]),
+                  orchestrator={"accountId": decision["orchestrator"].get("accountId"),
+                                "model": decision["orchestrator"].get("model"),
+                                "effort": decision["orchestrator"].get("effort")})
+    if not quiet:
+        print(f"routing       {assessment['band']} band "
+              f"({assessment['score']}/{assessment['maxScore']}), "
+              f"confidence {assessment['confidence']}, floor {assessment['qualityFloor']}")
+        if decision["orchestrator"].get("routable"):
+            print(f"model         {decision['orchestrator']['model']} / "
+                  f"{decision['orchestrator']['effort']}  "
+                  f"(~{decision['estimatedCostUnits']:g} cost units, estimated)")
+        if assessment.get("clarification"):
+            print(f"ask first     {assessment['clarification']}")
+    return decision
+
+
+def refresh_routing_proposal(run: Run, agents=None, *, strategy=None, quiet=True):
+    """Recompute and re-persist an unapproved proposal after the plan or roles move.
+
+    A proposal is a preview: it is recomputed from the run's current files every
+    time something it depends on changes, so what an operator is asked to
+    approve is never stale. An approved route is not touched here — changing one
+    of those needs its own approval, through `fde routing override`."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto":
+        return None
+    if doc.get("approvedAt"):
+        return doc
+    policy = load_routing_policy()
+    agents = agents or load_agents()
+    orchestrator = run.orchestrator() or (doc.get("orchestrator") or {}).get("accountId")
+    assignments = (run.roles() or {}).get("assignments") or {}
+    request = routing_request_for(run)
+    decision = build_routing_decision(
+        policy, agents, mode="auto", strategy=strategy or doc.get("strategy") or
+        policy["defaultStrategy"], orchestrator=orchestrator, request=request,
+        stages=request["stages"], assignments=assignments)
+    merged = dict(decision)
+    merged["proposedAt"] = iso()
+    merged["approvedAt"] = None
+    merged["approvedWithPlanHash"] = None
+    merged["planHash"] = routing_plan_hash(request["stages"], assignments)
+    merged["overrides"] = list(doc.get("overrides") or [])
+    save_routing(run, merged)
+    sync_routed_session_config(run, merged)
+    if doc.get("decisionHash") != merged["decisionHash"]:
+        routing_event(run, "routing.proposed", mode="auto",
+                      strategy=merged["strategy"], band=merged["assessment"]["band"],
+                      score=merged["assessment"]["score"],
+                      confidence=merged["assessment"]["confidence"],
+                      qualityFloor=merged["assessment"]["qualityFloor"],
+                      decisionHash=merged["decisionHash"],
+                      policyRevision=merged["policyRevision"],
+                      estimatedCostUnits=merged["estimatedCostUnits"],
+                      taskCount=len(merged["tasks"]))
+        if not quiet:
+            print(f"routing  {merged['assessment']['band']} band, "
+                  f"{len(merged['tasks'])} task(s), "
+                  f"~{merged['estimatedCostUnits']:g} cost units (estimate)")
+    return merged
+
+
+def routing_status_summary(run: Run):
+    """A bounded view for `fde status --json`.
+
+    Bounded on purpose: a status reader wants the shape of the decision, not
+    every prompt, alternative and rejection reason the engine considered."""
+    try:
+        doc = load_routing(run)
+    except RoutingError as exc:
+        return {"present": True, "readable": False, "error": exc.code,
+                "message": exc.message, "warnings": [exc.message]}
+    if doc is None:
+        return None
+    assessment = doc.get("assessment") or {}
+    orchestrator = doc.get("orchestrator") or {}
+    tasks = doc.get("tasks") or []
+    approved = bool(doc.get("approvedAt"))
+    plan_hash = routing_plan_hash(
+        (run.plan() or {}).get("stages") or [],
+        (run.roles() or {}).get("assignments") or {})
+    return {
+        "present": True,
+        "readable": True,
+        "schemaVersion": doc.get("schemaVersion"),
+        "policyRevision": doc.get("policyRevision"),
+        "mode": doc.get("mode"),
+        "strategy": doc.get("strategy"),
+        "band": assessment.get("band"),
+        "score": assessment.get("score"),
+        "maxScore": assessment.get("maxScore"),
+        "confidence": assessment.get("confidence"),
+        "qualityFloor": assessment.get("qualityFloor"),
+        "riskFlags": [entry.get("flag") for entry in assessment.get("riskFlags") or []],
+        "clarification": assessment.get("clarification"),
+        "missingInformation": list(assessment.get("missingInformation") or [])[:6],
+        "orchestrator": {
+            "accountId": orchestrator.get("accountId"),
+            "account": orchestrator.get("account"),
+            "model": orchestrator.get("model"),
+            "effort": orchestrator.get("effort"),
+            "tier": orchestrator.get("tier"),
+            "routable": orchestrator.get("routable"),
+            "estimatedCostUnits": orchestrator.get("expectedCostUnits"),
+            "escalationCeiling": orchestrator.get("escalationCeiling"),
+            "reason": _safe_line(orchestrator.get("reason") or "", ROUTING_MAX_REASON_CHARS),
+        },
+        "taskCount": len(tasks),
+        "specialistCount": doc.get("specialistCount"),
+        "tasks": [
+            {
+                "taskId": task.get("taskId"),
+                "stage": task.get("stage"),
+                "requiredRole": task.get("requiredRole"),
+                "specialist": task.get("specialist"),
+                "accountId": task.get("accountId"),
+                "accountAvailable": task.get("accountAvailable"),
+                "model": task.get("model"),
+                "effort": task.get("effort"),
+                "tier": task.get("tier"),
+                "qualityFloor": task.get("qualityFloor"),
+                "dependsOn": list(task.get("dependsOn") or []),
+                "parallelizable": task.get("parallelizable"),
+                "estimatedCostUnits": task.get("estimatedCostUnits"),
+                "escalationCeiling": task.get("escalationCeiling"),
+                "independence": task.get("independence"),
+                "reason": _safe_line(task.get("specialistReason") or "",
+                                     ROUTING_MAX_REASON_CHARS),
+            }
+            for task in tasks[:ROUTING_MAX_STATUS_TASKS]
+        ],
+        "tasksTruncated": len(tasks) > ROUTING_MAX_STATUS_TASKS,
+        "limits": doc.get("limits"),
+        "estimatedCostUnits": doc.get("estimatedCostUnits"),
+        "costUnitsAreEstimates": True,
+        "usage": {"state": "unavailable", "reason":
+                  "no provider usage has been reported for this run yet"},
+        "approved": approved,
+        "approvedAt": doc.get("approvedAt"),
+        "proposedAt": doc.get("proposedAt"),
+        "decisionHash": doc.get("decisionHash"),
+        "approvedWithPlanHash": doc.get("approvedWithPlanHash"),
+        "planHashMatches": (not approved) or doc.get("approvedWithPlanHash") == plan_hash,
+        "overrideCount": len(doc.get("overrides") or []),
+        "notScheduled": list(doc.get("notScheduled") or [])[:12],
+        "unroutable": list(doc.get("unroutable") or [])[:12],
+        "warnings": list(doc.get("warnings") or [])[:12],
+    }
+
+
+# --------------------------------------------------------- routing display --
+
+def print_routing_matrix(decision, *, indent="  "):
+    """The execution matrix, in the form an operator can actually check.
+
+    Account identity, specialist method, model and effort are four different
+    things and are printed as four different things: conflating them is how a
+    reader ends up believing an independent check happened because three rows
+    appeared."""
+    assessment = decision.get("assessment") or {}
+    orchestrator = decision.get("orchestrator") or {}
+    print(f"{indent}complexity  {assessment.get('band')} "
+          f"({assessment.get('score')}/{assessment.get('maxScore')}), "
+          f"confidence {assessment.get('confidence')}, "
+          f"quality floor {assessment.get('qualityFloor')}")
+    flags = [entry.get("flag") for entry in assessment.get("riskFlags") or []]
+    if flags:
+        print(f"{indent}risk        {', '.join(flags)}")
+    for note in assessment.get("overrides") or []:
+        print(f"{indent}override    {note}")
+    if orchestrator.get("routable"):
+        print(f"{indent}orchestrator {orchestrator.get('accountLabel') or orchestrator.get('accountId')}"
+              f"  ·  {orchestrator.get('model')} / {orchestrator.get('effort')}"
+              f"  ·  ~{orchestrator.get('expectedCostUnits'):g} units (estimate)")
+    else:
+        print(f"{indent}orchestrator {orchestrator.get('accountId')}  ·  no model choice: "
+              f"{orchestrator.get('reason')}")
+    print(f"{indent}strategy    {decision.get('strategy')}  "
+          f"(policy {decision.get('policyRevision')})")
+    tasks = decision.get("tasks") or []
+    if not tasks:
+        print(f"{indent}tasks       none proposed yet — the plan and roles decide these")
+    else:
+        print(f"{indent}tasks")
+        header = (f"{indent}  {'task':<18}{'stage':<16}{'role':<18}{'method':<24}"
+                  f"{'account':<22}{'model/effort':<20}{'floor':<10}{'units':>7}")
+        print(header)
+        for task in tasks:
+            model = (f"{task.get('model')}/{task.get('effort')}" if task.get("routable")
+                     else "(not selectable)")
+            print(f"{indent}  {task.get('taskId'):<18}{task.get('stage'):<16}"
+                  f"{task.get('requiredRole'):<18}"
+                  f"{(task.get('specialist') or '— orchestrator does it'):<24}"
+                  f"{(task.get('accountLabel') or task.get('accountId') or '—'):<22}"
+                  f"{model:<20}{task.get('qualityFloor'):<10}"
+                  f"{task.get('estimatedCostUnits'):>7.1f}")
+            parallel = "may run in parallel" if task.get("parallelizable") else "sequential"
+            depends = ", ".join(task.get("dependsOn") or []) or "nothing"
+            print(f"{indent}    why: {task.get('specialistReason')}")
+            print(f"{indent}    after {depends}; {parallel}; "
+                  f"ceiling {(task.get('escalationCeiling') or {}).get('tier')}/"
+                  f"{(task.get('escalationCeiling') or {}).get('effort')}, "
+                  f"{(task.get('escalationCeiling') or {}).get('maxRetries')} retry max")
+            independence = task.get("independence")
+            if independence and not independence.get("independent"):
+                print(f"{indent}    NOT independent: {independence.get('reason')}")
+    limits = decision.get("limits") or {}
+    print(f"{indent}ceilings    {limits.get('maxSpecialists')} specialist(s), "
+          f"{limits.get('maxSpecialistsPerStage')} per stage, "
+          f"{limits.get('maxParallel')} in parallel, "
+          f"{limits.get('maxRetries')} retry, "
+          f"{limits.get('maxCostUnits'):g} cost units, "
+          f"tier {limits.get('maxAutomaticTier')}, effort {limits.get('maxAutomaticEffort')}")
+    print(f"{indent}estimate    ~{decision.get('estimatedCostUnits'):g} cost units — a "
+          f"relative estimate, not money, and not a provider-reported figure")
+    for entry in decision.get("notScheduled") or []:
+        print(f"{indent}not run     {entry.get('stage')}/{entry.get('role')}: "
+              f"{entry.get('reason')}")
+    for entry in decision.get("unroutable") or []:
+        print(f"{indent}no model    {entry.get('taskId')}: {entry.get('reason')}")
+    for warning in decision.get("warnings") or []:
+        print(f"{indent}warning     {warning}")
+    if assessment.get("clarification"):
+        print(f"{indent}ask first   {assessment['clarification']}")
+
+
+# -------------------------------------------------------- routing commands --
+
+def _routing_requirement(args):
+    if getattr(args, "requirement_stdin", False):
+        data = sys.stdin.buffer.read(ROUTING_MAX_REQUIREMENT_BYTES + 1)
+        if len(data) > ROUTING_MAX_REQUIREMENT_BYTES:
+            raise RoutingError(
+                "routing-requirement-too-large",
+                f"the request is larger than {ROUTING_MAX_REQUIREMENT_BYTES} bytes",
+                "Summarise it, or attach the long form to the run instead.")
+        return data.decode("utf-8", errors="replace").strip()
+    return (getattr(args, "requirement", None) or "").strip()
+
+
+@routing_command
+def cmd_routing_preview(args):
+    """Score a request and show what it would be routed to. Writes nothing.
+
+    This is the form's preview: no run is created, no file is written, and
+    nothing connected is read — not the Jira item the request names, not a
+    repository, not a connector. It is deterministic, so the same request and
+    the same policy give the same answer every time and a difference between
+    preview and creation is a real difference, not noise."""
+    policy = load_routing_policy(getattr(args, "policy", None))
+    agents = load_agents()
+    orchestrator = resolve_agent(agents, args.orchestrator)
+    strategy = args.strategy or policy["defaultStrategy"]
+    requirement = _routing_requirement(args)
+
+    stages = []
+    if args.shape:
+        stages = resolve_shape(args.shape)
+    elif args.stages:
+        for chunk in args.stages:
+            stages += [resolve_stage(x) for x in chunk.split(",") if x.strip()]
+    repo_count = 0
+    if getattr(args, "project", None):
+        project = load_project(args.project)
+        repo_count = len(project.get("repoPaths") or [])
+
+    assignments = {"orchestrator": orchestrator} if orchestrator else {}
+    decision = build_routing_decision(
+        policy, agents, mode="auto", strategy=strategy, orchestrator=orchestrator,
+        request={"requirement": requirement, "stages": stages, "shape": args.shape,
+                 "attachments": [], "repoCount": repo_count},
+        stages=stages, assignments=assignments)
+    decision["provisional"] = True
+    decision["provisionalReason"] = (
+        "no role assignment exists yet, so only the orchestrator's own stages have "
+        "tasks. The authoritative matrix is computed when the plan and roles are "
+        "recorded.")
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ROUTING_SCHEMA_VERSION, "preview": decision})
+    print("\nRouting preview — nothing was created, written, or read from any "
+          "connected system.\n")
+    print_routing_matrix(decision)
+    print(f"\n  provisional {decision['provisionalReason']}\n")
+    return 0
+
+
+@routing_command
+def cmd_routing_propose(args):
+    """Recompute this run's proposal from its own recorded plan and roles."""
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    if doc.get("mode") != "auto":
+        raise RoutingError(
+            "routing-manual",
+            f"run {run.id} was created with manual model and effort selection",
+            "Manual runs keep the model and effort the operator chose; nothing is "
+            "recomputed for them.",
+            exit_code=5)
+    if doc.get("approvedAt"):
+        raise RoutingError(
+            "routing-already-approved",
+            f"run {run.id} has an approved route; a proposal cannot replace it",
+            f"Change one decision with: fde routing override {run.id} --task-id <id> "
+            f"--reason '<why>'",
+            exit_code=5)
+    run.guard_orchestrator("proposing a route")
+    merged = refresh_routing_proposal(run, strategy=getattr(args, "strategy", None))
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ROUTING_SCHEMA_VERSION, "runId": run.id,
+                          "routing": merged})
+    print(f"\nProposed route for {run.id}\n")
+    print_routing_matrix(merged)
+    print(f"\n  hash        {merged['decisionHash']}")
+    print(f"  next        fde approve-plan {run.id}   — approves the plan, the roles and "
+          f"this exact route together\n")
+    return 0
+
+
+@routing_command
+def cmd_routing_show(args):
+    """This run's routing record as it stands, approved or not."""
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    if getattr(args, "json", False):
+        return emit_json({
+            "schemaVersion": ROUTING_SCHEMA_VERSION,
+            "runId": run.id,
+            "routing": doc,
+            "summary": routing_status_summary(run),
+        })
+    approved = doc.get("approvedAt")
+    print(f"\nrun     {run.id}")
+    print(f"mode    {doc.get('mode')}  ·  strategy {doc.get('strategy')}")
+    print(f"state   {'approved ' + str(approved) if approved else 'proposed, not approved'}")
+    print(f"hash    {doc.get('decisionHash')}\n")
+    print_routing_matrix(doc)
+    overrides = doc.get("overrides") or []
+    if overrides:
+        print("\n  overrides")
+        for entry in overrides:
+            print(f"    {entry.get('at')}  {entry.get('operator')}  "
+                  f"{entry.get('target')}.{entry.get('field')}: "
+                  f"{entry.get('from')} -> {entry.get('to')}")
+            print(f"      reason: {entry.get('reason')}")
+    print()
+    return 0
+
+
+@routing_command
+def cmd_routing_explain(args):
+    """Why this route, and why not the alternatives.
+
+    Explaining recomputes the candidate set from the persisted policy revision
+    and says so when the answer has drifted: a decision explained against a
+    policy that has since changed is not an explanation of the decision that was
+    actually approved."""
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    policy = load_routing_policy()
+    drift = None
+    if doc.get("policyRevision") != policy["policyRevision"]:
+        drift = (f"this route was decided under policy revision "
+                 f"{doc.get('policyRevision')}; the policy on disk is now "
+                 f"{policy['policyRevision']}, so today's candidate set may differ from "
+                 f"the one this decision was made from")
+
+    task_id = getattr(args, "task_id", None)
+    if task_id:
+        target = next((task for task in doc.get("tasks") or []
+                       if task.get("taskId") == task_id), None)
+        if target is None:
+            raise RoutingError(
+                "routing-task-unknown",
+                f"run {run.id} has no routed task '{task_id}'",
+                "Known: " + (", ".join(task.get("taskId") for task in
+                                       doc.get("tasks") or []) or "none"),
+                exit_code=4)
+    else:
+        target = doc.get("orchestrator") or {}
+
+    payload = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "runId": run.id,
+        "policyRevision": doc.get("policyRevision"),
+        "policyRevisionOnDisk": policy["policyRevision"],
+        "policyDrift": drift,
+        "strategy": doc.get("strategy"),
+        "strategyRule": target.get("strategyRule"),
+        "assessment": doc.get("assessment"),
+        "target": {"taskId": target.get("taskId"), "stage": target.get("stage"),
+                   "requiredRole": target.get("requiredRole"),
+                   "specialist": target.get("specialist"),
+                   "specialistReason": target.get("specialistReason"),
+                   "accountId": target.get("accountId"),
+                   "model": target.get("model"), "effort": target.get("effort"),
+                   "tier": target.get("tier"),
+                   "qualityFloor": target.get("qualityFloor"),
+                   "reason": target.get("reason"),
+                   "limitations": target.get("limitations"),
+                   "estimatedCostUnits": target.get("estimatedCostUnits")
+                   or target.get("expectedCostUnits"),
+                   "escalationCeiling": target.get("escalationCeiling"),
+                   "independence": target.get("independence")},
+        "alternativesConsidered": list(target.get("alternatives") or []),
+        "rejected": list(target.get("rejected") or []),
+        "limits": doc.get("limits"),
+        "notScheduled": list(doc.get("notScheduled") or []),
+        "costUnitsAreEstimates": True,
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    assessment = doc.get("assessment") or {}
+    print(f"\nrun     {run.id}")
+    print(f"target  {payload['target']['taskId'] or 'orchestrator'}")
+    print(f"chose   {payload['target']['model']} / {payload['target']['effort']} "
+          f"(tier {payload['target']['tier']}, floor {payload['target']['qualityFloor']})")
+    print(f"because {payload['target']['reason']}\n")
+    print("assessment")
+    for dimension in assessment.get("dimensions") or []:
+        print(f"  {dimension['label']:<42} {dimension['score']}/2  {dimension['evidence']}")
+    print(f"  {'total':<42} {assessment.get('score')}/{assessment.get('maxScore')} "
+          f"-> {assessment.get('band')}")
+    for note in assessment.get("overrides") or []:
+        print(f"  override: {note}")
+    if payload["alternativesConsidered"]:
+        print("\nalternatives considered")
+        for entry in payload["alternativesConsidered"]:
+            print(f"  {entry['model']}/{entry['effort']:<8} tier {entry['tier']:<10} "
+                  f"~{entry['expectedCostUnits']:g} units")
+    if payload["rejected"]:
+        print("\nrejected")
+        for entry in payload["rejected"]:
+            print(f"  {entry['model']}/{entry['effort']:<8} {entry['reason']}")
+    for item in assessment.get("missingInformation") or []:
+        print(f"\nmissing  {item}")
+    if drift:
+        print(f"\nnote     {drift}")
+    print()
+    return 0
+
+
+# ---------------------------------------------------------------- overrides --
+
+def _routing_operator():
+    """Who made this change, as far as this machine can honestly say."""
+    return (os.environ.get("SUDO_USER") or os.environ.get("USER")
+            or os.environ.get("LOGNAME") or "unknown")
+
+
+def _catalog_entry(policy, provider, model, effort):
+    for entry in (policy["providers"].get(provider) or {}).get("models") or []:
+        if entry["id"] == model:
+            return entry if effort is None or effort in entry["efforts"] else None
+    return None
+
+
+@routing_command
+def cmd_routing_override(args):
+    """Change one routed decision, on the record.
+
+    An override never overwrites history: the old value, who changed it, when and
+    why are appended, and the previous decision hash is kept beside the new one.
+    Two things it will not do. It will not go below the target's quality floor —
+    that is what a floor is. And it will not raise a model tier, an effort or an
+    account without the operator typing the approval phrase, because raising any
+    of those is a change to what was approved."""
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    policy = load_routing_policy()
+    agents = load_agents()
+    if doc.get("mode") != "auto":
+        raise RoutingError("routing-manual",
+                           f"run {run.id} selects its model and effort manually; there is "
+                           f"no routed decision to override", exit_code=5)
+
+    if args.orchestrator_target:
+        target = doc.get("orchestrator") or {}
+        label = "orchestrator"
+    else:
+        if not ROUTING_TASK_ID_RE.match(str(args.task_id or "")):
+            raise RoutingError(
+                "routing-task-id-invalid",
+                f"'{_safe_line(str(args.task_id), 60)}' is not a usable task id",
+                exit_code=2)
+        target = next((task for task in doc.get("tasks") or []
+                       if task.get("taskId") == args.task_id), None)
+        if target is None:
+            raise RoutingError(
+                "routing-task-unknown",
+                f"run {run.id} has no routed task '{_safe_line(str(args.task_id), 60)}'",
+                "Known: " + (", ".join(task.get("taskId") for task in
+                                       doc.get("tasks") or []) or "none"),
+                exit_code=4)
+        label = f"task:{args.task_id}"
+
+    reason = (args.reason or "").strip()
+    if not reason:
+        raise RoutingError("routing-override-no-reason",
+                           "an override needs a reason; it is the only part of the record "
+                           "that explains itself later")
+
+    account = target.get("accountId")
+    if args.account:
+        account = resolve_agent(agents, args.account)
+        if not account:
+            raise RoutingError("routing-unknown-identity",
+                               f"'{args.account}' is not an identity in this registry")
+    provider = routing_provider_for(agents, account)
+    if provider is None:
+        raise RoutingError(
+            "routing-account-unroutable",
+            f"{agent_label(agents, account)} exposes no model or effort for this "
+            f"controller to set", exit_code=2)
+
+    model = args.model or target.get("model")
+    effort = args.effort or target.get("effort")
+    if not model or not effort:
+        raise RoutingError("routing-override-incomplete",
+                           "give a model and an effort, or an account that has them")
+    entry = _catalog_entry(policy, provider, model, effort)
+    if entry is None:
+        offered = ", ".join(
+            f"{m['id']}({'/'.join(m['efforts'])})"
+            for m in (policy["providers"].get(provider) or {}).get("models") or [])
+        raise RoutingError(
+            "routing-not-in-catalog",
+            f"'{model}' at '{effort}' effort is not something this policy offers for a "
+            f"{provider} account",
+            f"Offered: {offered}. Add it to {ROUTING_POLICY_FILE} if the account really "
+            f"has it — a route the console will not accept is worse than no route.",
+            exit_code=2)
+
+    floor = target.get("qualityFloor") or "standard"
+    floor_spec = policy["floors"][floor]
+    if _tier_rank(policy, entry["tier"]) < _tier_rank(policy, floor_spec["minimumTier"]) \
+            or _effort_rank(policy, effort) < _effort_rank(policy, floor_spec["minimumEffort"]):
+        raise RoutingError(
+            "routing-below-floor",
+            f"{model} at '{effort}' effort is below this task's '{floor}' quality floor "
+            f"(at least {floor_spec['minimumTier']} tier at "
+            f"{floor_spec['minimumEffort']} effort)",
+            "A floor is not negotiable by override. Change the plan, or change the floor "
+            f"in {ROUTING_POLICY_FILE} deliberately.",
+            exit_code=5)
+
+    changes = []
+    for field, old, new in (("account", target.get("accountId"), account),
+                            ("model", target.get("model"), model),
+                            ("effort", target.get("effort"), effort)):
+        if old != new:
+            changes.append((field, old, new))
+    if not changes:
+        raise RoutingError("routing-override-noop",
+                           "that is already the routed decision; nothing was recorded")
+
+    escalating = (
+        _tier_rank(policy, entry["tier"]) > _tier_rank(policy, target.get("tier") or entry["tier"])
+        or _effort_rank(policy, effort) > _effort_rank(policy, target.get("effort") or effort)
+        or account != target.get("accountId"))
+    if escalating and not args.approve:
+        expected = f"APPROVE ROUTING {run.id}"
+        print(f"\nThis override raises what was approved for {label}:")
+        for field, old, new in changes:
+            print(f"  {field}: {old} -> {new}")
+        print(f"\n  new tier {entry['tier']}, effort {effort}")
+        print("  Raising a model tier, an effort or an account is a change to the "
+              "approved plan.")
+        print(f"\nType exactly: {expected}")
+        typed = input("> ").strip() if sys.stdin.isatty() else sys.stdin.readline().strip()
+        if typed != expected:
+            die("confirmation did not match; nothing was overridden", 8)
+
+    available, detail = agent_available(agents, account)
+    previous_hash = doc.get("decisionHash")
+    target["accountId"] = account
+    target["account"] = routing_account_id(agents, account)
+    target["accountLabel"] = agent_label(agents, account)
+    target["accountAvailable"] = bool(available)
+    target["provider"] = provider
+    target["routable"] = True
+    target["model"] = model
+    target["modelLabel"] = entry.get("label") or model
+    target["effort"] = effort
+    target["tier"] = entry["tier"]
+    target["limitations"] = list(entry.get("limitations") or [])
+    cost = round(float(entry["costWeight"])
+                 * float(policy["effortCostMultiplier"][effort]), 2)
+    band = target.get("band") or (doc.get("assessment") or {}).get("band") or "standard"
+    limits = policy["limits"][band]
+    target["costUnits"] = cost
+    expected_cost = round(cost * (1.0 + policy["expectedRetry"]["tierAtBand"]), 2)
+    if args.orchestrator_target:
+        target["expectedCostUnits"] = expected_cost
+    else:
+        target["estimatedCostUnits"] = expected_cost
+    target["escalationCeiling"] = escalation_ceiling(
+        policy, tier=entry["tier"], effort=effort, limits=limits)
+    target["reason"] = (f"set by an operator override: {_safe_line(reason, 200)}")
+    target["overridden"] = True
+
+    doc["estimatedCostUnits"] = round(
+        (doc.get("orchestrator") or {}).get("expectedCostUnits", 0.0)
+        + sum(task.get("estimatedCostUnits", 0.0) for task in doc.get("tasks") or []), 2)
+    doc["decisionHash"] = routing_decision_hash(doc)
+    warnings = list(doc.get("warnings") or [])
+    if not available:
+        warnings.append(f"{agent_label(agents, account)} was set by override but is not "
+                        f"available on this machine: {detail}")
+    run_band = (doc.get("effectiveBand")
+                or (doc.get("assessment") or {}).get("band") or "standard")
+    cap = float(policy["limits"][run_band]["maxCostUnits"])
+    if doc["estimatedCostUnits"] > cap:
+        warnings.append(
+            f"after this override the estimate is {doc['estimatedCostUnits']:g} cost "
+            f"units, above the {cap:g}-unit ceiling for '{run_band}' work. Nothing will "
+            f"run past the ceiling; narrow the plan, raise the ceiling deliberately, or "
+            f"revert this override")
+    doc["warnings"] = warnings
+
+    stamp = iso()
+    operator = _routing_operator()
+    entries = list(doc.get("overrides") or [])
+    for field, old, new in changes:
+        entries.append({
+            "at": stamp, "operator": operator, "target": label, "field": field,
+            "from": old, "to": new, "reason": _safe_line(reason, ROUTING_MAX_REASON_CHARS),
+            "escalation": bool(escalating),
+            "previousDecisionHash": previous_hash,
+            "decisionHash": doc["decisionHash"],
+        })
+    doc["overrides"] = entries
+    save_routing(run, doc)
+    # An override of the orchestrator's own route has to reach the orchestrator's
+    # session, or it is a record of an intention rather than a change.
+    if args.orchestrator_target:
+        sync_routed_session_config(run, doc)
+    for field, old, new in changes:
+        routing_event(run, "routing.overridden", taskId=target.get("taskId"),
+                      field=field, **{"from": old, "to": new})
+
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ROUTING_SCHEMA_VERSION, "runId": run.id,
+                          "target": label, "changes": [
+                              {"field": f, "from": o, "to": n} for f, o, n in changes],
+                          "decisionHash": doc["decisionHash"],
+                          "previousDecisionHash": previous_hash,
+                          "estimatedCostUnits": doc["estimatedCostUnits"],
+                          "warnings": doc["warnings"]})
+    print(f"\noverridden  {label}")
+    for field, old, new in changes:
+        print(f"  {field}: {old} -> {new}")
+    print(f"  reason: {reason}")
+    print(f"  hash: {previous_hash} -> {doc['decisionHash']}")
+    for warning in doc["warnings"]:
+        print(f"  warning: {warning}")
+    print()
+    return 0
+
+
+# ------------------------------------------------- freezing and resolving --
+
+def routing_needs_reapproval(run: Run):
+    """Whether an approved route no longer describes this run.
+
+    The freeze is bound to the exact stage slice and role assignment it was
+    shown with. If either moves, the route still exists and is still auditable,
+    but it is no longer a decision about this run, so it has to be approved
+    again rather than quietly reused."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto" or not doc.get("approvedAt"):
+        return False, None
+    plan_hash = routing_plan_hash(
+        (run.plan() or {}).get("stages") or [],
+        (run.roles() or {}).get("assignments") or {})
+    if doc.get("approvedWithPlanHash") == plan_hash:
+        return False, None
+    return True, (f"run {run.id}'s plan or role assignment changed after its route was "
+                  f"approved")
+
+
+def supersede_routing_approval(run: Run, agents=None, *, reason=""):
+    """Return an approved route to a proposal so it can be approved again.
+
+    Nothing is deleted: the superseded decision hash and the plan hash it was
+    bound to are recorded in the event log before the recomputation, so the
+    record still shows what was approved and when it stopped applying."""
+    doc = load_routing(run)
+    if doc is None or not doc.get("approvedAt"):
+        return doc
+    routing_event(run, "routing.proposed", mode=doc.get("mode"),
+                  strategy=doc.get("strategy"),
+                  decisionHash=doc.get("decisionHash"),
+                  policyRevision=doc.get("policyRevision"),
+                  supersededApprovalAt=doc.get("approvedAt"),
+                  supersededPlanHash=doc.get("approvedWithPlanHash"),
+                  reason=_safe_line(reason, ROUTING_MAX_REASON_CHARS))
+    doc["supersededApprovals"] = list(doc.get("supersededApprovals") or []) + [{
+        "approvedAt": doc.get("approvedAt"),
+        "approvedBy": doc.get("approvedBy"),
+        "approvedWithPlanHash": doc.get("approvedWithPlanHash"),
+        "decisionHash": doc.get("decisionHash"),
+        "supersededAt": iso(),
+        "reason": _safe_line(reason, ROUTING_MAX_REASON_CHARS),
+    }]
+    doc["approvedAt"] = None
+    doc["approvedWithPlanHash"] = None
+    doc.pop("approvedBy", None)
+    save_routing(run, doc)
+    return refresh_routing_proposal(run, agents)
+
+
+def freeze_routing_for_approval(run: Run, agents=None, *, quiet=False):
+    """Bind the exact displayed route to the plan approval, or refuse.
+
+    Before the typed approval, a route is a preview and authorises nothing. This
+    is the moment it becomes durable, so it has to be the same route the operator
+    just read: recompute it, and if the recomputation differs, refuse the
+    approval and show the revised proposal instead of approving something nobody
+    saw."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto":
+        return None
+    stale, why = routing_needs_reapproval(run)
+    if stale:
+        if not quiet:
+            print(f"\n  {why}, so the previous route is superseded and this approval "
+                  f"covers the recomputed one.")
+        doc = supersede_routing_approval(run, agents, reason=why) or doc
+    stored = doc.get("decisionHash")
+    recomputed = refresh_routing_proposal(run, agents)
+    if recomputed is None:
+        return None
+    if stored and stored != recomputed.get("decisionHash"):
+        if not quiet:
+            print("\nThe route changed since it was last shown, so this approval cannot "
+                  "stand for it.\n")
+            print_routing_matrix(recomputed)
+            print(f"\n  was  {stored}")
+            print(f"  now  {recomputed.get('decisionHash')}\n")
+        raise RoutingError(
+            "routing-decision-changed",
+            f"the routing decision for run {run.id} is not the one that was displayed",
+            f"Read the revised proposal above, then run: fde approve-plan {run.id}",
+            exit_code=5)
+    return recomputed
+
+
+def confirm_routing_freeze(run: Run, plan_stages, assignments):
+    """Record the approval on the routing document itself."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto":
+        return None
+    plan_hash = routing_plan_hash(plan_stages, assignments)
+    doc["approvedAt"] = iso()
+    doc["approvedWithPlanHash"] = plan_hash
+    doc["planHash"] = plan_hash
+    doc["approvedBy"] = _routing_operator()
+    save_routing(run, doc)
+    sync_routed_session_config(run, doc)
+    routing_event(run, "routing.approved", mode=doc.get("mode"),
+                  strategy=doc.get("strategy"),
+                  band=(doc.get("assessment") or {}).get("band"),
+                  qualityFloor=(doc.get("assessment") or {}).get("qualityFloor"),
+                  decisionHash=doc.get("decisionHash"),
+                  policyRevision=doc.get("policyRevision"),
+                  estimatedCostUnits=doc.get("estimatedCostUnits"),
+                  taskCount=len(doc.get("tasks") or []))
+    return doc
+
+
+def resolve_routed_task(run: Run, agents, *, task_id, agent_id, stage):
+    """The frozen route for one invocation, or a refusal that says why.
+
+    Nothing here trusts the caller's idea of the model or effort. The approved
+    decision is the authority; the invocation is checked against it on stage,
+    role, identity, model and effort, and a mismatch is refused rather than
+    reconciled."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto":
+        return None
+    if not doc.get("approvedAt"):
+        raise RoutingError(
+            "routing-not-approved",
+            f"run {run.id} has a proposed route that has not been approved",
+            f"Approve the plan, roles and route together: fde approve-plan {run.id}",
+            exit_code=7)
+    plan_hash = routing_plan_hash(
+        (run.plan() or {}).get("stages") or [],
+        (run.roles() or {}).get("assignments") or {})
+    if doc.get("approvedWithPlanHash") != plan_hash:
+        raise RoutingError(
+            "routing-plan-changed",
+            f"run {run.id}'s plan or role assignment has changed since its route was "
+            f"approved, so the frozen route no longer describes this run",
+            f"Re-approve the combined plan, roles and route: fde approve-plan {run.id} "
+            f"--reapprove",
+            exit_code=7)
+    tasks = doc.get("tasks") or []
+    if task_id and not ROUTING_TASK_ID_RE.match(str(task_id)):
+        raise RoutingError(
+            "routing-task-id-invalid",
+            f"'{_safe_line(str(task_id), 60)}' is not a usable task id",
+            "Approved tasks: " + (", ".join(task["taskId"] for task in tasks) or "none"),
+            exit_code=2)
+    if not task_id:
+        raise RoutingError(
+            "routing-task-id-required",
+            f"run {run.id} is automatically routed, so every invocation names the "
+            f"approved task it is carrying out",
+            "Approved tasks: " + (", ".join(
+                f"{task['taskId']} ({task['stage']}, {task['requiredRole']}, "
+                f"{task['accountId']})" for task in tasks) or "none"),
+            exit_code=2)
+    task = next((entry for entry in tasks if entry.get("taskId") == task_id), None)
+    if task is None:
+        raise RoutingError(
+            "routing-task-unknown",
+            f"run {run.id} has no approved task '{task_id}'",
+            "Approved tasks: " + (", ".join(task["taskId"] for task in tasks) or "none"),
+            exit_code=4)
+    if task.get("stage") != stage:
+        raise RoutingError(
+            "routing-task-stage-mismatch",
+            f"approved task '{task_id}' belongs to the '{task.get('stage')}' stage, not "
+            f"'{stage}'", exit_code=6)
+    if task.get("accountId") != agent_id:
+        raise RoutingError(
+            "routing-task-identity-mismatch",
+            f"approved task '{task_id}' is assigned to "
+            f"{agent_label(agents, task.get('accountId'))}, not "
+            f"{agent_label(agents, agent_id)}",
+            "Automatic routing does not substitute one identity for another. Override "
+            "the route deliberately if the assignment is wrong.",
+            exit_code=6)
+    if task.get("requiredRole") not in run.role_of(agent_id, stage):
+        raise RoutingError(
+            "routing-task-role-mismatch",
+            f"approved task '{task_id}' needs the '{task.get('requiredRole')}' role in "
+            f"'{stage}', which {agent_label(agents, agent_id)} does not hold in this run",
+            exit_code=6)
+    if not task.get("routable"):
+        return {"taskId": task_id, "model": None, "effort": None,
+                "specialist": task.get("specialist"), "task": task}
+    model, effort = task.get("model"), task.get("effort")
+    provider = routing_provider_for(agents, agent_id)
+    policy = load_routing_policy()
+    if _catalog_entry(policy, provider, model, effort) is None:
+        raise RoutingError(
+            "routing-frozen-route-unavailable",
+            f"approved task '{task_id}' names {model} at '{effort}' effort, which this "
+            f"policy no longer offers for a {provider} account",
+            "The policy changed after approval. Re-approve the route, or restore the "
+            "policy revision it was approved under.",
+            exit_code=5)
+    return {"taskId": task_id, "model": model, "effort": effort,
+            "specialist": task.get("specialist"), "task": task}
 
 
 # -------------------------------------------------------------- design panel --
@@ -6191,6 +9230,12 @@ def main(argv=None):
                    help="Claude model alias or provider model id for the orchestrator session")
     s.add_argument("--effort", choices=["auto", "low", "medium", "high", "xhigh", "max"],
                    help="Claude reasoning effort for the orchestrator session")
+    s.add_argument("--routing", choices=list(ROUTING_MODES), default="manual",
+                   help="auto: the controller selects a concrete model and effort from the "
+                        "chosen account and proposes the specialist matrix. manual (the "
+                        "default) keeps --model/--effort exactly as before")
+    s.add_argument("--strategy", choices=list(AUTO_STRATEGIES),
+                   help="how automatic routing trades quality against cost")
     s.add_argument("--json", action="store_true",
                    help="print the created run as JSON; narration goes to stderr")
     s.set_defaults(fn=cmd_start)
@@ -6253,9 +9298,12 @@ def main(argv=None):
 
     s = sub.add_parser(
         "approve-plan",
-        help="approve a proposed plan and its selected roles together before execution",
+        help="approve a proposed plan, its selected roles and its route together",
     )
     s.add_argument("run_id")
+    s.add_argument("--reapprove", action="store_true",
+                   help="re-approve after the plan or role assignment changed, which "
+                        "supersedes the previously frozen route")
     s.set_defaults(fn=cmd_approve_plan)
 
     s = sub.add_parser("status", help="state, roles, artifacts, approvals, next action")
@@ -6322,11 +9370,78 @@ def main(argv=None):
     s = sub.add_parser("invoke", help="run an assigned identity for a stage")
     s.add_argument("run_id")
     s.add_argument("agent_id")
-    s.add_argument("task_file")
+    s.add_argument("task_file", nargs="?",
+                   help="the task file, relative to the run directory")
+    s.add_argument("--task-file", dest="task_file_option", metavar="PATH",
+                   help="the same thing as the positional form, for callers that "
+                        "prefer named arguments")
     s.add_argument("--stage")
+    s.add_argument("--task-id", dest="task_id", metavar="TASK-ID",
+                   help="the approved routed task this invocation carries out; required "
+                        "on an automatically routed run, and the source of its model and "
+                        "effort")
     s.add_argument("--write", action="store_true", help="Codex only, and only with a live approval")
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_invoke)
+
+    s = sub.add_parser(
+        "routing",
+        help="assess a request, propose a route, and explain or override one")
+    rt = s.add_subparsers(dest="routing_cmd", required=True)
+
+    c = rt.add_parser("preview", help="score a request and show its route; writes nothing")
+    c.add_argument("--orchestrator", "-o", required=True,
+                   help="work | msc | alt | bedrock | codex — an operator decision")
+    c.add_argument("--strategy", choices=list(AUTO_STRATEGIES))
+    c.add_argument("--shape", metavar="NAME[+NAME]")
+    c.add_argument("--stages", action="append", metavar="a,b,c")
+    c.add_argument("--project", metavar="PROJECT-ID",
+                   help="read only this project's recorded repository count")
+    c.add_argument("--requirement", metavar="TEXT",
+                   help="the ask. Use --requirement=<text> for text that starts with a "
+                        "dash, or --requirement-stdin for anything arbitrary")
+    c.add_argument("--requirement-stdin", dest="requirement_stdin", action="store_true",
+                   help="read the ask from stdin — the reliable path for arbitrary text")
+    c.add_argument("--policy", metavar="FILE", help=argparse.SUPPRESS)
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_preview)
+
+    c = rt.add_parser("propose",
+                      help="recompute this run's unapproved proposal from its own files")
+    c.add_argument("run_id")
+    c.add_argument("--strategy", choices=list(AUTO_STRATEGIES))
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_propose)
+
+    c = rt.add_parser("show", help="this run's routing record, approved or not")
+    c.add_argument("run_id")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_show)
+
+    c = rt.add_parser("explain", help="why this route, and why not the alternatives")
+    c.add_argument("run_id")
+    c.add_argument("--task-id", dest="task_id", metavar="TASK-ID",
+                   help="explain one task instead of the orchestrator")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_explain)
+
+    c = rt.add_parser("override",
+                      help="change one routed decision, on the record, with a reason")
+    c.add_argument("run_id")
+    target = c.add_mutually_exclusive_group(required=True)
+    target.add_argument("--task-id", dest="task_id", metavar="TASK-ID")
+    target.add_argument("--orchestrator", dest="orchestrator_target", action="store_true",
+                        help="override the orchestrator's own model and effort")
+    c.add_argument("--model", metavar="MODEL")
+    c.add_argument("--effort", choices=list(ROUTING_EFFORT_NAMES))
+    c.add_argument("--account", metavar="IDENTITY")
+    c.add_argument("--reason", required=True,
+                   help="why — the only part of the record that explains itself later")
+    c.add_argument("--approve", action="store_true",
+                   help="the operator has already approved raising a tier, effort or "
+                        "account for this override")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_override)
 
     s = sub.add_parser("log", help="record an external tool call in the run's events.jsonl")
     s.add_argument("run_id")
@@ -6536,7 +9651,17 @@ def main(argv=None):
     s.set_defaults(fn=cmd_consume_approval)
 
     args = p.parse_args(argv)
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except RoutingError as exc:
+        # Every command can reach the routing engine now — creating a run,
+        # scoping it, assigning roles — so the refusal is handled once, here,
+        # rather than depending on each command remembering to wrap itself.
+        if getattr(args, "json", False):
+            emit_json(exc.payload())
+            return exc.exit_code
+        hint = f"\n       {exc.hint}" if exc.hint else ""
+        die(f"{exc.message}{hint}", exc.exit_code)
 
 
 if __name__ == "__main__":
