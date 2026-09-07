@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppSidebar } from '../../web/src/components/AppSidebar'
 import { FileBrowser, buildTree } from '../../web/src/components/FileBrowser'
+import { PathBrowser } from '../../web/src/components/PathBrowser'
 import type { RunFileEntry } from '../../web/src/lib/types'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -186,5 +187,102 @@ describe('the file tree', () => {
     expect(await screen.findByRole('heading', { name: 'Brief' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Download/ })).toBeInTheDocument()
     expect(screen.getByText('artifacts/research/brief.md')).toBeInTheDocument()
+  })
+})
+
+describe('the folder picker', () => {
+  const listing = (path: string) => ({
+    path,
+    parent: path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/',
+    truncated: false,
+    entries: [
+      { name: 'repos', path: `${path}/repos`, kind: 'directory', symlink: false, size: null, modifiedAt: null },
+      { name: 'notes.md', path: `${path}/notes.md`, kind: 'file', symlink: false, size: 120, modifiedAt: null },
+      { name: 'shortcut', path: `${path}/shortcut`, kind: 'directory', symlink: true, size: null, modifiedAt: null },
+    ],
+  })
+
+  const seed = (): string[] => {
+    const asked: string[] = []
+    stubFetch((url) => {
+      if (url.startsWith('/api/fs/browse')) {
+        const query = new URLSearchParams(url.split('?')[1] ?? '')
+        const path = query.get('path') ?? '/home/op'
+        asked.push(path)
+        return jsonResponse(listing(path))
+      }
+      return jsonResponse({}, 404)
+    })
+    return asked
+  }
+
+  it('shows the current folder as breadcrumbs you can steer by', async () => {
+    seed()
+    const user = userEvent.setup()
+    render(<PathBrowser title="Choose a repository folder" mode="directory" onSelect={() => {}} onClose={() => {}} />)
+    await screen.findByRole('option', { name: /repos/ })
+    const crumbs = screen.getByRole('navigation', { name: 'Current folder' })
+    expect(within(crumbs).getAllByRole('button').map((b) => b.textContent))
+      .toEqual(['/', 'home', 'op', 'Type a path'])
+    await user.click(within(crumbs).getByRole('button', { name: 'home' }))
+    await waitFor(() =>
+      expect(screen.getByText('/home', { selector: '.pathpicker-current' })).toBeInTheDocument())
+  })
+
+  it('opens folders and refuses files when a folder is what is wanted', async () => {
+    const picked: string[] = []
+    seed()
+    const user = userEvent.setup()
+    render(<PathBrowser title="Choose a repository folder" mode="directory"
+                        onSelect={(path) => picked.push(path)} onClose={() => {}} />)
+    const file = await screen.findByRole('option', { name: /notes\.md/ })
+    expect(file).toHaveAttribute('aria-disabled', 'true')
+    await user.click(file)
+    expect(picked).toEqual([])
+    await user.click(screen.getByRole('option', { name: /repos/ }))
+    await waitFor(() =>
+      expect(screen.getByText('/home/op/repos', { selector: '.pathpicker-current' })).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Use this folder' }))
+    expect(picked).toEqual(['/home/op/repos'])
+  })
+
+  it('selects a file directly when a file is allowed', async () => {
+    const picked: string[] = []
+    seed()
+    const user = userEvent.setup()
+    render(<PathBrowser title="Attach" mode="any" onSelect={(path) => picked.push(path)} onClose={() => {}} />)
+    await user.click(await screen.findByRole('option', { name: /notes\.md/ }))
+    expect(picked).toEqual(['/home/op/notes.md'])
+  })
+
+  it('never submits the form it was opened from', async () => {
+    const submitted = vi.fn()
+    seed()
+    const user = userEvent.setup()
+    render(
+      <form onSubmit={submitted}>
+        <PathBrowser title="Choose a repository folder" mode="directory" onSelect={() => {}} onClose={() => {}} />
+      </form>,
+    )
+    await screen.findByRole('option', { name: /repos/ })
+    // The dialog is a portal on document.body, so it is not inside that form.
+    expect(document.querySelectorAll('form form')).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Type a path' }))
+    const field = screen.getByLabelText('Path')
+    await user.clear(field)
+    await user.type(field, '/srv/code{Enter}')
+    await waitFor(() =>
+      expect(screen.getByText('/srv/code', { selector: '.pathpicker-current' })).toBeInTheDocument())
+    expect(submitted).not.toHaveBeenCalled()
+  })
+
+  it('closes on Escape and gives focus back', async () => {
+    const closed = vi.fn()
+    seed()
+    const user = userEvent.setup()
+    render(<PathBrowser title="Choose a repository folder" mode="directory" onSelect={() => {}} onClose={closed} />)
+    await screen.findByRole('option', { name: /repos/ })
+    await user.keyboard('{Escape}')
+    expect(closed).toHaveBeenCalled()
   })
 })

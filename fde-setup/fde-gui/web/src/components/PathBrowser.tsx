@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ApiError, apiGet } from '../lib/api'
 import { formatBytes } from '../lib/format'
 import type { FsBrowseResponse, FsEntry } from '../lib/types'
@@ -20,6 +21,11 @@ import { ErrorState, Loading } from './States'
  * The dialog owns the keyboard while it is open: focus starts inside it,
  * Escape closes it, and Tab cycles within it rather than wandering into the
  * page behind.
+ *
+ * It renders in a portal on `document.body`, and its path field is not a
+ * `<form>`. Both matter because every caller mounts it from inside their own
+ * form: a nested form is invalid HTML with undefined submit behaviour, and one
+ * stray Enter in a folder picker must never submit the page behind it.
  */
 export function PathBrowser({
   title,
@@ -68,6 +74,15 @@ export function PathBrowser({
     }
   }, [target])
 
+  // The caller usually passes an inline arrow, so its identity changes on every
+  // render. Keeping it in a ref lets the effect below run once: an effect that
+  // re-ran per render would take focus back to the dialog after every
+  // keystroke, and the path field could never be typed into.
+  const closeRef = useRef(onClose)
+  useEffect(() => {
+    closeRef.current = onClose
+  }, [onClose])
+
   // Focus lands inside the dialog, Escape closes it, and Tab stays in it.
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
@@ -75,7 +90,7 @@ export function PathBrowser({
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation()
-        onClose()
+        closeRef.current()
         return
       }
       if (event.key !== 'Tab' || dialog.current === null) return
@@ -98,7 +113,7 @@ export function PathBrowser({
       document.removeEventListener('keydown', onKeyDown, true)
       previous?.focus?.()
     }
-  }, [onClose])
+  }, [])
 
   // A path is easier to steer by its parts than by retyping the whole string.
   const crumbs = useMemo(() => {
@@ -122,6 +137,11 @@ export function PathBrowser({
     return mode === 'any' || entry.kind === 'directory'
   }
 
+  const go = (): void => {
+    if (jump.trim() !== '') setTarget(jump.trim())
+    setTyping(false)
+  }
+
   const move = (delta: number): void => {
     const rows = [...(list.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
     const index = rows.indexOf(document.activeElement as HTMLButtonElement)
@@ -129,7 +149,7 @@ export function PathBrowser({
     next?.focus()
   }
 
-  return (
+  return createPortal(
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div
         className="modal card pathpicker"
@@ -159,14 +179,7 @@ export function PathBrowser({
           </button>
 
           {typing ? (
-            <form
-              className="pathpicker-jump"
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (jump.trim() !== '') setTarget(jump.trim())
-                setTyping(false)
-              }}
-            >
+            <div className="pathpicker-jump">
               <label className="visually-hidden" htmlFor="pathpicker-path">Path</label>
               <input
                 id="pathpicker-path"
@@ -175,9 +188,14 @@ export function PathBrowser({
                 autoFocus
                 value={jump}
                 onChange={(event) => setJump(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  go()
+                }}
               />
-              <button className="action" type="submit">Go</button>
-            </form>
+              <button className="action" type="button" onClick={go}>Go</button>
+            </div>
           ) : (
             <nav className="crumbs" aria-label="Current folder">
               <button className="crumb" type="button" onClick={() => setTarget('/')}>/</button>
@@ -270,6 +288,7 @@ export function PathBrowser({
           </>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
