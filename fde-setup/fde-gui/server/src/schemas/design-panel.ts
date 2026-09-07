@@ -9,7 +9,11 @@ import { z } from 'zod'
  * scalars fall back so one thin record degrades a row rather than a page.
  * `schemaVersion` is pinned — this console understands version 1.
  */
-const SCHEMA_VERSION = z.literal(1)
+// Version 2 of the panel document: it carries the collaborative handoff order,
+// the sealed copy of every image the panel passes through, and the prototype a
+// 'prototype' panel produces. A version-1 panel cannot express any of them, so
+// the controller refuses it rather than half-reading it, and so does this.
+const SCHEMA_VERSION = z.literal(2)
 const loose = z.object({}).passthrough()
 
 export const PANEL_MODES = ['independent', 'collaborative'] as const
@@ -38,8 +42,15 @@ export const participantSchema = z
     proposalPath: z.string().nullish(),
     proposalPresent: z.boolean().default(false),
     proposalBytes: z.number().nullish(),
+    prototypePath: z.string().nullish(),
+    prototypePresent: z.boolean().default(false),
     commonContextSha256: z.string().nullish(),
     promptSha256: z.string().nullish(),
+    /** Where this participant sits in the panel's handoff order. */
+    order: z.number().default(0),
+    /** Whose proposals this participant was handed before it started. */
+    handoffFrom: z.array(z.string()).default([]),
+    handoffSha256: z.string().nullish(),
   })
   .passthrough()
 
@@ -68,6 +79,20 @@ export const panelViewSchema = z
     references: z.array(z.string()).default([]),
     context: loose.default({}),
     contextManifest: loose.nullish(),
+    handoffOrder: z.array(z.string()).default([]),
+    mediaFiles: z
+      .array(
+        z
+          .object({
+            runPath: z.string().nullish(),
+            sha256: z.string().nullish(),
+            originalName: z.string().nullish(),
+            mediaType: z.string().nullish(),
+            bytes: z.number().nullish(),
+          })
+          .passthrough(),
+      )
+      .default([]),
     participants: z.array(participantSchema).default([]),
     succeededCount: z.number().default(0),
     reconciliation: loose.default({}),
@@ -119,7 +144,10 @@ export const panelStartSchema = z
     promptSha256: z.string(),
     promptBytes: z.number().default(0),
     prompt: z.string(),
+    /** The sealed copies, re-hashed by the controller at this start. */
     mediaPaths: z.array(z.string()).default([]),
+    handoffFrom: z.array(z.string()).default([]),
+    handoffSha256: z.string().nullish(),
     proposalPath: z.string().default(''),
   })
   .passthrough()

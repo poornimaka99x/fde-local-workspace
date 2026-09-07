@@ -85,6 +85,7 @@ export function controllerEnv(config: GuiConfig): NodeJS.ProcessEnv {
     CLAUDE_SHARED: config.sharedRoot,
     FDE_RUNS_DIR: config.runsRoot,
     FDE_PROJECTS_DIR: config.projectsRoot,
+    FDE_CHATS_DIR: config.chatsRoot,
     CLAUDE_PROFILES_DIR: config.profilesRoot,
     LANG: process.env.LANG ?? 'en_US.UTF-8',
     ...(process.env.PYTHONPATH ? { PYTHONPATH: process.env.PYTHONPATH } : {}),

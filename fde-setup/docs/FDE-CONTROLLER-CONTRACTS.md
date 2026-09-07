@@ -351,7 +351,7 @@ one-element list by every reader, and no record is rewritten to migrate it.
 {
   "schemaVersion": 1,
   "designPanel": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "runId": "20260906-returns-aaaa",
     "panelId": "panel-a1b2c3d4",
     "state": "running",
@@ -366,14 +366,22 @@ one-element list by every reader, and no record is rewritten to migrate it.
     "degradedApprovedAt": null,
     "context": { "contextSha256": "…", "manifestSha256": "…", "commonContextBytes": 4096 },
     "contextManifest": { "…the manifest as written…": null },
+    "handoffOrder": ["claude_work", "claude_msc"],
+    "mediaFiles": [
+      { "runPath": "artifacts/design-panel/media/9f1c00aa.png", "sha256": "…",
+        "originalName": "screen.png", "mediaType": "image/png", "bytes": 20480 }
+    ],
     "participants": [
       {
         "participantId": "claude_work", "label": "Claude: work",
-        "model": "opus", "effort": "high", "lensId": "flow",
+        "model": "opus", "effort": "high", "lensId": "flow", "order": 0,
         "state": "succeeded", "attempts": 1, "durationMs": 61000,
         "commonContextSha256": "…", "promptSha256": "…",
+        "handoffFrom": [], "handoffSha256": null,
         "proposalPath": "artifacts/design-panel/proposals/claude_work.md",
-        "proposalPresent": true, "error": null
+        "proposalPresent": true,
+        "prototypePath": "artifacts/design-panel/prototypes/claude_work.html",
+        "prototypePresent": true, "error": null
       }
     ],
     "succeededCount": 1,
@@ -389,27 +397,48 @@ Participant states are `pending`, `running`, `succeeded`, `failed`, `stopped`
 and `interrupted`. The last four are terminal; only `failed`, `stopped` and
 `interrupted` can be retried.
 
+The panel document is `schemaVersion: 2`. Version 2 adds `order` and
+`handoffFrom` (the collaborative handoff), `mediaFiles` (the sealed copy and
+digest of every image the panel passes through) and `prototypePath` (the
+artifact a `prototype` panel produces). A version-1 panel on disk is refused
+rather than half-read, because none of those claims can be recovered from it.
+
 ### `design-panel start --json`
 
 Applies every guard — plan confirmed, roles confirmed, the run in `solutioning`,
 the participant holding `uiUxDesign`, the participant `pending`, at most three
-running — and answers with the exact prompt for that one participant:
+running, in a collaborative panel every participant ahead of it finished, and
+every sealed image still matching its recorded digest — and answers with the
+exact prompt for that one participant:
 
 ```json
 {
   "schemaVersion": 1, "runId": "…", "panelId": "…", "participantId": "claude_work",
   "profile": "work", "model": "opus", "effort": "high", "attempt": 1,
   "commonContextSha256": "…", "promptSha256": "…", "promptBytes": 4096,
-  "prompt": "…the shared context, then this participant's lens block…",
-  "mediaPaths": ["/…/inputs/files/screen-ab12.png"],
+  "prompt": "…the shared context, the handoff if any, then this lens block…",
+  "mediaPaths": ["/…/artifacts/design-panel/media/9f1c00aa.png"],
+  "handoffFrom": [], "handoffSha256": null,
   "proposalPath": "artifacts/design-panel/proposals/claude_work.md"
 }
 ```
+
+`mediaPaths` are the run's own sealed copies, re-hashed against the manifest
+during this call. They are never paths into the operator's writable attachment
+directory: a digest checked once when the panel was created would say nothing
+about the bytes the *next* participant receives.
 
 The shared context is a **strict prefix** of the prompt, and
 `commonContextSha256` is the digest of that prefix. It is identical for every
 participant in a panel, and the controller refuses to start a participant whose
 prompt would break the independent-first barrier.
+
+In a **collaborative** panel the prompt carries, between the shared context and
+the lens block, a `<handoff>` block holding the proposals of the participants
+ahead of this one, each with its digest. `handoffFrom` names them,
+`handoffSha256` digests the block, and the run log records a
+`design-panel.handoff` event. The order is enforced: a participant whose
+predecessors have not finished is refused.
 
 A reader is expected to run that one account and hand the answer back through
 `design-panel record`. It must not compose a prompt of its own, and must not
@@ -425,8 +454,17 @@ prompt, `degraded`, and the orchestrator identity to run it with.
 
 `design-panel record-reconciliation` refuses an answer that does not carry
 `## Comparison`, `## Reconciliation` and `## Final design recommendation` — plus
-`## Design-to-code handoff` when the output target is `design-to-code` — in that
-order, with no empty section. A refused answer writes nothing.
+`## Prototype` when the output target is `prototype`, or `## Design-to-code
+handoff` when it is `design-to-code` — in that order, with no empty section. A
+refused answer writes nothing.
+
+When the output target is `prototype`, `## Prototype` must contain exactly one
+```html fenced block holding a complete, self-contained HTML document that
+fetches nothing over the network. `design-panel record` applies the same rule to
+each participant's proposal. The controller extracts the document into
+`artifacts/design-panel/prototypes/` and refuses prose about a prototype: a
+refused proposal leaves the participant `running` and retryable, and writes
+nothing.
 
 ### Events
 
@@ -452,7 +490,8 @@ continues to report only those two.
 
 Gains one additive field, `designPanel`: `null` for a run without one, a small
 summary otherwise (`panelId`, `state`, `mode`, `outputTarget`, `contextSha256`,
-`participants`, `succeededCount`, `reconciliation.state`). A panel written by a
+`participants` — each with `order`, `handoffFrom` and `prototypeSha256` —
+`succeededCount`, `reconciliation.state`). A panel written by a
 schema this controller does not speak answers `{"readable": false}` rather than
 a guess. `schemaVersion` is unchanged: a field was added, not redefined.
 

@@ -106,7 +106,17 @@ interface CachedCatalog<T> {
 const CATALOG_TTL_MS = 60_000
 
 export class DesignPanelService {
-  private readonly active = new Map<string, RunningPanelCommand>()
+  /**
+   * Every process slot this console has spent, keyed `runId:participantId`.
+   *
+   * A slot is taken *before* the controller is asked for a prompt, and holds
+   * `null` until the process behind it exists. Checking the limit and then
+   * awaiting would let two requests that arrived together both pass the check
+   * and both take a process; the reservation is what makes the limit a limit
+   * rather than a hint. `shutdown()` and `stopParticipant()` therefore have to
+   * tolerate a slot with nothing running in it yet.
+   */
+  private readonly active = new Map<string, RunningPanelCommand | null>()
   private references: CachedCatalog<ReferenceCatalog> | null = null
   private packs: CachedCatalog<PackList> | null = null
   private lenses: CachedCatalog<LensList> | null = null
@@ -242,7 +252,10 @@ export class DesignPanelService {
    * hands back the exact prompt), then run that one account.
    */
   async startParticipant(runId: string, participantId: string): Promise<PanelView> {
-    if (this.active.has(`${runId}:${participantId}`)) {
+    const key = `${runId}:${participantId}`
+    // Everything that can refuse this start is decided before the reservation,
+    // so a refusal never leaves a slot behind.
+    if (this.active.has(key)) {
       throw new PanelBusy(`${participantId} is already running`)
     }
     if (this.active.size >= this.config.panelConcurrency) {
@@ -256,10 +269,19 @@ export class DesignPanelService {
     if (!this.accounts.binaryAvailable(account.provider)) {
       throw new PanelUnavailable('The Claude CLI is not available on this machine.')
     }
-    const started = panelStartSchema.parse(
-      await runControllerJson(this.config,
-        ['design-panel', 'start', runId, participantId, '--json']),
-    )
+    // Take the slot before the first await. This method runs to here without
+    // yielding, so two concurrent requests cannot both get past the check above.
+    this.active.set(key, null)
+    let started
+    try {
+      started = panelStartSchema.parse(
+        await runControllerJson(this.config,
+          ['design-panel', 'start', runId, participantId, '--json']),
+      )
+    } catch (error) {
+      this.active.delete(key)
+      throw error
+    }
     this.watcher.touch()
     void this.execute(runId, started.participantId, account.id, started.model, started.effort,
       started.prompt, started.mediaPaths)
@@ -275,14 +297,16 @@ export class DesignPanelService {
     prompt: string,
     mediaPaths: string[],
   ): Promise<void> {
+    // The slot is already reserved by startParticipant; this replaces the
+    // reservation with the running process, and every exit from here frees it.
     const key = `${runId}:${participantId}`
-    const media = await this.accounts.mediaSupport()
-    const args = this.claudeArgs(prompt, model, effort)
-    if (media.support === 'file' && media.flag !== null) {
-      for (const file of mediaPaths) args.push(media.flag, file)
-    }
     let command: RunningPanelCommand
     try {
+      const media = await this.accounts.mediaSupport()
+      const args = this.claudeArgs(prompt, model, effort)
+      if (media.support === 'file' && media.flag !== null) {
+        for (const file of mediaPaths) args.push(media.flag, file)
+      }
       command = this.runCommand({
         file: this.config.claudeBin,
         args,
@@ -290,8 +314,10 @@ export class DesignPanelService {
         env: this.accounts.profileEnv(accountId),
       })
     } catch {
+      this.active.delete(key)
       await this.recordFailure(runId, participantId,
         'Claude could not be started for this account.')
+      this.watcher.touch()
       return
     }
     this.active.set(key, command)
@@ -370,8 +396,9 @@ export class DesignPanelService {
   }
 
   async stopParticipant(runId: string, participantId: string, force = false): Promise<PanelView> {
-    const command = this.active.get(`${runId}:${participantId}`)
-    if (command !== undefined) {
+    // `null` is a slot reserved for a process that has not been spawned yet.
+    const command = this.active.get(`${runId}:${participantId}`) ?? null
+    if (command !== null) {
       try {
         command.kill(force ? 'SIGKILL' : 'SIGINT')
       } catch {
@@ -392,18 +419,29 @@ export class DesignPanelService {
   }
 
   async reconcile(runId: string): Promise<PanelView> {
-    if (this.active.has(`${runId}:reconciliation`)) {
+    const key = `${runId}:reconciliation`
+    if (this.active.has(key)) {
       throw new PanelBusy('this panel is already reconciling')
     }
     if (this.active.size >= this.config.panelConcurrency) {
       throw new PanelBusy('this console is already running its limit of panel work')
     }
-    const started = panelReconcileStartSchema.parse(
-      await runControllerJson(this.config, ['design-panel', 'reconcile', runId, '--json']),
-    )
+    // Same reservation as a participant: the limit is checked and taken in one
+    // synchronous step, so concurrent reconcile requests cannot both pass it.
+    this.active.set(key, null)
+    let started
+    try {
+      started = panelReconcileStartSchema.parse(
+        await runControllerJson(this.config, ['design-panel', 'reconcile', runId, '--json']),
+      )
+    } catch (error) {
+      this.active.delete(key)
+      throw error
+    }
     this.watcher.touch()
     const account = this.accounts.getConfigured(String(started.profile ?? ''))
     if (account === null) {
+      this.active.delete(key)
       await this.recordReconciliationFailure(runId,
         'The orchestrator account for this run is not configured on this machine.')
       return await this.show(runId)
@@ -430,8 +468,10 @@ export class DesignPanelService {
         env: this.accounts.profileEnv(accountId),
       })
     } catch {
+      this.active.delete(key)
       await this.recordReconciliationFailure(runId,
         'Claude could not be started for the orchestrator account.')
+      this.watcher.touch()
       return
     }
     this.active.set(key, command)
@@ -488,6 +528,7 @@ export class DesignPanelService {
 
   shutdown(): void {
     for (const command of this.active.values()) {
+      if (command === null) continue
       try {
         command.kill('SIGHUP')
       } catch {

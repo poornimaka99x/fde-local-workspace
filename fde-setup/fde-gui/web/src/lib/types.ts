@@ -353,8 +353,15 @@ export interface PanelParticipant {
   proposalPath: string | null
   proposalPresent: boolean
   proposalBytes: number | null
+  prototypePath: string | null
+  prototypePresent: boolean
   commonContextSha256: string | null
   promptSha256: string | null
+  /** Where this participant sits in the panel's handoff order. */
+  order: number
+  /** Whose proposals it was handed before it started. Collaborative only. */
+  handoffFrom: string[]
+  handoffSha256: string | null
 }
 
 export interface PanelContextManifest {
@@ -417,6 +424,14 @@ export interface DesignPanel {
   references: string[]
   context: { contextSha256?: string; manifestSha256?: string; commonContextBytes?: number; manifestPath?: string }
   contextManifest: PanelContextManifest | null
+  handoffOrder: string[]
+  mediaFiles: {
+    runPath: string | null
+    sha256: string | null
+    originalName: string | null
+    mediaType: string | null
+    bytes: number | null
+  }[]
   participants: PanelParticipant[]
   succeededCount: number
   reconciliation: { state?: string; agentId?: string; error?: string | null; degraded?: boolean }

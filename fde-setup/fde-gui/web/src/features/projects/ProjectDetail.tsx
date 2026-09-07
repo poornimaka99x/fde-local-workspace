@@ -1,16 +1,38 @@
+import { useState } from 'react'
 import { Link } from '../../lib/router'
 import { formatTime, stateTone } from '../../lib/format'
 import { useApi } from '../../lib/useApi'
 import type { ProjectDetailResponse } from '../../lib/types'
 import { ErrorState, Loading, Warnings } from '../../components/States'
+import { ApiError, apiSend } from '../../lib/api'
+import { announceChange } from '../../lib/changes'
 
 export function ProjectDetail({ projectId }: { projectId: string }): JSX.Element {
   const detail = useApi<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(projectId)}`, 30000)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<ApiError | null>(null)
 
   if (detail.error) return <ErrorState error={detail.error} onRetry={detail.reload} />
   if (detail.data === null) return <Loading label="Loading project…" />
 
   const { project, runs, events, malformedEvents, warnings } = detail.data
+
+  const deleteProject = async (): Promise<void> => {
+    if (!window.confirm(
+      `Delete project “${project.name ?? project.projectId}”? Its metadata will move to recoverable trash. Repositories are never deleted, and projects used by runs or chats will be refused.`,
+    )) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await apiSend(`/api/projects/${encodeURIComponent(project.projectId)}`, 'DELETE')
+      announceChange()
+      window.history.pushState(null, '', '/projects')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    } catch (cause) {
+      setDeleteError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not delete this project.'))
+      setDeleting(false)
+    }
+  }
 
   return (
     <>
@@ -35,8 +57,12 @@ export function ProjectDetail({ projectId }: { projectId: string }): JSX.Element
           >
             Start design panel
           </Link>
+          <button className="action danger" type="button" disabled={deleting} onClick={() => void deleteProject()}>
+            {deleting ? 'Deleting…' : 'Delete project'}
+          </button>
         </div>
       </div>
+      {deleteError ? <ErrorState error={deleteError} /> : null}
       <Warnings warnings={warnings} />
 
       <div className="card">

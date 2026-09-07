@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { open, readdir as readdirAsync, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { GuiConfig } from '../config'
@@ -460,6 +460,30 @@ export class ChatService {
     if (command === undefined) throw new ChatNotFound(chatId)
     command.kill(force ? 'SIGKILL' : 'SIGINT')
     return this.get(chatId)
+  }
+
+  /** Move a durable record out of the live index without touching referenced files. */
+  delete(chatId: string): ChatRecord {
+    if (this.active.has(chatId)) throw new ChatBusy(chatId)
+    const chat = this.read(chatId)
+    if (chat.status === 'running') throw new ChatBusy(chatId)
+    const trash = path.join(this.config.chatsRoot, '.trash')
+    try {
+      if (lstatSync(trash).isSymbolicLink()) throw new Error('chat trash is a symlink')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    mkdirSync(trash, { recursive: true, mode: 0o700 })
+    const target = path.join(
+      trash,
+      `${chatId}-${Date.now()}-${randomBytes(4).toString('hex')}.json`,
+    )
+    renameSync(this.file(chatId), target)
+    return chat
+  }
+
+  countForProject(projectId: string): number {
+    return this.list().filter((chat) => chat.projectId === projectId).length
   }
 
   shutdown(): void {

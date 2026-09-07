@@ -6,10 +6,11 @@ import { problem } from '../problem'
 import { RUN_ID_PATTERN, runControllerJson } from '../services/controller'
 import { statusSchema } from '../schemas/controller'
 import { FilePathError, resolveRunDirectory } from '../services/files'
-import { NoSuchSession, SessionExists, sessionCwd, sessionEnv } from '../services/sessions'
+import { NoSuchSession, SessionActive, SessionExists, sessionCwd, sessionEnv } from '../services/sessions'
 import type { Services } from '../services/types'
 
 const stopBody = z.object({ force: z.boolean().default(false) }).default({ force: false })
+const LOGIN_SESSION_PATTERN = /^login:[a-z][a-z0-9_-]{0,39}$/
 
 interface ClientMessage {
   type?: unknown
@@ -29,6 +30,30 @@ export function registerSessionRoutes(
     available: sessions.available,
     sessions: sessions.list(),
   }))
+
+  app.delete<{ Params: { sessionId: string } }>('/api/sessions/:sessionId', async (request, reply) => {
+    const { sessionId } = request.params
+    if (!RUN_ID_PATTERN.test(sessionId) && !LOGIN_SESSION_PATTERN.test(sessionId)) {
+      return problem(reply, 400, 'invalid-session-id', 'That is not a valid session id.')
+    }
+    const release = services.locks.tryAcquire(`session:${sessionId}`)
+    if (release === null) return problem(reply, 409, 'busy', 'This session is being changed right now.')
+    try {
+      sessions.delete(sessionId)
+      services.watcher.touch()
+      return { deleted: { kind: 'session-history', sessionId } }
+    } catch (error) {
+      if (error instanceof NoSuchSession) {
+        return problem(reply, 404, 'no-session', 'This console has no such session history.')
+      }
+      if (error instanceof SessionActive) {
+        return problem(reply, 409, 'session-active', 'Stop this session before deleting its history.')
+      }
+      throw error
+    } finally {
+      release()
+    }
+  })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/session', async (request, reply) => {
     const { runId } = request.params
@@ -122,6 +147,33 @@ export function registerSessionRoutes(
             session: sessions.get(runId),
             ticket: sessions.issueTicket(runId),
           }
+        }
+        throw error
+      } finally {
+        release()
+      }
+    },
+  )
+
+  app.delete<{ Params: { runId: string } }>(
+    '/api/runs/:runId/session',
+    async (request, reply) => {
+      const { runId } = request.params
+      if (!RUN_ID_PATTERN.test(runId)) {
+        return problem(reply, 400, 'invalid-run-id', 'That is not a valid run id.')
+      }
+      const release = services.locks.tryAcquire(`session:${runId}`)
+      if (release === null) return problem(reply, 409, 'busy', 'This session is being changed right now.')
+      try {
+        sessions.delete(runId)
+        services.watcher.touch()
+        return { deleted: { kind: 'session-history', runId } }
+      } catch (error) {
+        if (error instanceof NoSuchSession) {
+          return problem(reply, 404, 'no-session', 'This run has no console session history.')
+        }
+        if (error instanceof SessionActive) {
+          return problem(reply, 409, 'session-active', 'Stop this session before deleting its history.')
         }
         throw error
       } finally {

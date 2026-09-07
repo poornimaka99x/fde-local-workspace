@@ -43,7 +43,7 @@ const OUTPUT_TARGETS = [
   {
     id: 'prototype',
     label: 'Prototype',
-    help: 'Adds a described prototype — screens, states and the surface to build it on.',
+    help: 'Each participant produces a working single-file HTML prototype, and reconciliation produces one more from them. They are stored as artifacts of the run and open from disk — a proposal without one is refused.',
   },
   {
     id: 'design-to-code',
@@ -61,7 +61,7 @@ const MODES = [
   {
     id: 'collaborative',
     label: 'Collaborative',
-    help: 'Staged handoffs are visible to later participants and recorded in the run log.',
+    help: 'Participants work in the order listed above. Each is handed the proposals of the ones before it, cannot start until they finish, and the handoff is recorded in the run log.',
   },
 ] as const
 

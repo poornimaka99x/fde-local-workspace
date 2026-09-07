@@ -186,16 +186,22 @@ export function registerClaudeRoutes(
     if (auth.state === 'unavailable') {
       return problem(reply, 503, 'chat-provider-unavailable', 'The selected chat account is not available.')
     }
-    let cwd = existsSync(config.sharedRoot) ? config.sharedRoot : process.cwd()
-    if (projectId) {
-      const project = projectDetailSchema.parse(
-        await runControllerJson(config, ['project', 'show', projectId, '--json']),
-      ).project
-      cwd = sessionCwd(config, project.repoPaths, existsSync)
+    const release = projectId ? services.locks.tryAcquire(`project:${projectId}`) : () => undefined
+    if (release === null) return problem(reply, 409, 'busy', 'This project is being changed right now.')
+    try {
+      let cwd = existsSync(config.sharedRoot) ? config.sharedRoot : process.cwd()
+      if (projectId) {
+        const project = projectDetailSchema.parse(
+          await runControllerJson(config, ['project', 'show', projectId, '--json']),
+        ).project
+        cwd = sessionCwd(config, project.repoPaths, existsSync)
+      }
+      const chat = services.chats.create({ title, accountId, model, effort: effort as Effort, projectId, cwd })
+      services.watcher.touch()
+      return await reply.status(201).send({ chat })
+    } finally {
+      release()
     }
-    const chat = services.chats.create({ title, accountId, model, effort: effort as Effort, projectId, cwd })
-    services.watcher.touch()
-    return await reply.status(201).send({ chat })
   })
 
   app.get<{ Params: { chatId: string } }>('/api/chats/:chatId', async (request, reply) => {
@@ -206,6 +212,32 @@ export function registerClaudeRoutes(
     } catch (error) {
       if (error instanceof ChatNotFound) return problem(reply, 404, 'chat-not-found', 'No such chat.')
       throw error
+    }
+  })
+
+  app.delete<{ Params: { chatId: string } }>('/api/chats/:chatId', async (request, reply) => {
+    const parsed = chatParams.safeParse(request.params)
+    if (!parsed.success) return problem(reply, 400, 'invalid-chat-id', 'That is not a valid chat id.')
+    const chatId = parsed.data.chatId
+    const release = services.locks.tryAcquire(`chat:${chatId}`)
+    if (release === null) return problem(reply, 409, 'busy', 'This chat is being changed right now.')
+    try {
+      const chat = services.chats.delete(chatId)
+      services.watcher.touch()
+      return {
+        deleted: {
+          kind: 'chat',
+          chatId: chat.chatId,
+          projectId: chat.projectId,
+          recoverable: true,
+        },
+      }
+    } catch (error) {
+      if (error instanceof ChatNotFound) return problem(reply, 404, 'chat-not-found', 'No such chat.')
+      if (error instanceof ChatBusy) return problem(reply, 409, 'chat-busy', 'Stop this chat before deleting it.')
+      throw error
+    } finally {
+      release()
     }
   })
 

@@ -250,6 +250,7 @@ describe('controller boundary', () => {
     expect(Object.keys(passed).sort()).toEqual([
       'CLAUDE_PROFILES_DIR',
       'CLAUDE_SHARED',
+      'FDE_CHATS_DIR',
       'FDE_PROJECTS_DIR',
       'FDE_RUNS_DIR',
       'HOME',

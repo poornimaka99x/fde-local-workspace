@@ -1,11 +1,33 @@
+import { useState } from 'react'
 import { Link } from '../../lib/router'
 import { formatTime } from '../../lib/format'
 import { useApi } from '../../lib/useApi'
 import type { ProjectListResponse } from '../../lib/types'
 import { EmptyState, ErrorState, Loading, Warnings } from '../../components/States'
+import { ApiError, apiSend } from '../../lib/api'
+import { announceChange } from '../../lib/changes'
 
 export function ProjectsView(): JSX.Element {
   const projects = useApi<ProjectListResponse>('/api/projects', 30000)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<ApiError | null>(null)
+
+  const deleteProject = async (projectId: string, name: string): Promise<void> => {
+    if (!window.confirm(
+      `Delete project “${name}”? Its metadata will move to recoverable trash. Repositories are never deleted, and projects used by runs or chats will be refused.`,
+    )) return
+    setDeleting(projectId)
+    setDeleteError(null)
+    try {
+      await apiSend(`/api/projects/${encodeURIComponent(projectId)}`, 'DELETE')
+      announceChange()
+      projects.reload()
+    } catch (cause) {
+      setDeleteError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not delete this project.'))
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   return (
     <>
@@ -20,6 +42,7 @@ export function ProjectsView(): JSX.Element {
       </div>
 
       {projects.error ? <ErrorState error={projects.error} onRetry={projects.reload} /> : null}
+      {deleteError ? <ErrorState error={deleteError} /> : null}
       {projects.loading && projects.data === null ? <Loading label="Loading projects…" /> : null}
       <Warnings warnings={projects.data?.warnings ?? []} />
 
@@ -44,6 +67,15 @@ export function ProjectsView(): JSX.Element {
             <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
               Last activity {formatTime(project.lastActivityAt)}
             </div>
+            <button
+              className="action danger"
+              style={{ marginTop: 12 }}
+              type="button"
+              disabled={deleting === project.projectId}
+              onClick={() => void deleteProject(project.projectId, project.name ?? project.projectId)}
+            >
+              {deleting === project.projectId ? 'Deleting…' : 'Delete project'}
+            </button>
           </article>
         ))}
       </div>

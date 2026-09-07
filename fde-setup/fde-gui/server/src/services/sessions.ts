@@ -101,6 +101,7 @@ interface Session {
 
 export class SessionExists extends Error {}
 export class NoSuchSession extends Error {}
+export class SessionActive extends Error {}
 
 interface Ticket {
   runId: string
@@ -263,6 +264,18 @@ export class SessionManager {
     if (session.status === 'running') {
       session.stopRequestedAt = new Date().toISOString()
       session.process.kill(options.force === true ? 'SIGKILL' : 'SIGINT')
+    }
+    return this.view(session)
+  }
+
+  /** Forget only finished, in-memory console history. The durable run is untouched. */
+  delete(runId: string): SessionView {
+    const session = this.sessions.get(runId)
+    if (session === undefined) throw new NoSuchSession(runId)
+    if (session.status === 'running') throw new SessionActive(runId)
+    this.sessions.delete(runId)
+    for (const [ticket, value] of this.tickets) {
+      if (value.runId === runId) this.tickets.delete(ticket)
     }
     return this.view(session)
   }

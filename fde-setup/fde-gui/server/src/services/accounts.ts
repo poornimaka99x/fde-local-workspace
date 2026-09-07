@@ -26,7 +26,43 @@ export interface MediaSupport {
   flag: string | null
 }
 
-const MEDIA_FLAGS = ['--attach', '--add-file', '--image', '--file'] as const
+/**
+ * Flags that take a *local path*.
+ *
+ * `--file` is deliberately not here. Claude Code documents it as
+ * `file_id:relative_path` — it downloads a hosted resource into the working
+ * directory, it does not attach a file from this disk. Detecting it as local
+ * file support would make the console hand absolute paths to a flag that
+ * cannot take them, and a panel that selected an image would fail at the point
+ * where its whole reason for existing is that the image reached the account.
+ */
+const MEDIA_FLAGS = ['--attach', '--add-file', '--image'] as const
+
+/**
+ * A documented value that is an identifier for something the provider hosts,
+ * not a path on this machine. A flag described this way is refused even if it
+ * is one of the names above: the help text is the evidence, not the name.
+ */
+const HOSTED_VALUE_PATTERN = /\bfile[_-]?id\b|\bresource[_-]?id\b|\buuid\b/i
+
+/**
+ * The help text that documents one flag: the line it appears on, plus the
+ * indented continuation lines beneath it. Bounded, because `--help` output is
+ * provider text and nothing here should walk it further than the entry asked
+ * about.
+ */
+function helpEntry(help: string, flag: string): string | null {
+  const lines = help.split(/\r?\n/)
+  const at = lines.findIndex((line) => new RegExp(`(^|\\s)${flag}(\\s|=|,|$)`).test(line))
+  if (at === -1) return null
+  const entry = [lines[at] ?? '']
+  for (let index = at + 1; index < lines.length && index <= at + 4; index += 1) {
+    const line = lines[index] ?? ''
+    if (line.trim() === '' || !/^\s{4,}/.test(line) || /(^|\s)--[a-z]/.test(line)) break
+    entry.push(line)
+  }
+  return entry.join('\n')
+}
 
 /**
  * The profile directory could not be created or verified before starting a
@@ -301,8 +337,12 @@ export class AccountService {
           timeout: Math.min(this.config.controllerTimeoutMs, 10_000),
         })
         const help = `${stdout}\n${stderr}`
-        const flag = MEDIA_FLAGS.find((candidate) =>
-          new RegExp(`(^|\\s)${candidate}(\\s|=|,)`).test(help))
+        const flag = MEDIA_FLAGS.find((candidate) => {
+          const entry = helpEntry(help, candidate)
+          // A flag whose documented value is a hosted id takes a handle to
+          // something on the provider's side, not a file on this disk.
+          return entry !== null && !HOSTED_VALUE_PATTERN.test(entry)
+        })
         if (flag !== undefined) result = { support: 'file', flag }
       } catch {
         /* A CLI that cannot be asked is a CLI that cannot take a file. */
@@ -361,8 +401,12 @@ export class AccountService {
     const account = this.getConfigured(id)
     if (account === null || !MODEL_PATTERN.test(model)) return false
     if (!EFFORTS.includes(effort as Effort)) return false
+    // The browser may select only from the models this server offered it. A
+    // syntactically valid identifier this account does not list is a model the
+    // console never showed anyone, so it is refused rather than forwarded.
     const known = account.models.find((item) => item.id === model)
-    return known === undefined || known.efforts.includes(effort as Effort)
+    if (known === undefined) return false
+    return known.efforts.includes(effort as Effort)
   }
 
   binaryAvailable(provider: ChatProvider = 'anthropic'): boolean {

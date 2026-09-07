@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { authed, makeHarness, type Harness } from './harness'
 import { FakeTerminal, fakeSpawn } from './fake-terminal'
@@ -72,6 +72,38 @@ describe('Claude accounts and general chats', () => {
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined()
   })
 
+  it('detects a local-file flag only when the help text documents a path', async () => {
+    // Claude Code documents `--file` as `file_id:relative_path` — it downloads
+    // something the provider hosts. Reading that as local-file support would
+    // make the console pass an absolute path to a flag that cannot take one,
+    // and every panel that selected an image would fail at the last moment.
+    const help = [
+      'Usage: claude [options] [prompt]',
+      '',
+      'Options:',
+      '  --model <model>           the model to use',
+      '  --file <file>             download a hosted file, given as file_id:relative_path',
+      '  --print <prompt>          print the response and exit',
+    ].join('\n')
+    const service = new AccountService(harness.config, async () => ({ stdout: help, stderr: '' }))
+    expect(await service.mediaSupport()).toEqual({ support: 'none', flag: null })
+
+    const attaching = new AccountService(harness.config, async () => ({
+      stdout: `${help}\n  --attach <path>           attach a local file to the session`,
+      stderr: '',
+    }))
+    expect(await attaching.mediaSupport()).toEqual({ support: 'file', flag: '--attach' })
+  })
+
+  it('accepts only a model and effort this account was offered', () => {
+    const service = new AccountService(harness.config)
+    expect(service.validateSelection('work', 'opus', 'xhigh')).toBe(true)
+    expect(service.validateSelection('work', 'sonnet', 'xhigh')).toBe(false)
+    // Well-formed, and not a model this server ever offered.
+    expect(service.validateSelection('work', 'claude-opus-9-secret', 'high')).toBe(false)
+    expect(service.validateSelection('work', 'default', 'ultra')).toBe(false)
+  })
+
   it('starts exactly the selected profile login command in an isolated PTY', async () => {
     const response = await harness.app.inject({
       method: 'POST', url: '/api/claude/accounts/work/login',
@@ -114,6 +146,51 @@ describe('Claude accounts and general chats', () => {
       method: 'GET', url: '/api/chats', headers: authed(harness.token),
     })
     expect(listed.json().chats).toMatchObject([{ chatId, messageCount: 2 }])
+  })
+
+  it('moves a deleted chat to recoverable trash without deleting attachments', async () => {
+    const attached = path.join(harness.config.home, 'keep-me.txt')
+    writeFileSync(attached, 'source remains')
+    const created = await harness.app.inject({
+      method: 'POST', url: '/api/chats', headers: mutating(harness.token),
+      payload: { accountId: 'work', model: 'sonnet', effort: 'high' },
+    })
+    const chatId = created.json().chat.chatId as string
+    const added = await harness.app.inject({
+      method: 'POST', url: `/api/chats/${chatId}/attachments`, headers: mutating(harness.token),
+      payload: { path: attached },
+    })
+    expect(added.statusCode).toBe(201)
+
+    const deleted = await harness.app.inject({
+      method: 'DELETE', url: `/api/chats/${chatId}`, headers: mutating(harness.token),
+    })
+    expect(deleted.statusCode).toBe(200)
+    expect(deleted.json().deleted).toMatchObject({ chatId, recoverable: true })
+    expect(existsSync(attached)).toBe(true)
+    expect(existsSync(path.join(harness.config.chatsRoot, `${chatId}.json`))).toBe(false)
+    expect(readdirSync(path.join(harness.config.chatsRoot, '.trash'))).toHaveLength(1)
+    const missing = await harness.app.inject({
+      method: 'GET', url: `/api/chats/${chatId}`, headers: authed(harness.token),
+    })
+    expect(missing.statusCode).toBe(404)
+  })
+
+  it('refuses to delete a chat while its provider is still responding', async () => {
+    let finish: ((value: { code: number; stdout: string }) => void) | undefined
+    const runner: ChatCommandRunner = () => ({
+      completed: new Promise((resolve) => { finish = resolve }),
+      kill: () => undefined,
+    })
+    const chats = new ChatService(harness.config, new AccountService(harness.config), runner)
+    const chat = chats.create({ accountId: 'work', model: 'sonnet', effort: 'high', cwd: harness.root })
+    const sending = chats.send(chat.chatId, 'Wait')
+    expect(() => chats.delete(chat.chatId)).toThrow(/chat-/)
+    await Promise.resolve()
+    expect(finish).toBeDefined()
+    finish?.({ code: 0, stdout: JSON.stringify({ result: 'Done' }) })
+    await sending
+    expect(chats.delete(chat.chatId).chatId).toBe(chat.chatId)
   })
 
   it('rejects unsupported effort choices and path-shaped account ids', async () => {

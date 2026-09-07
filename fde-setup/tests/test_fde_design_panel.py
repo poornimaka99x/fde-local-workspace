@@ -8,6 +8,7 @@ own suite of stubs.
 
 import json
 import os
+import pathlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -263,7 +264,7 @@ class SealedContext(PanelTestCase):
         manifest = json.loads(
             (self.run_dir(run_id) / "artifacts" / "design-panel"
              / "context-manifest.json").read_text())
-        self.assertEqual(manifest["schemaVersion"], 1)
+        self.assertEqual(manifest["schemaVersion"], 2)
         self.assertEqual(manifest["projectId"], project)
         self.assertEqual([entry["path"] for entry in manifest["repositories"]], [str(repo)])
         self.assertIsNone(manifest["repositories"][0]["head"])
@@ -347,6 +348,10 @@ class SealedContext(PanelTestCase):
                   / "common-context.md").read_bytes()
         self.assertNotIn(b"\x89PNG", common)
         self.assertIn(b"screen.png", common)
+        sealed = (self.run_dir(run_id) / "artifacts" / "design-panel" / "media"
+                  / f"{attachment['attachmentId']}.png")
+        self.assertTrue(sealed.is_file(), "the image must be copied into the run")
+        self.assertEqual(sealed.read_bytes(), image.read_bytes())
 
     def test_a_binary_attachment_that_is_not_an_image_is_refused(self):
         run_id = self.new_run()
@@ -362,6 +367,285 @@ class SealedContext(PanelTestCase):
         self.start(run_id, "claude_work")
         result = self.create_panel(run_id, "--replace", expected=5)
         self.assertIn("already started work", result.stderr)
+
+
+class SealedMedia(PanelTestCase):
+    """An image is sealed by its bytes, not by the path it arrived on."""
+
+    def image_panel(self):
+        run_id = self.new_run()
+        source = self.home / "screen.png"
+        source.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+        attachment = self.json_fde("attach", run_id, str(source), "--json")["attachment"]
+        self.create_panel(run_id, "--attachment", attachment["attachmentId"],
+                          "--media-support", "file")
+        self.approve(run_id)
+        self.advance_to(run_id, "solutioning")
+        return run_id, source, attachment
+
+    def test_participants_are_given_the_sealed_copy_not_the_uploaded_file(self):
+        run_id, _source, attachment = self.image_panel()
+        start = self.start(run_id, "claude_work")
+        sealed = (self.run_dir(run_id) / "artifacts" / "design-panel" / "media"
+                  / f"{attachment['attachmentId']}.png")
+        self.assertEqual(start["mediaPaths"], [str(sealed)])
+
+    def test_changing_the_stored_attachment_cannot_change_what_a_panel_shares(self):
+        run_id, _source, attachment = self.image_panel()
+        first = self.start(run_id, "claude_work")
+        # The attachment the operator uploaded is still writable. A panel that
+        # handed that path to each account would silently give them different
+        # bytes while showing one context digest.
+        stored = self.run_dir(run_id) / attachment["relativePath"]
+        stored.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\xff" * 64)
+        second = self.start(run_id, "claude_msc")
+        self.assertEqual(first["mediaPaths"], second["mediaPaths"])
+        self.assertEqual(pathlib.Path(second["mediaPaths"][0]).read_bytes(),
+                         b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+
+    def test_a_tampered_sealed_image_refuses_the_next_start(self):
+        run_id, _source, attachment = self.image_panel()
+        self.start(run_id, "claude_work")
+        sealed = (self.run_dir(run_id) / "artifacts" / "design-panel" / "media"
+                  / f"{attachment['attachmentId']}.png")
+        sealed.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\xff" * 64)
+        result = self.start(run_id, "claude_msc", expected=2)
+        self.assertIn("no longer matches the digest", result.stderr)
+        self.assertEqual(
+            next(item for item in self.panel(run_id)["participants"]
+                 if item["participantId"] == "claude_msc")["state"], "pending")
+
+    def test_a_deleted_sealed_image_refuses_the_next_start(self):
+        run_id, _source, attachment = self.image_panel()
+        (self.run_dir(run_id) / "artifacts" / "design-panel" / "media"
+         / f"{attachment['attachmentId']}.png").unlink()
+        result = self.start(run_id, "claude_work", expected=4)
+        self.assertIn("missing", result.stderr)
+
+
+class CollaborativeMode(PanelTestCase):
+    """Collaborative mode is a staged handoff, not a label on the form."""
+
+    def ready_collaborative(self):
+        return self.ready_panel(None, "--mode", "collaborative")
+
+    def test_a_later_participant_cannot_start_before_the_one_ahead_of_it(self):
+        run_id = self.ready_collaborative()
+        result = self.start(run_id, "claude_msc", expected=5)
+        self.assertIn("collaborative", result.stderr)
+        self.assertIn("claude_work", result.stderr)
+
+    def test_each_participant_is_handed_the_proposals_before_it(self):
+        run_id = self.ready_collaborative()
+        self.start(run_id, "claude_work")
+        self.record(run_id, "claude_work",
+                    "## Design read\n\nSplit view with a persistent queue.\n")
+        second = self.start(run_id, "claude_msc")
+        self.assertIn("Split view with a persistent queue", second["prompt"])
+        self.assertIn("Handed to you by this panel", second["prompt"])
+        self.assertEqual(second["handoffFrom"], ["claude_work"])
+        self.assertEqual(len(second["handoffSha256"]), 64)
+        # The shared context is still a strict prefix: the handoff is appended,
+        # never spliced into the bytes every participant is promised.
+        common = (self.run_dir(run_id) / "artifacts" / "design-panel"
+                  / "common-context.md").read_bytes()
+        self.assertTrue(second["prompt"].encode("utf-8").startswith(common))
+        self.assertEqual(len(second["commonContextSha256"]), 64)
+        # The handoff sits between the shared context and the lens, so the lens
+        # still knows it is speaking to somebody who has already read the others.
+        tail = second["prompt"][len(common.decode("utf-8")):]
+        self.assertLess(tail.index("Handed to you by this panel"),
+                        tail.index("Your lens"))
+
+    def test_a_handoff_opens_the_barrier_and_is_recorded(self):
+        run_id = self.ready_collaborative()
+        self.start(run_id, "claude_work")
+        self.record(run_id, "claude_work", "## Design read\n\nA queue.\n")
+        self.assertIsNone(self.panel(run_id)["barrierOpenedAt"])
+        self.start(run_id, "claude_msc")
+        panel = self.panel(run_id)
+        self.assertIsNotNone(panel["barrierOpenedAt"])
+        self.assertEqual(panel["handoffOrder"],
+                         ["claude_work", "claude_msc", "claude_alt"])
+        events = [json.loads(line) for line in
+                  (self.run_dir(run_id) / "events.jsonl").read_text().splitlines() if line]
+        handoff = [event for event in events if event["event"] == "design-panel.handoff"]
+        self.assertEqual(len(handoff), 1)
+        self.assertEqual(handoff[0]["receivedFrom"], ["claude_work"])
+        opened = [event for event in events
+                  if event["event"] == "design-panel.barrier-opened"]
+        self.assertEqual(opened[0]["reason"], "handoff")
+
+    def test_the_third_participant_sees_both_of_the_ones_before_it(self):
+        run_id = self.ready_collaborative()
+        for who, text in (("claude_work", "a persistent queue"),
+                          ("claude_msc", "a warm neutral palette")):
+            self.start(run_id, who)
+            self.record(run_id, who, f"## Design read\n\n{text}\n")
+        third = self.start(run_id, "claude_alt")
+        self.assertIn("a persistent queue", third["prompt"])
+        self.assertIn("a warm neutral palette", third["prompt"])
+        self.assertEqual(third["handoffFrom"], ["claude_work", "claude_msc"])
+        self.assertIn("adopting", third["prompt"])
+
+    def test_a_failed_predecessor_hands_nothing_on_but_does_not_block(self):
+        run_id = self.ready_collaborative()
+        self.start(run_id, "claude_work")
+        self.fde("design-panel", "record", run_id, "claude_work", "--status", "failed",
+                 "--error", "usage limit reached")
+        second = self.start(run_id, "claude_msc")
+        self.assertEqual(second["handoffFrom"], [])
+        self.assertNotIn("Handed to you by this panel", second["prompt"])
+
+    def test_an_independent_panel_hands_nothing_over(self):
+        run_id = self.ready_panel()
+        self.start(run_id, "claude_msc")
+        self.record(run_id, "claude_msc", "## Design read\n\nA modal.\n")
+        first = self.start(run_id, "claude_work")
+        self.assertEqual(first["handoffFrom"], [])
+        self.assertNotIn("A modal", first["prompt"])
+
+    def test_an_earlier_participant_cannot_be_retried_after_a_handoff(self):
+        run_id = self.ready_collaborative()
+        self.start(run_id, "claude_work")
+        self.fde("design-panel", "record", run_id, "claude_work", "--status", "failed",
+                 "--error", "usage limit reached")
+        self.start(run_id, "claude_msc")
+        result = self.fde("design-panel", "retry", run_id, "claude_work", expected=5)
+        self.assertIn("already worked after claude_work", result.stderr)
+
+
+class PrototypeTarget(PanelTestCase):
+    """A prototype panel produces a prototype, or it produces nothing."""
+
+    PROTOTYPE = (
+        "## Design read\n\nOne list, one detail pane.\n\n"
+        "## Prototype\n\nThe queue and the detail pane, with every state.\n\n"
+        "```html\n<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<title>Returns</title><style>body{font:14px system-ui}</style></head>"
+        "<body><main><h1>Returns</h1></main></body></html>\n```\n"
+    )
+
+    RECONCILED = (
+        "## Comparison\n\nThey disagree about the entry point.\n\n"
+        "## Reconciliation\n\nTook the split view, rejected the modal.\n\n"
+        "## Final design recommendation\n\nOne list, one detail pane.\n\n"
+        "## Prototype\n\nThe split view from claude_work with claude_msc's palette.\n\n"
+        "```html\n<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<title>Returns</title></head><body><main>Final</main></body></html>\n```\n"
+    )
+
+    def ready_prototype(self):
+        return self.ready_panel(None, "--output", "prototype")
+
+    def test_the_prompt_asks_for_the_artifact_not_a_description(self):
+        run_id = self.ready_prototype()
+        prompt = self.start(run_id, "claude_work")["prompt"]
+        self.assertIn("```html", prompt)
+        self.assertIn("self-contained HTML document", prompt)
+        self.assertIn("fetch nothing over the network", prompt)
+
+    def test_a_proposal_without_a_prototype_is_refused(self):
+        run_id = self.ready_prototype()
+        self.start(run_id, "claude_work")
+        result = self.fde("design-panel", "record", run_id, "claude_work", "--status",
+                          "ok", "--stdin", input_text="## Design read\n\nA queue.\n",
+                          expected=2)
+        self.assertIn("no '## Prototype' section", result.stderr)
+        self.assertEqual(
+            next(item for item in self.panel(run_id)["participants"]
+                 if item["participantId"] == "claude_work")["state"], "running")
+        self.assertFalse((self.run_dir(run_id) / "artifacts" / "design-panel"
+                          / "proposals" / "claude_work.md").exists())
+
+    def test_a_prototype_may_contain_a_line_that_looks_like_a_heading(self):
+        run_id = self.ready_prototype()
+        self.start(run_id, "claude_work")
+        body = (
+            "## Design read\n\nA queue.\n\n"
+            "## Prototype\n\nThe queue and the detail pane.\n\n"
+            "```html\n<!doctype html>\n<html><body>"
+            "<pre>## Returns queue</pre></body></html>\n```\n\n"
+            "## What I rejected\n\nThe modal.\n"
+        )
+        self.record(run_id, "claude_work", body)
+        artifact = (self.run_dir(run_id) / "artifacts" / "design-panel" / "prototypes"
+                    / "claude_work.html")
+        self.assertIn("<pre>## Returns queue</pre>", artifact.read_text())
+
+    def test_a_block_belonging_to_a_later_section_is_not_taken(self):
+        run_id = self.ready_prototype()
+        self.start(run_id, "claude_work")
+        result = self.fde(
+            "design-panel", "record", run_id, "claude_work", "--status", "ok", "--stdin",
+            input_text="## Prototype\n\nIt would carry five screens.\n\n"
+                       "## Appendix\n\n```html\n<!doctype html><html></html>\n```\n",
+            expected=2)
+        self.assertIn("before the next heading", result.stderr)
+
+    def test_a_prose_prototype_section_is_refused(self):
+        run_id = self.ready_prototype()
+        self.start(run_id, "claude_work")
+        result = self.fde(
+            "design-panel", "record", run_id, "claude_work", "--status", "ok", "--stdin",
+            input_text="## Design read\n\nA queue.\n\n## Prototype\n\n"
+                       "It would carry five screens and an empty state.\n",
+            expected=2)
+        self.assertIn("no ```html block", result.stderr)
+
+    def test_a_prototype_that_fetches_from_the_network_is_refused(self):
+        run_id = self.ready_prototype()
+        self.start(run_id, "claude_work")
+        body = self.PROTOTYPE.replace(
+            "<style>body{font:14px system-ui}</style>",
+            '<link rel="stylesheet" href="https://cdn.example.invalid/a.css">')
+        result = self.fde("design-panel", "record", run_id, "claude_work", "--status",
+                          "ok", "--stdin", input_text=body, expected=2)
+        self.assertIn("fetches something over the network", result.stderr)
+
+    def test_a_recorded_prototype_becomes_an_artifact_of_the_run(self):
+        run_id = self.ready_prototype()
+        self.start(run_id, "claude_work")
+        self.record(run_id, "claude_work", self.PROTOTYPE)
+        artifact = (self.run_dir(run_id) / "artifacts" / "design-panel" / "prototypes"
+                    / "claude_work.html")
+        self.assertTrue(artifact.is_file())
+        text = artifact.read_text()
+        self.assertIn("<!doctype html>", text)
+        self.assertIn("participant claude_work", text)
+        participant = next(item for item in self.panel(run_id)["participants"]
+                           if item["participantId"] == "claude_work")
+        self.assertEqual(participant["prototypePath"],
+                         "artifacts/design-panel/prototypes/claude_work.html")
+        self.assertTrue(participant["prototypePresent"])
+        self.assertEqual(len(participant["prototypeSha256"]), 64)
+
+    def test_reconciliation_must_produce_the_final_prototype(self):
+        run_id = self.ready_prototype()
+        for who in ("claude_work", "claude_msc", "claude_alt"):
+            self.start(run_id, who)
+            self.record(run_id, who, self.PROTOTYPE)
+        self.advance_to(run_id, "reconciliation")
+        prompt = self.json_fde("design-panel", "reconcile", run_id, "--json")["prompt"]
+        self.assertIn("## Prototype", prompt)
+        refused = self.fde("design-panel", "record-reconciliation", run_id, "--stdin",
+                           input_text=PANEL_ANSWER, expected=2)
+        self.assertIn("Prototype", refused.stderr)
+        self.fde("design-panel", "record-reconciliation", run_id, "--stdin", "--json",
+                 input_text=self.RECONCILED)
+        final = (self.run_dir(run_id) / "artifacts" / "design-panel" / "prototypes"
+                 / "final-prototype.html")
+        self.assertTrue(final.is_file())
+        self.assertIn("<main>Final</main>", final.read_text())
+        panel = self.panel(run_id)
+        self.assertEqual(panel["state"], "complete")
+        self.assertIn("artifacts/design-panel/prototypes/final-prototype.html",
+                      [item["path"] for item in panel["artifacts"] if item["present"]])
+        events = [json.loads(line) for line in
+                  (self.run_dir(run_id) / "events.jsonl").read_text().splitlines() if line]
+        selected = next(event for event in events
+                        if event["event"] == "design-panel.final-selected")
+        self.assertEqual(len(selected["finalPrototype"]), 64)
 
 
 class Guards(PanelTestCase):

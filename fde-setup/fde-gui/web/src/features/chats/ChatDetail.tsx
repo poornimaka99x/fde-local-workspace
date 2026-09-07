@@ -3,6 +3,7 @@ import { Markdown } from '../../components/Markdown'
 import { PathBrowser } from '../../components/PathBrowser'
 import { ErrorState, Loading } from '../../components/States'
 import { ApiError, apiSend } from '../../lib/api'
+import { announceChange } from '../../lib/changes'
 import { formatTime } from '../../lib/format'
 import { Link } from '../../lib/router'
 import type { ChatRecord } from '../../lib/types'
@@ -15,6 +16,7 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
   const [error, setError] = useState<ApiError | null>(null)
   const [attaching, setAttaching] = useState(false)
   const [attachError, setAttachError] = useState<ApiError | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const send = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -87,6 +89,23 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
     ? 'ChatGPT / Codex'
     : chat.provider === 'bedrock' ? 'Claude on Bedrock' : 'Claude'
 
+  const deleteChat = async (): Promise<void> => {
+    if (!window.confirm(
+      `Delete “${chat.title}” from this console? The chat record will be moved to recoverable trash. Attached files are not deleted.`,
+    )) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await apiSend(`/api/chats/${encodeURIComponent(chatId)}`, 'DELETE')
+      announceChange()
+      window.history.pushState(null, '', '/chats')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not delete this chat.'))
+      setDeleting(false)
+    }
+  }
+
   return (
     <>
       <div className="stack" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -94,7 +113,18 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
           <h1>{chat.title}</h1>
           <p className="lede">{chat.profile} · {chat.model} · {chat.effort}{chat.projectId ? ` · ${chat.projectId}` : ''}</p>
         </div>
-        <div className="stack"><Link className="action" to="/chats">All chats</Link><Link className="action" to="/chats/new">New chat</Link></div>
+        <div className="stack">
+          <Link className="action" to="/chats">All chats</Link>
+          <Link className="action" to="/chats/new">New chat</Link>
+          <button
+            className="action danger"
+            type="button"
+            disabled={chat.status === 'running' || sending || deleting}
+            onClick={() => void deleteChat()}
+          >
+            {deleting ? 'Deleting…' : chat.status === 'running' || sending ? 'Stop to delete' : 'Delete chat'}
+          </button>
+        </div>
       </div>
       {error ? <ErrorState error={error} /> : null}
       {chat.lastError ? <div className="banner danger" role="alert">{chat.lastError}</div> : null}

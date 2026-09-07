@@ -24,7 +24,7 @@ function panelEnvelope(overrides: Record<string, unknown> = {}): unknown {
   return {
     schemaVersion: 1,
     designPanel: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId: RUN,
       panelId: 'panel-abc12345',
       projectId: 'returns-a1b2',
@@ -52,19 +52,21 @@ function panelEnvelope(overrides: Record<string, unknown> = {}): unknown {
           participantId: 'claude_work', agentId: 'claude_work', profile: 'work',
           label: 'Claude: work', model: 'default', effort: 'auto', lensId: 'flow',
           lensLabel: 'Product flow', state: 'pending', attempts: 0,
-          proposalPresent: false,
+          proposalPresent: false, prototypePresent: false, order: 0, handoffFrom: [],
         },
         {
           participantId: 'claude_msc', agentId: 'claude_msc', profile: 'msc',
           label: 'Claude: msc', model: 'default', effort: 'auto', lensId: 'visual',
           lensLabel: 'Visual direction', state: 'pending', attempts: 0,
-          proposalPresent: false,
+          proposalPresent: false, prototypePresent: false, order: 1, handoffFrom: [],
         },
       ],
       succeededCount: 0,
       reconciliation: { state: 'pending' },
       artifacts: [],
       comparisonDimensions: ['user flow', 'accessibility'],
+      handoffOrder: ['claude_work', 'claude_msc'],
+      mediaFiles: [],
       nextAction: 'start the remaining participants',
       ...overrides,
     },
@@ -305,6 +307,37 @@ describe('creating a panel', () => {
       .toBe('Rework the in-store returns screen.')
   })
 
+  it('refuses a model this account was never offered', async () => {
+    harness = await makePanelHarness()
+    harness.fixture(`design-panel-create-${RUN}`, panelEnvelope())
+    // Syntactically valid, and not in the account's list. The browser may only
+    // choose from what this server offered it, so it is refused here rather
+    // than forwarded to the controller.
+    const response = await post(harness, `/api/runs/${RUN}/design-panel`, body({
+      participants: [
+        { accountId: 'work', model: 'claude-opus-9-secret', effort: 'high', lensId: 'flow' },
+        { accountId: 'msc', model: 'default', effort: 'auto', lensId: 'visual' },
+      ],
+    }))
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ type: 'about:fde/invalid-selection' })
+    expect(harness.calls().some((call) => call[1] === 'create')).toBe(false)
+  })
+
+  it('refuses an effort the selected model does not offer', async () => {
+    harness = await makePanelHarness()
+    harness.fixture(`design-panel-create-${RUN}`, panelEnvelope())
+    const response = await post(harness, `/api/runs/${RUN}/design-panel`, body({
+      participants: [
+        // xhigh is Opus-specific; Sonnet does not offer it.
+        { accountId: 'work', model: 'sonnet', effort: 'xhigh', lensId: 'flow' },
+        { accountId: 'msc', model: 'default', effort: 'auto', lensId: 'visual' },
+      ],
+    }))
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ type: 'about:fde/invalid-selection' })
+  })
+
   it('refuses a controller answer in an unexpected shape', async () => {
     harness = await makePanelHarness()
     harness.rawFixture(`design-panel-create-${RUN}`, JSON.stringify({ schemaVersion: 9 }))
@@ -469,6 +502,67 @@ describe('running participants', () => {
     expect(refused.statusCode).toBe(409)
     expect(refused.json()).toMatchObject({ type: 'about:fde/panel-busy' })
     expect(started).toHaveLength(3)
+  })
+
+  it('holds the limit when starts arrive together, not just one after another', async () => {
+    const started: Started[] = []
+    harness = await makePanelHarness({ panelRunner: recordingRunner(started, 'hang') })
+    harness.fixture(`design-panel-show-${RUN}`, panelEnvelope())
+    for (const participant of ['claude_work', 'claude_msc', 'claude_alt']) {
+      startFixture(harness, RUN, participant)
+    }
+    const other = '20260906-other-bbbb'
+    harness.fixture(`design-panel-show-${other}`, panelEnvelope())
+    startFixture(harness, other, 'claude_work')
+    startFixture(harness, other, 'claude_msc')
+
+    // Five starts in flight at once, across two panels. The check and the
+    // reservation have to happen in one step: a limit taken only after the
+    // controller answers is a limit two simultaneous requests can walk past.
+    const responses = await Promise.all([
+      post(harness, `/api/runs/${RUN}/design-panel/participants/claude_work/start`),
+      post(harness, `/api/runs/${RUN}/design-panel/participants/claude_msc/start`),
+      post(harness, `/api/runs/${RUN}/design-panel/participants/claude_alt/start`),
+      post(harness, `/api/runs/${other}/design-panel/participants/claude_work/start`),
+      post(harness, `/api/runs/${other}/design-panel/participants/claude_msc/start`),
+    ])
+    const accepted = responses.filter((response) => response.statusCode === 200)
+    const refused = responses.filter((response) => response.statusCode === 409)
+    expect(accepted).toHaveLength(harness.config.panelConcurrency)
+    expect(refused).toHaveLength(5 - harness.config.panelConcurrency)
+    expect(refused[0]?.json()).toMatchObject({ type: 'about:fde/panel-busy' })
+    await settle(() => started.length === harness!.config.panelConcurrency,
+      'the accepted participants to be running')
+    // Give any surplus process a chance to appear before asserting none did.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(started).toHaveLength(harness.config.panelConcurrency)
+  })
+
+  it('frees the slot it reserved when the controller refuses the start', async () => {
+    const started: Started[] = []
+    harness = await makePanelHarness({ panelRunner: recordingRunner(started, 'hang') })
+    harness.fixture(`design-panel-show-${RUN}`, panelEnvelope())
+    for (const participant of ['claude_work', 'claude_msc', 'claude_alt']) {
+      startFixture(harness, RUN, participant)
+    }
+    const other = '20260906-other-bbbb'
+    harness.fixture(`design-panel-show-${other}`, panelEnvelope())
+    harness.failure(`design-panel-start-${other}-claude_work`, 5,
+      'fde: claude_work is already running')
+
+    const refused = await post(harness,
+      `/api/runs/${other}/design-panel/participants/claude_work/start`)
+    expect(refused.statusCode).toBeGreaterThanOrEqual(400)
+    expect(harness.designPanels.isRunning(other, 'claude_work')).toBe(false)
+
+    // A reservation that outlived its refused start would leak a slot, and the
+    // console would run one participant fewer for the rest of its life.
+    for (const participant of ['claude_work', 'claude_msc', 'claude_alt']) {
+      const accepted = await post(harness,
+        `/api/runs/${RUN}/design-panel/participants/${participant}/start`)
+      expect(accepted.statusCode).toBe(200)
+    }
+    await settle(() => started.length === 3, 'all three slots to be usable')
   })
 
   it('stops a running participant and tells the controller', async () => {

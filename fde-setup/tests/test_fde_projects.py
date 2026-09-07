@@ -111,6 +111,57 @@ class TestProjectRegistry(ProjectTest):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("nothing to update", result.stderr)
 
+    def test_delete_moves_only_unused_project_metadata_to_recoverable_trash(self):
+        project = self.create_project(repos=[self.sb.repo])
+        project_id = project["projectId"]
+        registry = self.sb.shared / "projects" / project_id
+
+        result = self.sb.fde("project", "delete", project_id,
+                             "--confirm", project_id, "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        deleted = json.loads(result.stdout)["deletedProject"]
+        self.assertEqual(deleted["projectId"], project_id)
+        self.assertTrue(deleted["recoverable"])
+        self.assertFalse(registry.exists())
+        self.assertTrue(self.sb.repo.is_dir(), "recorded repositories are never deleted")
+
+        trashed = list((self.sb.shared / "projects" / ".trash").iterdir())
+        self.assertEqual(len(trashed), 1)
+        self.assertEqual(json.loads((trashed[0] / "project.json").read_text())["projectId"],
+                         project_id)
+        events = [json.loads(line) for line in
+                  (trashed[0] / "events.jsonl").read_text().splitlines() if line.strip()]
+        self.assertEqual(events[-1]["event"], "project.deleted")
+
+    def test_delete_requires_the_exact_project_id_confirmation(self):
+        project = self.create_project()
+        result = self.sb.fde("project", "delete", project["projectId"],
+                             "--confirm", "some-other-project")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("exact project id", result.stderr)
+        self.assertTrue((self.sb.shared / "projects" / project["projectId"]).is_dir())
+
+    def test_delete_refuses_projects_referenced_by_runs_or_chats(self):
+        with_run = self.create_project(name="Project with run")
+        started = self.sb.fde("start", "MAX-delete-guard", "--orchestrator", "work",
+                              "--project", with_run["projectId"])
+        self.assertEqual(started.returncode, 0, started.stderr)
+        refused_run = self.sb.fde("project", "delete", with_run["projectId"],
+                                  "--confirm", with_run["projectId"])
+        self.assertEqual(refused_run.returncode, 5)
+        self.assertIn("1 run(s)", refused_run.stderr)
+
+        with_chat = self.create_project(name="Project with chat")
+        chats = self.sb.shared / "chats"
+        chats.mkdir(parents=True)
+        (chats / "chat-20260907-abcdef12.json").write_text(json.dumps({
+            "chatId": "chat-20260907-abcdef12", "projectId": with_chat["projectId"]
+        }))
+        refused_chat = self.sb.fde("project", "delete", with_chat["projectId"],
+                                   "--confirm", with_chat["projectId"])
+        self.assertEqual(refused_chat.returncode, 5)
+        self.assertIn("1 chat(s)", refused_chat.stderr)
+
     def test_unknown_and_malformed_project_ids_are_refused(self):
         unknown = self.sb.fde("project", "show", "no-such-project-1234", "--json")
         self.assertEqual(unknown.returncode, 4)

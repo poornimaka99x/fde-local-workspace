@@ -43,6 +43,17 @@ describe('safe mutations', () => {
         updatedAt: '2026-09-03T11:00:00+00:00',
       },
     })
+    harness.fixture(`project-delete-${PROJECT}`, {
+      schemaVersion: 1,
+      deletedProject: {
+        projectId: PROJECT,
+        name: 'Returns modernisation',
+        deletedAt: '2026-09-07T10:00:00+00:00',
+        recoverable: true,
+        runCount: 0,
+        chatCount: 0,
+      },
+    })
     harness.fixture('start', {
       schemaVersion: 1,
       run: {
@@ -199,6 +210,19 @@ describe('safe mutations', () => {
     })
     expect(bad.statusCode).toBeGreaterThanOrEqual(400)
     expect(harness.calls()).toHaveLength(1)
+  })
+
+  it('deletes a project through the controller with exact confirmation', async () => {
+    const response = await harness.app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${PROJECT}`,
+      headers: mutating(harness.token),
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().deletedProject).toMatchObject({ projectId: PROJECT, recoverable: true })
+    expect(harness.calls()[0]).toEqual([
+      'project', 'delete', PROJECT, '--confirm', PROJECT, '--json',
+    ])
   })
 
   // -- runs ------------------------------------------------------------------

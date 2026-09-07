@@ -87,6 +87,86 @@ function ArtifactDocument({
   )
 }
 
+/**
+ * A prototype artifact, shown as what it is.
+ *
+ * The controller only records a prototype that is a whole, self-contained HTML
+ * document with nothing fetched over the network, so it can be previewed here
+ * directly. The frame is sandboxed with no allowances at all: scripts, forms
+ * and same-origin access are off, so a preview cannot reach this console, its
+ * token or the operator's other artifacts. What the frame will not run, the
+ * "Open the file" link will — deliberately, in a tab of the operator's choosing.
+ */
+function ArtifactPrototype({
+  runId,
+  path,
+  title,
+  open,
+}: {
+  runId: string
+  path: string
+  title: string
+  open?: boolean
+}): JSX.Element {
+  const [html, setHtml] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const requested = useRef(false)
+
+  const load = (): void => {
+    if (requested.current) return
+    requested.current = true
+    setLoading(true)
+    apiGetText(fileContentUrl(runId, path, 'inline'))
+      .then((result) => setHtml(result.text))
+      .catch(() => setError('That prototype could not be read.'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    if (open === true) load()
+  })
+
+  return (
+    <details className="card" open={open} onToggle={load}>
+      <summary>
+        <strong>{title}</strong> <span className="muted mono">{path}</span>
+      </summary>
+      {loading ? <Loading label="Reading…" /> : null}
+      {error !== null ? <p className="banner danger" role="alert">{error}</p> : null}
+      {html !== null ? (
+        <>
+          <p className="muted" style={{ margin: '6px 0' }}>
+            A preview with scripts off. Open the file to click through it.{' '}
+            <a href={fileContentUrl(runId, path, 'inline')} target="_blank" rel="noreferrer">
+              Open the file
+            </a>
+          </p>
+          <iframe
+            title={title}
+            srcDoc={html}
+            sandbox=""
+            referrerPolicy="no-referrer"
+            style={{ width: '100%', height: 520, border: '1px solid var(--line, #ccc)' }}
+          />
+        </>
+      ) : null}
+    </details>
+  )
+}
+
+/** A run artifact, rendered by what it is rather than by where it sits. */
+function PanelArtifact(props: {
+  runId: string
+  path: string
+  title: string
+  open?: boolean
+}): JSX.Element {
+  return props.path.endsWith('.html')
+    ? <ArtifactPrototype {...props} />
+    : <ArtifactDocument {...props} />
+}
+
 export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
   const panel = useApi<DesignPanelResponse>(`/api/runs/${encodeURIComponent(runId)}/design-panel`)
   const [busy, setBusy] = useState<string | null>(null)
@@ -303,6 +383,14 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
       </div>
 
       <h2>Participants</h2>
+      {data.mode === 'collaborative' ? (
+        <p className="muted" style={{ marginTop: 0 }}>
+          This panel is collaborative: participants work in order —{' '}
+          <span className="mono">{data.handoffOrder.join(' → ')}</span> — and each is handed
+          the proposals of the ones before it. A participant cannot start until the one ahead
+          of it has finished, and the handoff is recorded in the run log.
+        </p>
+      ) : null}
       <div className="grid">
         {data.participants.map((participant) => {
           const canStart = data.rolesConfirmed && data.conceptStageReady && participant.state === 'pending'
@@ -321,6 +409,16 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
               <table className="participant-facts">
                 <tbody>
                   <tr><th scope="row">Model</th><td>{participant.model} · {participant.effort}</td></tr>
+                  {data.mode === 'collaborative' ? (
+                    <tr>
+                      <th scope="row">Handed</th>
+                      <td>
+                        {participant.handoffFrom.length > 0
+                          ? participant.handoffFrom.join(', ')
+                          : participant.order === 0 ? 'nothing — works first' : '—'}
+                      </td>
+                    </tr>
+                  ) : null}
                   <tr><th scope="row">Attempts</th><td>{participant.attempts}</td></tr>
                   <tr><th scope="row">Duration</th><td>{duration(participant)}</td></tr>
                   <tr>
@@ -371,6 +469,13 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
               ) : (
                 <p className="muted" style={{ marginBottom: 0 }}>No proposal recorded yet.</p>
               )}
+              {participant.prototypePresent && participant.prototypePath !== null ? (
+                <ArtifactPrototype
+                  runId={data.runId}
+                  path={participant.prototypePath}
+                  title={`Prototype — ${participant.label}`}
+                />
+              ) : null}
             </section>
           )
         })}
@@ -388,8 +493,12 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
         <p style={{ marginTop: 0 }}>
           {data.succeededCount} of {data.participants.length} proposals succeeded.{' '}
           {data.barrierOpenedAt === null
-            ? 'The information barrier is closed: no participant has seen another proposal.'
-            : `The barrier opened at ${formatTime(data.barrierOpenedAt)}, for reconciliation.`}
+            ? data.mode === 'collaborative'
+              ? 'Nothing has been handed over yet: no participant has seen another proposal.'
+              : 'The information barrier is closed: no participant has seen another proposal.'
+            : data.mode === 'collaborative'
+              ? `Work was first handed over at ${formatTime(data.barrierOpenedAt)}; each participant sees the ones before it.`
+              : `The barrier opened at ${formatTime(data.barrierOpenedAt)}, for reconciliation.`}
         </p>
         {data.succeededCount === 1 && data.degradedApprovedAt === null ? (
           <div className="banner warn" role="note">
@@ -428,12 +537,13 @@ export function DesignPanelView({ runId }: { runId: string }): JSX.Element {
         .filter((artifact) => artifact.present && !artifact.path.endsWith('context-manifest.json')
           && !artifact.path.endsWith('common-context.md'))
         .map((artifact) => (
-          <ArtifactDocument
+          <PanelArtifact
             key={artifact.path}
             runId={data.runId}
             path={artifact.path}
             title={artifact.path.split('/').pop() ?? artifact.path}
-            open={artifact.path.endsWith('final-design.md')}
+            open={artifact.path.endsWith('final-design.md')
+              || artifact.path.endsWith('final-prototype.html')}
           />
         ))}
 

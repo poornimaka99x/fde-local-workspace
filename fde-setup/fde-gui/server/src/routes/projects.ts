@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { GuiConfig } from '../config'
 import { problem } from '../problem'
 import { PROJECT_ID_PATTERN, runControllerJson } from '../services/controller'
-import { projectDetailSchema, projectListSchema } from '../schemas/controller'
+import { projectDeletedSchema, projectDetailSchema, projectListSchema } from '../schemas/controller'
 import type { Services } from '../services/types'
 import { block, describeZod, line } from '../schemas/input'
 
@@ -98,6 +98,40 @@ export function registerProjectRoutes(
         const raw = await runControllerJson(config, args)
         services.watcher.touch()
         return raw
+      } finally {
+        release()
+      }
+    },
+  )
+
+  app.delete<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId',
+    async (request, reply) => {
+      const { projectId } = request.params
+      if (!PROJECT_ID_PATTERN.test(projectId)) {
+        return problem(reply, 400, 'invalid-project-id', 'That is not a valid project id.')
+      }
+      const release = services.locks.tryAcquire('project:' + projectId)
+      if (release === null) {
+        return problem(reply, 409, 'busy', 'This project is being changed right now.')
+      }
+      try {
+        if (services.chats.countForProject(projectId) > 0) {
+          return problem(
+            reply,
+            409,
+            'project-in-use',
+            'This project is still used by one or more chats.',
+            'Delete those chats before deleting the project.',
+          )
+        }
+        const raw = await runControllerJson(
+          config,
+          ['project', 'delete', projectId, '--confirm', projectId, '--json'],
+        )
+        const deleted = projectDeletedSchema.parse(raw)
+        services.watcher.touch()
+        return deleted
       } finally {
         release()
       }

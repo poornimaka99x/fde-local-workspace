@@ -99,6 +99,22 @@ export const projectDetailSchema = z
   })
   .passthrough()
 
+export const projectDeletedSchema = z
+  .object({
+    schemaVersion: SCHEMA_VERSION,
+    deletedProject: z
+      .object({
+        projectId: z.string(),
+        name: z.string().nullish(),
+        deletedAt: z.string(),
+        recoverable: z.literal(true),
+        runCount: z.literal(0),
+        chatCount: z.literal(0),
+      })
+      .passthrough(),
+  })
+  .passthrough()
+
 export const eventPageSchema = z
   .object({
     total: z.number(),

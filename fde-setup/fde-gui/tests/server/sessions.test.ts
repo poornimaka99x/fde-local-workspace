@@ -177,6 +177,41 @@ describe('resume sessions', () => {
     expect(listed.sessions).toHaveLength(1)
   })
 
+  it('deletes only finished console history and refuses a running session', async () => {
+    await resume(RUN)
+    const whileRunning = await harness.app.inject({
+      method: 'DELETE', url: `/api/runs/${RUN}/session`, headers: mutating(harness.token),
+    })
+    expect(whileRunning.statusCode).toBe(409)
+    expect(whileRunning.json()).toMatchObject({ type: 'about:fde/session-active' })
+    expect(FakeTerminal.spawned[0]?.signals).toEqual([])
+
+    FakeTerminal.spawned[0]?.finish(0)
+    const deleted = await harness.app.inject({
+      method: 'DELETE', url: `/api/runs/${RUN}/session`, headers: mutating(harness.token),
+    })
+    expect(deleted.statusCode).toBe(200)
+    expect(deleted.json()).toEqual({ deleted: { kind: 'session-history', runId: RUN } })
+    expect(harness.sessions.get(RUN)).toBeNull()
+    expect(() => harness.sessions.attach(RUN, () => undefined, () => undefined)).toThrow()
+  })
+
+  it('can delete finished account-login session history from the session list', async () => {
+    harness.sessions.startCommand({
+      sessionId: 'login:work', file: harness.config.claudeBin, args: ['auth', 'login'],
+      cwd: harness.root, env: {},
+    })
+    FakeTerminal.spawned.at(-1)?.finish(0)
+    const deleted = await harness.app.inject({
+      method: 'DELETE', url: '/api/sessions/login%3Awork', headers: mutating(harness.token),
+    })
+    expect(deleted.statusCode).toBe(200)
+    expect(deleted.json()).toEqual({
+      deleted: { kind: 'session-history', sessionId: 'login:work' },
+    })
+    expect(harness.sessions.get('login:work')).toBeNull()
+  })
+
   it('hangs up running sessions when the server closes', async () => {
     await resume(RUN)
     const terminal = FakeTerminal.spawned[0]

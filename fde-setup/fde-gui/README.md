@@ -26,6 +26,14 @@ Account status comes from `claude auth status`; the Login action opens an
 isolated `claude auth login` terminal for only the selected profile. The GUI
 never receives a password, OAuth token or credential file.
 
+Old records can be removed from their list with an explicit confirmation.
+Deleting a chat moves its JSON record to `~/.claude-shared/chats/.trash` and
+never touches attached source files. Deleting a finished console session only
+forgets its in-memory terminal history; it does not delete the FDE run. Deleting
+a project is controller-owned, moves only its metadata to
+`~/.claude-shared/projects/.trash`, leaves repositories unchanged, and is
+refused while any live chat or run still references that project.
+
 Both New run and New chat expose the selected Claude profile, model and the
 effort levels supported by that model. Run choices are persisted in the run
 manifest and reapplied by `fde-start` on every resume. After a Claude-led run is
@@ -118,9 +126,10 @@ The rules it is built to:
   not followed. Within it, paths are resolved and then re-checked against that
   root, symlinks are never followed, and the approval ledger, the session id and
   run-scoped MCP configuration are never served as files.
-- **Controller output is checked twice.** `schemaVersion` is pinned to 1, and
-  every structure the UI dereferences must be the right kind of thing or the
-  response is refused as an unexpected shape. Only documented controller exit
+- **Controller output is checked twice.** `schemaVersion` is pinned — 1 for the
+  controller envelopes, 2 for the design-panel document — and every structure
+  the UI dereferences must be the right kind of thing or the response is
+  refused as an unexpected shape. Only documented controller exit
   codes have their stderr forwarded; an undocumented failure never sends its
   text — or a traceback — to the browser.
 - **The rail is a read, and creation lives in one place.** It merges recent

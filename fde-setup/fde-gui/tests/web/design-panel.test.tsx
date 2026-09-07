@@ -220,7 +220,7 @@ describe('the design-panel form', () => {
 })
 
 const panelFixture = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   runId: '20260906-returns-aaaa',
   panelId: 'panel-abc12345',
   projectId: 'returns-a1b2',
@@ -242,6 +242,11 @@ const panelFixture = (overrides: Record<string, unknown> = {}): Record<string, u
   packs: {},
   references: [],
   context: { contextSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64), commonContextBytes: 4096 },
+  handoffOrder: ['claude_work', 'claude_msc', 'claude_alt'],
+  mediaFiles: [{
+    runPath: 'artifacts/design-panel/media/9f1c.png', sha256: 'd'.repeat(64),
+    originalName: 'receipt.png', mediaType: 'image/png', bytes: 2048,
+  }],
   contextManifest: {
     contextSha256: 'a'.repeat(64),
     inputFiles: [{
@@ -262,7 +267,8 @@ const panelFixture = (overrides: Record<string, unknown> = {}): Record<string, u
       state: 'succeeded', attempts: 1, startedAt: null, endedAt: null, durationMs: 61000,
       error: null, proposalPath: 'artifacts/design-panel/proposals/claude_work.md',
       proposalPresent: true, proposalBytes: 900, commonContextSha256: 'a'.repeat(64),
-      promptSha256: 'b'.repeat(64),
+      promptSha256: 'b'.repeat(64), prototypePath: null, prototypePresent: false,
+      order: 0, handoffFrom: [], handoffSha256: null,
     },
     {
       participantId: 'claude_msc', agentId: 'claude_msc', profile: 'msc', label: 'Claude: msc',
@@ -271,6 +277,8 @@ const panelFixture = (overrides: Record<string, unknown> = {}): Record<string, u
       error: 'This Claude account has reached a usage or rate limit.',
       proposalPath: null, proposalPresent: false, proposalBytes: null,
       commonContextSha256: 'a'.repeat(64), promptSha256: 'c'.repeat(64),
+      prototypePath: null, prototypePresent: false,
+      order: 1, handoffFrom: [], handoffSha256: null,
     },
     {
       participantId: 'claude_alt', agentId: 'claude_alt', profile: 'alt', label: 'Claude: alt',
@@ -278,6 +286,8 @@ const panelFixture = (overrides: Record<string, unknown> = {}): Record<string, u
       state: 'pending', attempts: 0, startedAt: null, endedAt: null, durationMs: null,
       error: null, proposalPath: null, proposalPresent: false, proposalBytes: null,
       commonContextSha256: null, promptSha256: null,
+      prototypePath: null, prototypePresent: false,
+      order: 2, handoffFrom: [], handoffSha256: null,
     },
   ],
   succeededCount: 1,
@@ -327,6 +337,53 @@ describe('the design-panel page', () => {
     expect(screen.getByText(/receipt\.png/)).toBeInTheDocument()
     expect(screen.getByText(/passed as a file/)).toBeInTheDocument()
     expect(screen.getByText(/not authorisation to impersonate a brand/i)).toBeInTheDocument()
+  })
+
+  it('says what collaborative mode actually does, and who was handed what', async () => {
+    renderPanel({
+      mode: 'collaborative',
+      barrierOpenedAt: '2026-09-06T10:20:00+00:00',
+      participants: (panelFixture().participants as Record<string, unknown>[]).map(
+        (participant, index) => index === 1
+          ? { ...participant, handoffFrom: ['claude_work'] }
+          : participant),
+    })
+    expect(await screen.findByText(/participants work in order/i)).toBeInTheDocument()
+    expect(screen.getByText('claude_work → claude_msc → claude_alt')).toBeInTheDocument()
+    expect(screen.getByText(/each participant sees the ones before it/i)).toBeInTheDocument()
+    const cards = screen.getAllByRole('region')
+    const second = cards.find((card) => card.getAttribute('aria-label')?.includes('Claude: msc'))
+    expect(within(second!).getByText('claude_work')).toBeInTheDocument()
+    const first = cards.find((card) => card.getAttribute('aria-label')?.includes('Claude: work'))
+    expect(within(first!).getByText('nothing — works first')).toBeInTheDocument()
+  })
+
+  it('shows a prototype as a sandboxed preview, not as prose', async () => {
+    const html = '<!doctype html><html><body><main>Returns queue</main></body></html>'
+    stubFetch((url) => {
+      if (url.endsWith('/design-panel')) {
+        return jsonResponse({
+          schemaVersion: 1,
+          designPanel: panelFixture({
+            outputTarget: 'prototype',
+            artifacts: [
+              { path: 'artifacts/design-panel/prototypes/final-prototype.html', present: true },
+            ],
+          }),
+        })
+      }
+      if (url.includes('/files/content')) return new Response(html, { status: 200 })
+      return jsonResponse({}, 404)
+    })
+    window.history.pushState(null, '', '/runs/20260906-returns-aaaa/design-panel')
+    render(<DesignPanelView runId="20260906-returns-aaaa" />)
+
+    const frame = await screen.findByTitle('final-prototype.html')
+    // An empty sandbox: no scripts, no forms, no same-origin. The preview
+    // cannot reach this console, its token or the operator's other artifacts.
+    expect(frame.getAttribute('sandbox')).toBe('')
+    expect(frame.getAttribute('srcdoc')).toContain('Returns queue')
+    expect(screen.getByRole('link', { name: 'Open the file' })).toBeInTheDocument()
   })
 
   it('keeps a successful proposal available beside a failure', async () => {

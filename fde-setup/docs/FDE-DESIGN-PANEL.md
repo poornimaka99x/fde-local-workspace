@@ -75,16 +75,63 @@ into it:
 | `schemaVersion` | the manifest contract |
 | `projectId`, `repositories` | the project and its repository roots, each with its Git HEAD when it has one |
 | `brief` | SHA-256 and size of the design brief |
-| `inputFiles` | each selected attachment: media type, size, SHA-256, and whether it was inlined or passed as a file |
+| `inputFiles` | each selected attachment: media type, size, SHA-256, whether it was inlined or passed as a file, and for a file the sealed copy's path inside the run |
 | `productMd`, `designMd` | the selected project documents, with digests, or the reason one was not included |
 | `designReferences` | the selected catalog documents, their upstream commit, licence and digest |
 | `guidancePacks` | each enabled pack, its pinned commit, licence, dial settings, and exactly which document bytes were used |
 | `commonContextBytes`, `contextSha256` | the size and digest of the shared bytes |
 
-Every participant's prompt is **the shared bytes followed by its own lens
-block**. The shared context is a strict prefix of every prompt, the controller
-asserts it, and the test suite proves it — that is what makes "everyone got the
-same context" checkable rather than merely intended.
+Every participant's prompt is **the shared bytes, then the handoff it was given
+if the panel is collaborative, then its own lens block**. The shared context is a
+strict prefix of every prompt, the controller asserts it, and the test suite
+proves it — that is what makes "everyone got the same context" checkable rather
+than merely intended.
+
+Images are sealed by their bytes, not by the path they arrived on. A selected
+image is copied into `artifacts/design-panel/media/`, and that copy — never the
+uploaded attachment, which stays writable — is what participants are handed. The
+copy is re-hashed against the manifest at *every* start, so an image that
+changed between two participants refuses the second start rather than quietly
+giving two accounts different bytes under one context digest.
+
+## Independent-first and collaborative
+
+**Independent-first** is the default: no participant sees another's proposal
+until every one of them has finished or failed, and the controller refuses a
+prompt that contains one.
+
+**Collaborative** is a staged handoff, and the stages are enforced. Participants
+work in the order they were configured — `handoffOrder` in the panel view — and:
+
+- a participant cannot start until every participant ahead of it is finished,
+  failed, stopped or interrupted;
+- when it starts, the succeeded proposals ahead of it are appended after the
+  shared context, in a `<handoff>` block carrying each proposal's digest, and its
+  lens block tells it to say what it adopts, changes and rejects;
+- the run log records a `design-panel.handoff` event naming who received which
+  proposals by digest, and `design-panel.barrier-opened` with `reason: handoff`
+  the first time anything is handed over;
+- an earlier participant cannot be retried once a later one has worked, because
+  that would replace a proposal somebody was already given. Start a new run.
+
+A failed predecessor hands nothing on and does not block: the next participant
+starts with an empty handoff and is told it is working first.
+
+## Output targets
+
+`recommendation` is a document. `design-to-code` adds a handoff section to the
+reconciliation.
+
+`prototype` produces an artifact, not a description of one. Each participant's
+proposal must carry a `## Prototype` section containing exactly one ```html
+fenced block holding a complete, self-contained HTML document — everything
+inline, nothing fetched over the network — and the reconciliation must produce
+one more, reconciled from theirs. The controller extracts each into
+`artifacts/design-panel/prototypes/` (`<participant>.html` and
+`final-prototype.html`) and refuses a proposal or an answer that describes a
+prototype instead of delivering one: nothing is recorded, and the participant
+stays running and retryable. The console previews them with scripts off and
+links to the file.
 
 The selection is explicit and bounded. No repository is traversed and no folder
 is inlined: at most 12 attachments, 256 KiB each, 64 KiB inlined each, 512 KiB
@@ -219,8 +266,13 @@ what was recorded stays recorded.
 - A panel is Claude accounts. Codex, Gemini and Copilot are not participants:
   the point is separately authenticated Claude accounts reading identical
   context, and the isolation guarantee is a Claude-profile one.
-- **Collaborative** mode records staged handoffs; it does not make the accounts
-  talk to each other live. There is no shared session.
+- **Collaborative** mode is a staged handoff: each participant is given the
+  proposals of the ones before it, and the order is enforced. It does not make
+  the accounts talk to each other live — there is no shared session, and a
+  participant sees a predecessor's finished proposal, not its reasoning.
+- A prototype is a single self-contained HTML file with no network access. It
+  is a design artifact to look at and click through, not a build of the product,
+  and it authorises no repository write.
 - The console runs the accounts; the controller owns the record. If the console
   is not running, nothing progresses — and nothing is lost.
 - Participants have no tools. They cannot read the repository themselves; they
