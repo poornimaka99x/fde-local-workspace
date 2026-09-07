@@ -3549,6 +3549,11 @@ def cmd_status(args):
         attempts = routing_attempts(run)
         print(f"  attempts   {len(attempts)} recorded, "
               f"~{spent:g} of {cap:g} approved cost units spent (estimates)")
+        if attempts:
+            escalated = sum(1 for record in attempts
+                            if record.get("mode") == "escalation")
+            print(f"             {len(attempts) - 1} beyond the first, of which "
+                  f"{escalated} escalated")
         rollup = routing_usage_rollup(run)
         reported = [field for field, value in rollup.items()
                     if isinstance(value, dict) and value.get("state") == "reported"
@@ -7398,6 +7403,8 @@ def plan_next_attempt(run: Run, agents, doc, task, *, probe=False):
 def record_routing_attempt(run: Run, doc, task, plan, *, usage=None, outcome="unknown",
                            artifact=None, exit_code=None, notes=()):
     """Append one attempt. Never amend an earlier one."""
+    if plan["mode"] not in ROUTING_ATTEMPT_MODES:
+        die(f"unknown attempt mode '{plan['mode']}'", 2)
     record = {
         "at": iso(),
         "runId": run.id,
@@ -7549,7 +7556,8 @@ def cmd_routing_outcome(args):
     print(f"\nrecorded  attempt {last.get('attempt')} at {args.task_id}: {args.status}"
           + (f" ({classification})" if classification else ""))
     print(f"attempts  {progress['attempts']} "
-          f"({progress['retries']} retry, {progress['escalations']} escalation), "
+          f"({progress['retries']} beyond the first, of which "
+          f"{progress['escalations']} escalated), "
           f"~{progress['spentCostUnits']:g} units spent on this task")
     reported = [field for field, value in usage.items()
                 if isinstance(value, dict) and value.get("state") == "reported"]
@@ -9701,6 +9709,8 @@ def design_panel_summary(run: Run):
         "effort": participant.get("effort"),
         "tier": participant.get("tier"),
         "routingSource": participant.get("routingSource") or "operator",
+        "routingReason": participant.get("routingReason"),
+        "qualityFloor": participant.get("qualityFloor"),
         "estimatedCostUnits": participant.get("estimatedCostUnits"),
         "state": participant.get("state"),
         "order": participant.get("order"),

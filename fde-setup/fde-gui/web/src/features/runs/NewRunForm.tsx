@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, apiSend } from '../../lib/api'
 import { announceChange } from '../../lib/changes'
 import { useApi } from '../../lib/useApi'
@@ -54,7 +54,15 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
 
   const policy = routingPolicy.data?.policy ?? null
   const routingAvailable = policy?.state === 'available'
+  // Three states, not two. "We have not asked yet" is not the same as
+  // "automatic routing is unavailable", and collapsing them showed the
+  // recommended option as selected while quietly creating a manual run.
+  const policyKnown = routingPolicy.data !== null || routingPolicy.error !== null
   const auto = routingMode === 'auto' && routingAvailable
+
+  useEffect(() => {
+    if (policyKnown && !routingAvailable) setRoutingMode('manual')
+  }, [policyKnown, routingAvailable])
   const strategies = routingPolicy.data?.strategies ?? ['balanced', 'quality_first', 'cost_first']
   const minChars = routingPolicy.data?.previewMinRequirementChars ?? 24
   const selectedAccount = (accounts.data?.accounts ?? [])
@@ -138,7 +146,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
                 name="routing-mode"
                 value="auto"
                 checked={routingMode === 'auto'}
-                disabled={!routingAvailable}
+                disabled={!policyKnown || !routingAvailable}
                 onChange={() => setRoutingMode('auto')}
               />{' '}
               Automatic model and effort <span className="muted">(recommended)</span>
@@ -155,7 +163,8 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
                 type="radio"
                 name="routing-mode"
                 value="manual"
-                checked={routingMode === 'manual' || !routingAvailable}
+                checked={routingMode === 'manual'}
+                disabled={!policyKnown}
                 onChange={() => setRoutingMode('manual')}
               />{' '}
               Manual
@@ -163,6 +172,18 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
               <span className="muted">Choose the model and the effort yourself.</span>
             </label>
           </p>
+          {!policyKnown ? (
+            <p className="muted" role="status">
+              Checking whether this controller offers automatic routing…
+            </p>
+          ) : null}
+          {routingPolicy.error !== null ? (
+            <p className="banner warn" role="status">
+              <strong>Could not ask the controller about automatic routing: </strong>
+              {routingPolicy.error.message} Manual selection still works, and this run
+              will use the model and effort you choose below.
+            </p>
+          ) : null}
           {!routingAvailable && routingPolicy.data !== null ? (
             <p className="banner warn" role="status">
               <strong>Automatic routing is unavailable: </strong>
@@ -234,7 +255,11 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
           </label>
         </p>
         <div className="stack">
-          <button className="action primary" type="submit" disabled={saving || requirement.trim() === ''}>
+          <button
+            className="action primary"
+            type="submit"
+            disabled={saving || requirement.trim() === '' || !policyKnown}
+          >
             {saving ? 'Creating…' : 'Create run'}
           </button>
           <a className="action" href="/runs">

@@ -14,12 +14,9 @@ import { z } from 'zod'
 const SCHEMA_VERSION = z.literal(1)
 const loose = z.object({}).passthrough()
 
-export const TIERS = ['economy', 'standard', 'premium'] as const
-export const BANDS = ['simple', 'standard', 'complex', 'critical'] as const
-export const FLOORS = ['low', 'standard', 'high', 'critical'] as const
+/** The automatic strategies. The controller reports these too; this is the
+ *  compile-time copy the request schemas validate against. */
 export const STRATEGIES = ['balanced', 'quality_first', 'cost_first'] as const
-export const ROUTING_MODES = ['auto', 'manual'] as const
-export const CONFIDENCES = ['high', 'medium', 'low'] as const
 
 /**
  * A telemetry figure with its provenance attached.

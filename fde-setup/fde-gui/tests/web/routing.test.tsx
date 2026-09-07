@@ -369,6 +369,55 @@ describe('the new-run routing preview', () => {
     expect(body.effort).toBeUndefined()
   })
 
+  it('does not show a mode as chosen before it knows the answer', async () => {
+    // A pending answer is not the same as "unavailable", and showing the
+    // recommended option as selected while quietly creating a manual run is the
+    // one outcome the brief forbids.
+    const held: { release: (() => void) | null } = { release: null }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/claude/accounts') return jsonResponse(accountsResponse)
+      if (url === '/api/routing/policy') {
+        await new Promise<void>((resolve) => { held.release = resolve })
+        return jsonResponse(policyResponse)
+      }
+      return jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] })
+    }))
+    render(<NewRunForm />)
+    expect(await screen.findByText(/Checking whether this controller offers/))
+      .toBeInTheDocument()
+    expect(screen.getByLabelText(/Automatic model and effort/)).toBeDisabled()
+    expect(screen.getByLabelText(/^Manual/)).toBeDisabled()
+    expect(screen.getByLabelText(/^Manual/)).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Create run' })).toBeDisabled()
+    await waitFor(() => expect(held.release).not.toBeNull())
+    held.release?.()
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Automatic model and effort/)).toBeEnabled())
+  })
+
+  it('says so when it cannot ask the controller at all', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/claude/accounts') return jsonResponse(accountsResponse)
+      if (url === '/api/routing/policy') {
+        return jsonResponse({
+          type: 'about:fde/controller-unavailable',
+          title: 'The fde controller is not available.',
+        }, 503)
+      }
+      return jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] })
+    }))
+    render(<NewRunForm />)
+    expect(await screen.findByText(/Could not ask the controller about automatic routing/))
+      .toBeInTheDocument()
+    expect(screen.getByText(/controller is not available/)).toBeInTheDocument()
+    // Exactly one mode is selected, and it is the one that still works.
+    expect(screen.getByLabelText(/^Manual/)).toBeChecked()
+    expect(screen.getByLabelText(/Automatic model and effort/)).not.toBeChecked()
+    expect(screen.getByLabelText(/Model/)).toBeEnabled()
+  })
+
   it('says automatic routing is unavailable rather than offering it', async () => {
     stub({
       policy: {
@@ -691,6 +740,48 @@ describe('the run view execution matrix', () => {
     })} />)
     expect(await screen.findByText(/could not be read/)).toBeInTheDocument()
     expect(screen.getByText(/not schema 1/)).toBeInTheDocument()
+  })
+
+  it('shows an unknown retry ceiling as unknown, not as zero', async () => {
+    stub({
+      ...matrixRouting,
+      routing: {
+        ...matrixRouting.routing,
+        limits: { maxCostUnits: 60, maxAutomaticTier: 'standard', maxAutomaticEffort: 'high' },
+        tasks: [{
+          ...matrixRouting.routing.tasks[0],
+          escalationCeiling: { tier: 'premium', effort: 'high', maxRetries: null },
+        }],
+      },
+    })
+    render(<RoutingMatrix run={runWithRouting()} />)
+    await screen.findByText('Approved ceilings')
+    expect(screen.getByRole('row', { name: /Retries/ })).toHaveTextContent('not recorded')
+    expect(screen.getByRole('row', { name: /Retries/ })).not.toHaveTextContent('0 per task')
+    expect(screen.getByText(/retry count not recorded/)).toBeInTheDocument()
+  })
+
+  it('shows the append-only ledger behind the replayed attempts', async () => {
+    stub(matrixRouting, {
+      ...matrixAttempts,
+      ledger: [
+        { ...matrixAttempts.attempts[0], classification: null, outcome: 'fail' },
+        {
+          ...matrixAttempts.attempts[0],
+          at: '2026-09-07T11:35:00+00:00',
+          supersedes: { attempt: 1 },
+          recordedBy: 'poornima',
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<RoutingMatrix run={runWithRouting()} />)
+    await user.click(await screen.findByText(/^Attempts \(/))
+    await user.click(screen.getByText(/Full ledger \(2 lines\)/))
+    expect(screen.getByText(/attempt 1 recorded/)).toBeInTheDocument()
+    expect(screen.getByText(/attempt 1 judged.*invalid-contract.*by poornima/))
+      .toBeInTheDocument()
+    expect(screen.getByText(/Nothing here was\s+rewritten/)).toBeInTheDocument()
   })
 
   it('has no control that approves a plan', async () => {

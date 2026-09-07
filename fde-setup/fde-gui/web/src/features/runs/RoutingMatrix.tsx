@@ -309,7 +309,11 @@ function Ceilings({ run, decision, attempts }: {
           </tr>
           <tr>
             <th scope="row">Retries</th>
-            <td>{limits.maxRetries ?? 0} per task</td>
+            <td>
+              {typeof limits.maxRetries === 'number'
+                ? `${limits.maxRetries} per task`
+                : 'not recorded'}
+            </td>
           </tr>
           <tr>
             <th scope="row">Agents</th>
@@ -405,8 +409,8 @@ function TaskDetail({ run, task, onChanged }: {
             <tr>
               <th scope="row">Attempts</th>
               <td>
-                {task.progress.attempts} recorded ({task.progress.retries} retry,{' '}
-                {task.progress.escalations} escalation),{' '}
+                {task.progress.attempts} recorded — {task.progress.retries} beyond
+                the first, of which {task.progress.escalations} escalated —{' '}
                 <CostUnits value={task.progress.spentCostUnits} /> spent
                 {task.progress.lastOutcome
                   ? ` · last outcome: ${task.progress.lastOutcome}`
@@ -672,6 +676,37 @@ function Attempts({ attempts }: { attempts: RoutingAttemptsResponse | null }): J
           </tbody>
         </table>
       </div>
+      {attempts.ledger.length > attempts.attempts.length ? (
+        <details>
+          <summary>
+            Full ledger ({attempts.ledger.length} line
+            {attempts.ledger.length === 1 ? '' : 's'})
+          </summary>
+          <p className="muted">
+            Recording an outcome appends a line rather than editing the attempt it
+            describes, so the table above is this ledger replayed. Nothing here was
+            rewritten.
+          </p>
+          <ul>
+            {attempts.ledger.map((line, index) => (
+              <li key={`${line.taskId}-${line.attempt}-${index}`}>
+                {formatTime(line.at)} · <span className="mono">{line.taskId}</span>{' '}
+                attempt {line.attempt}
+                {line.supersedes === null || line.supersedes === undefined
+                  ? ' recorded'
+                  : ' judged'}
+                : {line.outcome ?? 'unjudged'}
+                {line.classification === null || line.classification === undefined
+                  ? ''
+                  : ` (${line.classification})`}
+                {line.recordedBy === null || line.recordedBy === undefined
+                  ? ''
+                  : ` by ${line.recordedBy}`}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </details>
   )
 }

@@ -364,6 +364,25 @@ after that every invocation is checked against it. `fde routing preview`,
 weights, quality floors and ceilings — yours to edit, and preserved across
 updates. Costs are relative cost units, never money.
 
+Retries are bounded and have to be earned: a failure needs a classification
+before the budget is spent again, one of them buys a same-tier retry and the rest
+climb a frozen ladder, and the approved retry count, tier, effort and cost units
+are all hard stops rather than guidance. Every attempt keeps its own artifact, so
+the cheap attempt that failed is still there as the reason the expensive one was
+allowed. Usage is recorded with its provenance — reported by a provider,
+estimated by the controller, or unavailable — and never as a zero standing in for
+a measurement nobody made.
+
+`fde routing report` reads all of it back and produces calibration
+recommendations for a person. It changes no policy, and nothing reads it back as
+configuration.
+
+The console offers the same thing on **New run**: automatic model and effort as
+the recommended mode, a debounced preview showing the complexity band, the model,
+the estimated cost and an expandable "Why this choice?", and an execution matrix
+on the run itself that keeps account identity, specialist method, model and
+effort as four separate columns. Nothing in the console approves anything.
+
 Manual selection is still the default and still works exactly as before, as do
 runs created before any of this existed. See
 [docs/FDE-CONTROLLER-CONTRACTS.md](docs/FDE-CONTROLLER-CONTRACTS.md#routing).

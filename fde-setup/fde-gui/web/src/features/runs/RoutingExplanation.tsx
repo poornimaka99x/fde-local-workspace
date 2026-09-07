@@ -116,7 +116,9 @@ export function Ceiling({ ceiling }: {
     <span>
       up to <span className="mono">{ceiling.tier}</span> tier at{' '}
       <span className="mono">{ceiling.effort}</span> effort,{' '}
-      {ceiling.maxRetries ?? 0} retry max
+      {typeof ceiling.maxRetries === 'number'
+        ? `${ceiling.maxRetries} retry max`
+        : 'retry count not recorded'}
     </span>
   )
 }

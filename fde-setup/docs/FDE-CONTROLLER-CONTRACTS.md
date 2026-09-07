@@ -47,6 +47,12 @@ fde routing explain <run-id> [--task-id <task-id>] --json
 fde routing override <run-id> (--task-id <task-id> | --orchestrator)
           [--model <id>] [--effort <e>] [--account <identity>]
           --reason <text> [--approve] --json
+fde routing attempts <run-id> [--task-id <task-id>] --json
+fde routing outcome <run-id> --task-id <task-id> --status pass|fail
+          [--classification transient-provider|invalid-contract|failed-validation|failed-checkpoint]
+          [--evidence <text> ...] [--usage-file <path>] --json
+fde routing report [--project <project-id>] [--since <iso>] [--min-sample N] --json
+fde design-panel create <run-id> ... [--routing manual|auto] [--strategy <s>]
 fde invoke <run-id> <identity> (<task-file> | --task-file <path>)
           [--stage <stage>] [--task-id <task-id>]
 
@@ -770,3 +776,181 @@ one-line refusal. Neither gets a traceback.
 Automatic routing **fails closed**. When it cannot meet a quality floor it says
 so and stops; it does not fall back to `default`, reduce effort, omit a required
 reviewer, or swap one account identity for another to make an answer possible.
+
+## Attempts, retries and escalation
+
+An attempt is not a free action, and the ledger that records them is what makes
+every ceiling enforceable.
+
+`<run>/routing-attempts.jsonl` is append-only. Recording an outcome appends a
+line carrying `supersedes: {attempt, at}` rather than editing the attempt it
+describes, so reading means replaying: the latest line for each `(taskId,
+attempt)` wins. That is why writing down what happened never consumes a retry.
+Each attempt also keeps its own artifact — `<stage>-<agent>-a<N>-<timestamp>.md`
+— because a failed cheap attempt is the evidence that justifies the expensive
+one, and replacing it in place would destroy the only reason the escalation was
+allowed.
+
+### What may follow a failed attempt
+
+| Situation | Outcome |
+|---|---|
+| The last attempt passed | Refused: `routing-task-complete` |
+| The last attempt has no recorded outcome | Refused: `routing-attempt-unjudged` |
+| It failed with no classification | Refused: `routing-retry-unclassified` |
+| `transient-provider`, first time at this rung | One same-tier retry |
+| Any other classification, or a second failure at this rung | One rung up the frozen ladder |
+| The approved retry count is used | Refused: `routing-retry-ceiling` (exit 9) |
+| The ladder is at the approved ceiling | Refused: `routing-escalation-ceiling` (exit 9) |
+| The next attempt would pass the approved cost units | Refused: `routing-budget-exhausted` (exit 9) |
+
+The classification list has four entries and none of them is "the answer was not
+what I wanted". A disliked answer is a scoping problem; spending the budget again
+on the same prompt is the most expensive way of not fixing it, and the refusal
+says so.
+
+The cost ceiling is checked on **every** attempt including a task's first,
+because a later task's opening attempt spends from the same approved budget an
+earlier task's retries have already drawn on. `routing.budget_exhausted` is
+appended when a ceiling actually stops work — a read never appends one, so
+`fde routing outcome`'s `nextAttempt` preview and `fde invoke --dry-run` are
+free of side effects and cannot inflate the evidence the calibration report
+reads back.
+
+Escalation climbs only `escalation.ladder` from the policy, never past the
+task's frozen `escalationCeiling`, and never above
+`escalation.requireRecordedFailureAbove` without a recorded failure at that
+rung. `routing.escalated` records each climb with its from/to.
+
+### `routing attempts --json`
+
+Returns `attempts` (the replay, one entry per attempt), `ledger` (every line as
+written), `progress` per task, `spentCostUnits`, `approvedCostUnits`, and a
+`usage` roll-up.
+
+### `routing outcome --json`
+
+Records what an attempt produced. On a failure it answers whether a retry is
+permitted (`retryPermitted`, plus `nextAttempt` or `retryRefusal`) without
+performing one. `--usage-file` takes provider-reported usage as JSON.
+
+## Usage telemetry
+
+Every figure carries its own provenance:
+
+```json
+{"state": "reported",    "value": 1200, "source": "provider report"}
+{"state": "estimated",   "value": 44.0, "source": "policy cost weights; relative units, not money"}
+{"state": "unavailable", "value": null, "reason": "no provider reported this figure"}
+```
+
+Three states and no fourth. An `unavailable` figure carries no value at all,
+because a missing measurement written as `0` is a lie that reads like data — the
+console renders it as "unavailable" for the same reason.
+
+Only these fields are ever stored: `inputTokens`, `outputTokens`,
+`cacheReadTokens`, `cacheWriteTokens`, `totalTokens`, `durationMs`,
+`monetaryCost`, `currency`. It is an allowlist, not a convention: a report
+containing a prompt, an API key or a model's output has those fields dropped and
+their **names** listed in a diagnostic note, so an integration sending them can
+be fixed rather than silently ignored. A negative, non-numeric or non-finite
+value is refused the same way.
+
+A total is `reported` only when **every** recorded attempt reported that field.
+One missing measurement makes the total unknown, and an unknown total is reported
+as `unavailable` with the arithmetic said out loud rather than as the sum of the
+parts that happened to arrive. `durationMs` is measured by the controller, so it
+is `reported`; token counts are not available through the CLI invocation path, so
+they stay `unavailable`.
+
+## Calibration reporting
+
+`fde routing report --json` is read-only. It opens `routing.json`,
+`routing-attempts.jsonl` and `routing-events.jsonl` across runs, writes nothing
+anywhere, and reads the **newest** runs first with `--since` applied before the
+500-run cap.
+
+It reports the band, strategy, confidence and floor mix; attempt, retry and
+escalation counts; estimated cost at approval against estimated cost consumed;
+which usage fields providers actually reported; and `calibration`.
+
+`calibration` carries `minSample` (5 by default), `bands` (the per-band counts
+each recommendation was derived from, so the arithmetic can be checked),
+`recommendations`, `insufficientEvidence`, `policyChanged: false` — a literal, so
+a client can pin it — and a note. Every recommendation carries `applied: false`
+and names the policy field it concerns.
+
+**Nothing here changes policy, and no part of this controller reads this report
+back as configuration.** A pattern below `minSample` is reported as insufficient
+evidence rather than as a recommendation: a policy nudged by three runs would
+drift somewhere nobody chose, and the drift would look like data.
+
+## Design panels
+
+`design-panel create --routing auto [--strategy <s>]` fills in the model and
+effort each participant was not given, from the same shared policy. A panel works
+the `solutioning` stage, so it inherits that stage's quality floor. The strategy
+defaults to the run's own.
+
+What routing does **not** touch: who is in the panel. The participants, their
+order, their lenses and their sealed context are the operator's decisions and the
+entire basis of the panel's independence. The controller compares the participant
+identities before and after routing and refuses to continue (exit 8) if they
+differ or if the same account appears twice — a guarantee, not an intention. The
+sealed context depends on the brief and the inputs, never on which models were
+chosen.
+
+An explicitly chosen model or effort is left exactly as it was. A pinned model is
+priced and tiered **as itself**: the candidate set is narrowed to that model
+before a choice is made, so the recorded `tier`, `estimatedCostUnits` and
+`routingReason` describe what will actually run. A pinned model the policy does
+not offer keeps `routingSource: "operator"`, gets no tier and no cost estimate,
+and the reason is recorded in `routing.notes` — a model the policy never priced
+gets no price.
+
+Each participant records `routingSource` (`auto` or `operator`), `routingReason`,
+`tier`, `qualityFloor` and `estimatedCostUnits`. The reconciler takes its model
+and effort from the approved reconciliation-stage task, failing that the approved
+orchestrator route, failing that the run's session configuration, and records
+which in `reconciliation.modelSource`.
+
+## The console
+
+The console is a client of these contracts and nothing more. It calls controller
+JSON commands, validates every answer against a pinned Zod schema, keeps the
+existing bearer-token and origin checks, and never opens a routing file — it
+cannot, because it has no code that writes one.
+
+| Endpoint | Controller command |
+|---|---|
+| `GET /api/routing/policy` | `version --json` (capabilities + `routingPolicy`) |
+| `POST /api/routing/preview` | `routing preview --requirement-stdin --json` |
+| `GET /api/runs/:runId/routing` | `routing show --json` |
+| `GET /api/runs/:runId/routing/explain` | `routing explain --json` |
+| `GET /api/runs/:runId/routing/attempts` | `routing attempts --json` |
+| `POST /api/runs/:runId/routing/override` | `routing override --json` |
+| `GET /api/routing/report` | `routing report --json` |
+
+Four properties hold across all of it.
+
+**Nothing approves a plan.** There is no endpoint that can clear the
+`APPROVE PLAN` gate, and the UI has no control that tries. An escalating override
+still needs the operator to type `APPROVE ROUTING <run-id>`; the server forwards
+`--approve` only when the phrase it received matches exactly, and always closes
+the controller's stdin so an unconfirmed escalation is refused rather than left
+waiting for an answer nobody is there to type.
+
+**The request text is never argv.** A requirement goes to the controller's stdin,
+so a request beginning with a dash is text. Every other argv-bound value is
+pattern- or enum-constrained before it gets near a command line.
+
+**A routing refusal arrives as itself.** The controller's typed error is parsed
+back out of its JSON envelope, so the browser sees `routing-below-floor` and can
+say something useful about it rather than "the controller refused this request".
+
+**Automatic routing is offered only when it exists.** `routingPolicy.state`
+distinguishes available from unavailable, and the console distinguishes both from
+"not asked yet": while the answer is pending neither mode is shown as selected
+and the run cannot be created, because showing the recommended option as chosen
+while quietly creating a manual run on `default` is the one outcome the whole
+mechanism exists to prevent. A failing policy endpoint is said out loud.

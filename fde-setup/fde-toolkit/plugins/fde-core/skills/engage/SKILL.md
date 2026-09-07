@@ -36,6 +36,8 @@ fde roles <run-id> --set <role>=<identity>
 fde routing show <run-id> --json
 fde routing explain <run-id> [--task-id <task-id>] --json
 fde routing override <run-id> --task-id <task-id> --reason "<why>"
+fde routing outcome <run-id> --task-id <task-id> --status pass|fail [--classification <r>]
+fde routing attempts <run-id> --json
 fde approve-plan <run-id>
 fde status <run-id>
 fde checkpoint <run-id> --stage <stage> --status <status> --evidence <item>
@@ -74,6 +76,15 @@ fde resume <run-id> --next
 - Invoke a routed run only with `--task-id <task-id>` naming an approved task.
   The frozen decision is the authority for the model and effort; never pass your
   own.
+- Record what every attempt produced with `fde routing outcome`. A failure needs
+  a classification before a retry is permitted, and there is no classification
+  for "the answer was not what I wanted" — if the output was simply not useful,
+  change the task or the plan instead of re-running it. Never retry to see if a
+  second roll is better.
+- Never work around a ceiling. When the controller reports a retry, escalation or
+  cost ceiling, stop and tell the user what it would take, in their terms. Report
+  usage exactly as the record states it: reported, estimated, or unavailable —
+  never a zero standing in for a measurement nobody made.
 - Guard connector/repository access with `fde guard` and invoke only identities
   assigned to the applicable role/stage.
 - `APPROVE CODEX <run-id>` is required for each exact Codex write task.

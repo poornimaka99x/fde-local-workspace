@@ -363,6 +363,55 @@ fde approve-plan <run-id> --reapprove
 
 The old freeze is kept on the record as a superseded approval, not deleted.
 
+### When an attempt fails
+
+Retries are bounded and have to be earned. `fde invoke` records each attempt; you
+say what it produced:
+
+```bash
+fde routing outcome <run-id> --task-id solutioning-1 --status fail \
+  --classification transient-provider --evidence "provider returned 529"
+fde routing attempts <run-id>          # every attempt, and what each cost
+```
+
+There are four classifications — `transient-provider`, `invalid-contract`,
+`failed-validation`, `failed-checkpoint` — and none of them is "the answer was
+not what I wanted". A transient provider failure buys one retry at the same
+model; anything else climbs one rung of the frozen ladder. When the approved
+retry count, the escalation ceiling or the cost ceiling is reached, the
+controller stops and tells you, rather than spending past what you approved.
+Every attempt keeps its own artifact, so the cheap attempt that failed is still
+there as the reason the expensive one was allowed.
+
+Token counts are not available through this invocation path, so they are recorded
+as unavailable rather than as zero. If you have provider figures, pass them:
+`--usage-file usage.json` stores only the allowlisted numeric fields.
+
+### Reading back what it cost
+
+```bash
+fde routing report                     # everything with a routing record
+fde routing report --project <id> --since 2026-09-01
+```
+
+Bands, strategies, retries, escalations, estimated cost consumed against
+estimated cost at approval, and calibration recommendations. The recommendations
+are **for you to read**: nothing in this toolkit updates its own routing policy,
+and a pattern seen fewer than five times is reported as insufficient evidence
+rather than as advice.
+
+### Design panels
+
+```bash
+fde design-panel create <run-id> --routing auto --brief "…" \
+  --participant claude_work:flow --participant claude_msc:visual
+```
+
+Fills in each participant's model and effort from the same policy. Who is in the
+panel is never routed — that is the operator's decision and the whole basis of
+the panel's independence — and a model you pin yourself is left exactly as you
+set it.
+
 Costs are shown in **cost units** — relative weights from
 `~/.claude-shared/config/routing-policy.json`, not money. There are no provider
 prices in this toolkit, and every figure is labelled an estimate. Edit that file
