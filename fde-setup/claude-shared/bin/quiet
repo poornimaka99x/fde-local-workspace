@@ -17,6 +17,7 @@
 #   QUIET_TAIL=15        trailing lines of the log to show on failure
 #   QUIET_LOG_DIR        where logs go (default ${TMPDIR}/quiet-logs)
 #   QUIET_KEEP=1         print everything (escape hatch, same log path)
+#   QUIET_NO_RTK=1       skip the rtk hand-off and use the built-in filter
 set -uo pipefail
 
 [[ $# -gt 0 ]] || { echo "usage: quiet [--] <command> [args...]" >&2; exit 64; }
@@ -30,6 +31,47 @@ mkdir -p "$log_dir" 2>/dev/null || log_dir="${TMPDIR:-/tmp}"
 
 slug="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
 log="$log_dir/${slug}-$(date +%Y%m%d-%H%M%S)-$$.log"
+
+# ---------------------------------------------------------------- rtk hand-off --
+# rtk (github.com/rtk-ai/rtk) is a Rust output compressor that knows 100+ dev
+# commands and filters them far better than the generic patterns below. quiet
+# stays the single entry point either way: if rtk is installed and recognises
+# this command, hand off to it; otherwise filter locally. Nothing in the toolkit
+# changes when rtk is installed or removed.
+#
+# Deliberately NOT wired through `rtk init -g`. Global hooks also rewrite the
+# reads and diffs that review findings cite, and a finding that blocks a merge
+# has to quote what is actually in the file, not a compressed rendering of it.
+# The dev loop is where the tokens are; the evidence path is left alone.
+rtk_knows() {  # rtk_knows <command-name>
+  [[ "${QUIET_NO_RTK:-}" == "1" ]] && return 1
+  command -v rtk >/dev/null 2>&1 || return 1
+
+  local cache="${TMPDIR:-/tmp}/.quiet-rtk-commands"
+  if [[ ! -s "$cache" ]] || [[ -n "$(find "$cache" -mmin +1440 2>/dev/null)" ]]; then
+    # Ask rtk what it supports rather than hard-coding a list that goes stale.
+    # A parse that yields nothing means we never delegate — failing closed here
+    # costs some tokens; failing open would corrupt a command's output.
+    rtk --help 2>/dev/null | awk '
+      /^[A-Za-z]+ *:?$/ && tolower($0) ~ /commands|subcommands/ { inlist = 1; next }
+      /^[A-Za-z]/ { inlist = 0 }
+      inlist && match($0, /^[ \t]+[a-z][a-z0-9_-]*/) {
+        cmd = substr($0, RSTART, RLENGTH); gsub(/[ \t]/, "", cmd)
+        if (cmd != "help") print cmd
+      }
+    ' | sort -u > "$cache" 2>/dev/null || : > "$cache"
+  fi
+  [[ -s "$cache" ]] && grep -qxF "$1" "$cache"
+}
+
+if rtk_knows "$1"; then
+  started=$SECONDS
+  rtk "$@"
+  rc=$?
+  printf 'quiet: via rtk (exit %d, %ds). QUIET_NO_RTK=1 quiet %s for the unfiltered capture.\n' \
+    "$rc" "$(( SECONDS - started ))" "$1" >&2
+  exit $rc
+fi
 
 started=$SECONDS
 "$@" >"$log" 2>&1

@@ -25,6 +25,8 @@ a CTO and the engineers who will maintain it.
 - Run tests and builds through `quiet <cmd>` (e.g. `quiet npm test`). It prints
   failures and a summary instead of the whole log, and always names the full log
   file if you need more. Never re-run a command just to see the output again.
+  Where `rtk` is installed, `quiet` hands off to it; there are no global rtk
+  hooks, so reads and diffs reach you exactly as they are on disk.
 
 ## The other identities on this machine
 

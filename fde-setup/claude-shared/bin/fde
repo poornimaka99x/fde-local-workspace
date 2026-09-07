@@ -2322,6 +2322,33 @@ def check_harness_config():
     return OK, "manifests, roles, MCP scope, secrets and bypass flags clean"
 
 
+def check_rtk():
+    """The optional output compressor behind `quiet`.
+
+    Advisory on purpose: `quiet` filters on its own when rtk is absent, so a
+    missing binary costs tokens, never correctness. Global rtk hooks are NOT
+    wanted here — they would also rewrite the reads and diffs that review
+    findings cite — so an installed rtk with `init -g` applied is worth saying
+    out loud rather than leaving to be discovered in a bad review."""
+    rtk = shutil.which("rtk")
+    if not rtk:
+        return WARN, "not installed — brew install rtk (quiet filters without it)"
+    hooked = []
+    candidates = {HOME / ".claude" / "settings.json",
+                  pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR",
+                                              HOME / ".claude")) / "settings.json"}
+    for settings in sorted(candidates):
+        try:
+            if "rtk" in settings.read_text():
+                hooked.append(str(settings))
+        except OSError:
+            continue
+    if hooked:
+        return WARN, (f"{rtk} — but rtk appears in {hooked[0]}; global hooks also "
+                      "rewrite review evidence. quiet calls rtk directly.")
+    return OK, f"{rtk} — quiet hands off to it for the commands it knows"
+
+
 def check_design_sources():
     """The vendored design references, against their checked-in lock.
 
@@ -2382,6 +2409,7 @@ def cmd_doctor(args):
 
     _row(rows, "Atlassian MCP", *check_atlassian(), required=True)
     _row(rows, "Confluence CLI", *check_confluence())
+    _row(rows, "rtk output compressor", *check_rtk())
     _row(rows, "DOCX intake", *check_docx())
     _row(rows, "Run directory", *check_runs_dir(), required=True)
     _row(rows, "Toolkit source", *check_toolkit_source(), required=True)

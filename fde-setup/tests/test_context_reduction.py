@@ -100,6 +100,64 @@ class QuietFiltersWithoutLosing(unittest.TestCase):
         self.assertGreater(len(result.stdout.splitlines()), 300)
 
 
+class QuietHandsOffToRtk(unittest.TestCase):
+    """rtk is optional: absent it costs tokens, never correctness."""
+
+    QUIET = SHARED / "bin" / "quiet"
+    HELP = ("RTK: Rust Token Killer\n\nUsage: rtk [OPTIONS] <COMMAND>\n\n"
+            "Commands:\n  ls    tree\n  git   status\n  npm   packages\n"
+            "  help  Print this message\n\nOptions:\n  -u, --ultra-compact\n")
+
+    def stub_rtk(self, tmp):
+        d = Path(tmp) / "bin"
+        d.mkdir()
+        rtk = d / "rtk"
+        rtk.write_text('#!/usr/bin/env bash\n'
+                       f'[[ "$1" == "--help" ]] && {{ cat <<\'H\'\n{self.HELP}H\n'
+                       'exit 0; }\n'
+                       'echo "rtk[$1]: compressed"; exit 7\n')
+        rtk.chmod(0o755)
+        cache = Path(tmp) / "cache"
+        cache.mkdir()
+        return {"PATH": f"{d}:{os.environ['PATH']}", "TMPDIR": str(cache)}
+
+    def test_known_command_is_delegated_and_exit_code_survives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = sh(self.QUIET, "npm", "test", env=self.stub_rtk(tmp))
+            self.assertIn("rtk[npm]: compressed", result.stdout)
+            self.assertEqual(result.returncode, 7)
+
+    def test_unknown_command_still_uses_the_builtin_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = sh(self.QUIET, "bash", "-c", 'seq 1 200; echo "200 passed"',
+                        env=self.stub_rtk(tmp), expected=0)
+            self.assertIn("200 passed", result.stdout)
+            self.assertIn("log:", result.stdout)
+            self.assertNotIn("compressed", result.stdout)
+
+    def test_supported_command_list_is_parsed_from_rtk_help(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = self.stub_rtk(tmp)
+            sh(self.QUIET, "ls", env=env)
+            listed = (Path(env["TMPDIR"]) / ".quiet-rtk-commands").read_text().split()
+            self.assertEqual(sorted(listed), ["git", "ls", "npm"])
+            # "help" is rtk's own, and section headings are not commands: a
+            # parse that swept those up would delegate commands rtk cannot run.
+            self.assertNotIn("help", listed)
+            self.assertNotIn("Options", listed)
+
+    def test_opt_out_skips_rtk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**self.stub_rtk(tmp), "QUIET_NO_RTK": "1"}
+            result = sh(self.QUIET, "npm", "--version", env=env)
+            self.assertNotIn("compressed", result.stdout)
+
+    def test_no_global_rtk_hooks_are_shipped(self):
+        # Global hooks would also rewrite the reads a review finding cites.
+        hooks = (PLUGIN / "hooks" / "hooks.json").read_text()
+        self.assertNotIn("rtk", hooks)
+
+
 class SidecarPrefixIsCacheable(unittest.TestCase):
     """A prefix that shifts by one byte is a full cache miss."""
 

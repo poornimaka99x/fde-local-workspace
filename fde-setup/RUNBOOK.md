@@ -27,6 +27,25 @@ For `cc-bedrock`, run it then `/setup-bedrock` inside it and follow the wizard.
 **Check:** `cc-which` lists four profiles. `fde doctor` prints a status table and
 exits 0. Anything marked `BROKEN*` is a required component and blocks the rest.
 
+### Optional: rtk, the output compressor
+
+`quiet` filters test and build output on its own. Where `rtk` is installed it
+hands off to it instead, because rtk knows 100+ dev commands properly rather
+than by regex:
+
+```bash
+brew install rtk
+rtk --version
+fde doctor            # the "rtk output compressor" row should read ok
+```
+
+**Do not run `rtk init -g`.** Global hooks rewrite every agent's `git`, `ls` and
+file reads as well as its test output — including the reads a review agent cites
+when it blocks a merge, and a finding has to quote what is actually in the file.
+`quiet` calls rtk directly for the dev loop and leaves the evidence path alone;
+`fde doctor` warns if global hooks appear in your Claude settings. Nothing breaks
+if rtk is absent, and `QUIET_NO_RTK=1 quiet <cmd>` bypasses it per call.
+
 Re-running the installer later is safe: `./install.sh --update` never deletes,
 shows a diff before replacing anything you have customised, backs up what it
 replaces into `~/.claude-shared/.backups/<timestamp>/`, and leaves client

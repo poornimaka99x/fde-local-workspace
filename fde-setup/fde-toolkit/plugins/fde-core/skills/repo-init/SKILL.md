@@ -77,7 +77,7 @@ for the files an agent should never spend context on:
 ```json
 {
   "permissions": {
-    "allow": ["Bash(quiet:*)", "Bash(<test cmd>:*)", "Bash(<lint cmd>:*)"],
+    "allow": ["Bash(quiet:*)", "Bash(rtk:*)", "Bash(<test cmd>:*)", "Bash(<lint cmd>:*)"],
     "deny": [
       "Read(./.env)", "Read(./.env.*)", "Read(./**/secrets/**)",
       "Read(./**/node_modules/**)", "Read(./**/dist/**)",

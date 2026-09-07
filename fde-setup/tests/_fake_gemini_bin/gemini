@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-while [[ $# -gt 0 ]]; do
-  [[ "$1" == "-p" ]] && { printf "%s" "$2"; exit 0; }
-  shift
-done
