@@ -53,7 +53,7 @@ export default function ClaudeLoginPanel({
       }
       connection.onerror = () => setError(new ApiError(0, 'terminal', 'The login terminal connection dropped.'))
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not start Claude login.'))
+      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not start account login.'))
     }
   }
 
@@ -68,10 +68,10 @@ export default function ClaudeLoginPanel({
         <button className="action" type="button" onClick={() => void start()}>Login to {account.label}</button>
       ) : (
         <>
-          <p className="muted">Complete the Claude sign-in flow below. Credentials are handled by Claude Code, not this GUI.</p>
+          <p className="muted">Complete the provider sign-in flow below. Credentials are handled by its CLI, not this GUI.</p>
           <TerminalView
             ref={terminal}
-            ariaLabel="Claude account login terminal"
+            ariaLabel="Chat account login terminal"
             readOnly={session.status !== 'running'}
             onInput={(data) => send({ type: 'input', data })}
             onResize={(cols, rows) => send({ type: 'resize', cols, rows })}

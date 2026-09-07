@@ -263,6 +263,9 @@ export const statusSchema = z
     attachments: z.array(attachmentSchema).default([]),
     outputHygiene: hygieneSchema.nullish(),
     session: sessionSchema,
+    // Additive: a run without a design panel answers null, and an older
+    // controller simply omits the field.
+    designPanel: loose.nullish(),
     warnings: z.array(z.string()).default([]),
   })
   .passthrough()

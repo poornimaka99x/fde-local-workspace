@@ -91,6 +91,7 @@ export function registerHealthRoutes(
         fde: { path: config.fdeBin, present: isExecutable(config.fdeBin) },
         fdeStart: { path: config.fdeStartBin, present: isExecutable(config.fdeStartBin) },
         claude: { path: config.claudeBin, present: isExecutable(config.claudeBin) },
+        codex: { path: config.codexBin, present: isExecutable(config.codexBin) },
       },
       // Names only. No credential file is opened, and none is reported.
       claudeProfiles: profiles.map((name) => ({

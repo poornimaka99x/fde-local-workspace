@@ -14,6 +14,7 @@ export interface GuiConfig {
   fdeBin: string
   fdeStartBin: string
   claudeBin: string
+  codexBin: string
   home: string
   sharedRoot: string
   runsRoot: string
@@ -27,6 +28,12 @@ export interface GuiConfig {
   maxTextPreviewBytes: number
   bodyLimitBytes: number
   maxUploadBytes: number
+  /** One design-panel participant's wall-clock ceiling. */
+  panelTimeoutMs: number
+  /** How many participant subprocesses this console will run at once. */
+  panelConcurrency: number
+  /** The largest proposal this console will carry back to the controller. */
+  panelMaxProposalBytes: number
 }
 
 /** The GUI is a local operator console. It never listens anywhere else. */
@@ -54,17 +61,17 @@ function intFrom(value: string | undefined, fallback: number, label: string): nu
   return parsed
 }
 
-function resolveClaudeBin(home: string, env: NodeJS.ProcessEnv): string {
-  if (env.FDE_CLAUDE_BIN?.trim()) return env.FDE_CLAUDE_BIN.trim()
+function resolveCliBin(name: 'claude' | 'codex', override: string | undefined, env: NodeJS.ProcessEnv): string {
+  if (override?.trim()) return override.trim()
   for (const directory of (env.PATH ?? '').split(path.delimiter)) {
     if (!directory) continue
-    const candidate = path.join(directory, 'claude')
+    const candidate = path.join(directory, name)
     if (isExecutable(candidate)) return candidate
   }
   // Claude Desktop's claude-code-vm contains a Linux guest binary on macOS;
   // it must not be mistaken for a host CLI. The native `claude` command must
   // be installed on PATH or named explicitly with FDE_CLAUDE_BIN.
-  return 'claude'
+  return name
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
@@ -92,7 +99,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
     token: env.FDE_GUI_TOKEN?.trim() || randomBytes(32).toString('base64url'),
     fdeBin,
     fdeStartBin,
-    claudeBin: resolveClaudeBin(home, env),
+    claudeBin: resolveCliBin('claude', env.FDE_CLAUDE_BIN, env),
+    codexBin: resolveCliBin('codex', env.FDE_CODEX_BIN, env),
     home,
     sharedRoot,
     runsRoot,
@@ -107,6 +115,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
     bodyLimitBytes: 64 * 1024,
     // The controller's own ceiling. Configurable downward only, like the
     // controller's: neither a caller nor an environment may raise it.
+    panelTimeoutMs: intFrom(env.FDE_GUI_PANEL_TIMEOUT_MS, 900_000, 'FDE_GUI_PANEL_TIMEOUT_MS'),
+    // Three is the panel ceiling in the controller too: a panel is two or three
+    // accounts, and running more processes than that would mean running
+    // something this console was not asked to run.
+    panelConcurrency: Math.min(3, intFrom(env.FDE_GUI_PANEL_CONCURRENCY, 3, 'FDE_GUI_PANEL_CONCURRENCY') || 3),
+    panelMaxProposalBytes: Math.min(
+      1024 * 1024,
+      intFrom(env.FDE_GUI_PANEL_MAX_PROPOSAL_BYTES, 1024 * 1024, 'FDE_GUI_PANEL_MAX_PROPOSAL_BYTES') ||
+        1024 * 1024,
+    ),
     maxUploadBytes: Math.min(
       100 * 1024 * 1024,
       intFrom(env.FDE_GUI_MAX_UPLOAD_BYTES, 100 * 1024 * 1024, 'FDE_GUI_MAX_UPLOAD_BYTES') ||

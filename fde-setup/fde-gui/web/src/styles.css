@@ -59,6 +59,11 @@ a { color: var(--accent); }
 .skip-link:focus { left: 8px; top: 8px; }
 
 .layout { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+/* A grid item is min-width:auto by default, so one wide table used to widen the
+   whole track — and, once the sidebar stacked below it on a narrow screen, the
+   sidebar with it. Both columns may shrink; wide content scrolls inside its own
+   container instead of pushing the page sideways. */
+.layout > * { min-width: 0; }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } }
 
 .sidebar {
@@ -81,7 +86,7 @@ a { color: var(--accent); }
   position: sticky; top: 0; z-index: 2; flex-wrap: wrap;
 }
 .topbar .root { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
-main { padding: 20px; max-width: 1180px; }
+main { padding: 20px; max-width: 1180px; min-width: 0; }
 
 h1 { font-size: 20px; margin: 0 0 4px; }
 h2 { font-size: 16px; margin: 24px 0 8px; }
@@ -193,3 +198,57 @@ details summary { cursor: pointer; color: var(--text-muted); }
   display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 30;
 }
 .modal { width: min(640px, 100%); max-height: 85vh; overflow: auto; }
+
+/* -- design panel ------------------------------------------------------- */
+
+/* Announcements and step context for screen readers, without a visual echo. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.panel-steps { list-style: none; display: flex; gap: 16px; flex-wrap: wrap; margin: 0 0 12px; padding: 0; }
+.panel-steps li { color: var(--text-muted); }
+.panel-steps li[aria-current='step'] { color: var(--text); font-weight: 600; }
+
+.checklist { list-style: none; margin: 8px 0; padding: 0; }
+.checklist li { padding: 3px 0; }
+.checklist label { display: inline-flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+
+.participant-row { background: var(--surface-2); }
+
+fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 14px; }
+legend { padding: 0 6px; }
+
+/* The stacked-layout rule for the sidebar sits here rather than beside the
+   grid rule above: `.sidebar` is declared after that media block, so the
+   earlier override never applied and a stacked sidebar kept a full viewport of
+   empty height. */
+@media (max-width: 860px) {
+  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
+/* A panel page is read on a laptop beside a terminal as often as on a wide
+   screen; nothing here may depend on horizontal room it might not have. */
+@media (max-width: 700px) {
+  .grid { grid-template-columns: 1fr; }
+  .form-grid { grid-template-columns: 1fr; }
+  .panel-steps { flex-direction: column; gap: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Digests and paths are long and unbreakable. Inside a card they wrap rather
+   than widening the page; a wide table scrolls in its own container. */
+.card .mono, .participant-facts td { overflow-wrap: anywhere; }
+/* Rendered artifacts carry digests and paths with no break opportunity. They
+   wrap rather than widening the page they are shown in. */
+.md { overflow-wrap: anywhere; }
+.participant-facts { table-layout: fixed; }

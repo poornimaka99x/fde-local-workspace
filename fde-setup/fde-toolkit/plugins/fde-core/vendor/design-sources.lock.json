@@ -1,0 +1,701 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-06T12:39:42+00:00",
+  "sources": {
+    "awesome-design-md": {
+      "sourceUrl": "https://github.com/voltagent/awesome-design-md",
+      "commit": "8147538b4226ae41e2487a9179e3bcc1f68e8554",
+      "commitDate": "2026-07-31T15:32:38+03:00",
+      "license": "MIT",
+      "licenseFile": "awesome-design-md/LICENSE",
+      "role": "Design-language reference catalog. Data for the operator to choose from; never an executable skill.",
+      "importedPaths": [
+        "LICENSE",
+        "design-md/*/DESIGN.md"
+      ],
+      "reviewedAt": "2026-09-06",
+      "reviewNote": "Markdown catalog only: 74 entries, no scripts, no workflows, no package metadata, no binaries. Imported as data for operator selection.",
+      "adapterVersion": "1.0.0",
+      "fileCount": 76,
+      "totalBytes": 2207269,
+      "treeSha256": "6734bf30c2c31e4b6fdff9d31cd32527ca6a6449a924f4289aafd11c296387aa",
+      "files": [
+        {
+          "path": "awesome-design-md/LICENSE",
+          "upstreamPath": "LICENSE",
+          "bytes": 1066,
+          "sha256": "6d4bdc9a9cf30e7beb593475fdcdbf29f981ea6bd7923f202866145409f87b44",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/catalog.json",
+          "upstreamPath": "(generated)",
+          "bytes": 56168,
+          "sha256": "39428fbdf56d6ef6992027768368d3710ecca07b37cab723f8de15b5bf458c77",
+          "adapted": true
+        },
+        {
+          "path": "awesome-design-md/design-md/airbnb/DESIGN.md",
+          "upstreamPath": "design-md/airbnb/DESIGN.md",
+          "bytes": 30517,
+          "sha256": "add34130d67209ad105346d60fe2b290728b9711683969db4b7760e29477a5fe",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/airtable/DESIGN.md",
+          "upstreamPath": "design-md/airtable/DESIGN.md",
+          "bytes": 35266,
+          "sha256": "1d225e511213044d3c705bde50265ad010932bfd8a15740a144dd4f480128889",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/apple/DESIGN.md",
+          "upstreamPath": "design-md/apple/DESIGN.md",
+          "bytes": 37096,
+          "sha256": "83fbc614443a9b3d7569e9956a43e7b8740f9d0f939f58b8154f7a7cec3002b2",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/binance/DESIGN.md",
+          "upstreamPath": "design-md/binance/DESIGN.md",
+          "bytes": 39918,
+          "sha256": "378ff97d568ccbc316519b9d45a29d6649ed8961c9c486c3ed4cea7501d72371",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/bmw-m/DESIGN.md",
+          "upstreamPath": "design-md/bmw-m/DESIGN.md",
+          "bytes": 30697,
+          "sha256": "824a1707c0a8d1609d72477d0fa211b9ebe4bdeb3e1fd701790af7b7bb669a4a",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/bmw/DESIGN.md",
+          "upstreamPath": "design-md/bmw/DESIGN.md",
+          "bytes": 27907,
+          "sha256": "b7268279e7c98e85fb80890e06765f4ee8340ba1ea1ccb5a8a5b134de43dac3e",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/bugatti/DESIGN.md",
+          "upstreamPath": "design-md/bugatti/DESIGN.md",
+          "bytes": 28535,
+          "sha256": "375f0a20ada88cdee5e995ca7edcfbd584ddf5f887024deebd1bc75bfd55b1bc",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/cal/DESIGN.md",
+          "upstreamPath": "design-md/cal/DESIGN.md",
+          "bytes": 31176,
+          "sha256": "8cd21b7d67e94c899843d517f4b426e4fee33d47354a433d6a63ebcf79d5a654",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/claude/DESIGN.md",
+          "upstreamPath": "design-md/claude/DESIGN.md",
+          "bytes": 33586,
+          "sha256": "3d972f34f8d4f33b442fa28220cf3b7ca2f13c0a97c468e3988148f82521f9df",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/clay/DESIGN.md",
+          "upstreamPath": "design-md/clay/DESIGN.md",
+          "bytes": 25705,
+          "sha256": "1abd803a207fbe950a06e155adcd6013c2e149b13e7b88844f5069f9d3d99eb3",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/clickhouse/DESIGN.md",
+          "upstreamPath": "design-md/clickhouse/DESIGN.md",
+          "bytes": 25986,
+          "sha256": "50987e29b603cc7503ebe724af810fcf43845e96fdd4083e0fbe5fe00d2cdd2e",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/cohere/DESIGN.md",
+          "upstreamPath": "design-md/cohere/DESIGN.md",
+          "bytes": 20020,
+          "sha256": "1c49a5a5f88d43841d4f4afa33831328d47a5715048700a3b75086a822575883",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/coinbase/DESIGN.md",
+          "upstreamPath": "design-md/coinbase/DESIGN.md",
+          "bytes": 25853,
+          "sha256": "c8c67800dd7f58fcc87ed7d267a3bba862e3419e499e8a66d67731a69d2de1d6",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/composio/DESIGN.md",
+          "upstreamPath": "design-md/composio/DESIGN.md",
+          "bytes": 20606,
+          "sha256": "e7db886dabecca61f29b83e8f46d7a1e8a43889d30b81bc6e48162ccaafcbb2f",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/cursor/DESIGN.md",
+          "upstreamPath": "design-md/cursor/DESIGN.md",
+          "bytes": 21771,
+          "sha256": "a3db9b3019dc2f514fdee7cd0ca0a5232c0bd0119e23178e8eebaf6916258d9d",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/dell-1996/DESIGN.md",
+          "upstreamPath": "design-md/dell-1996/DESIGN.md",
+          "bytes": 34592,
+          "sha256": "e186c614b1223fe7015670472ac6bc84b5b3fdd5de5325b3ce5bfb7fbe9c8d6e",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/elevenlabs/DESIGN.md",
+          "upstreamPath": "design-md/elevenlabs/DESIGN.md",
+          "bytes": 20943,
+          "sha256": "3b359acfaafadbb499c7ed3eebe813a76e0be497a7157b77de207fe275068a66",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/expo/DESIGN.md",
+          "upstreamPath": "design-md/expo/DESIGN.md",
+          "bytes": 21660,
+          "sha256": "1be7e129b6f75afaa12318a7c51ab22f6f74a214dec22c4827cecc519f112363",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/ferrari/DESIGN.md",
+          "upstreamPath": "design-md/ferrari/DESIGN.md",
+          "bytes": 24365,
+          "sha256": "1199e2832641cac7e384aaf3b1f3db87f992240cea5d3d1eee04d9dc00acb17c",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/figma/DESIGN.md",
+          "upstreamPath": "design-md/figma/DESIGN.md",
+          "bytes": 32316,
+          "sha256": "716ce8431f47eb8b8135552710e3c4d538bccccf1202e4ceac5428c9aada9972",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/framer/DESIGN.md",
+          "upstreamPath": "design-md/framer/DESIGN.md",
+          "bytes": 29119,
+          "sha256": "a5d47dddacf5a04577cec0be6fe0fc53b7402254c7686874af3e59bcc7588cb4",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/hashicorp/DESIGN.md",
+          "upstreamPath": "design-md/hashicorp/DESIGN.md",
+          "bytes": 28023,
+          "sha256": "d2df9be72d867e48d318fd18db04e60a78357c27e392ab921fc2ba7f46951442",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/hp/DESIGN.md",
+          "upstreamPath": "design-md/hp/DESIGN.md",
+          "bytes": 36335,
+          "sha256": "4c9a248046684bdde5311a0c9881814f50e2381c2b0f3c75b02a35fc64bc8bb8",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/ibm/DESIGN.md",
+          "upstreamPath": "design-md/ibm/DESIGN.md",
+          "bytes": 26481,
+          "sha256": "46f6fd65b5e7524fed1133b9b3c0dd619f9a0f145fbb2b87f3675c701a88f3bd",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/intercom/DESIGN.md",
+          "upstreamPath": "design-md/intercom/DESIGN.md",
+          "bytes": 23278,
+          "sha256": "962be23cd947e87a86b2ffbc0440e9d0808243a6ef3af2aa04e8e7cc04d48ba3",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/kraken/DESIGN.md",
+          "upstreamPath": "design-md/kraken/DESIGN.md",
+          "bytes": 4350,
+          "sha256": "41bcbd5642c926a549f0d50f1151484c5776b4536233240c8415cfb79bcf1f38",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/lamborghini/DESIGN.md",
+          "upstreamPath": "design-md/lamborghini/DESIGN.md",
+          "bytes": 21119,
+          "sha256": "9aa68c53b481a0befdf72859db5625f85454122294509989aa58414aaee04b34",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/linear.app/DESIGN.md",
+          "upstreamPath": "design-md/linear.app/DESIGN.md",
+          "bytes": 24354,
+          "sha256": "30bd30e72c48a16e4bdbd010f2d1c85fab657c6fae3cc85389399aab10f9cb5f",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/lovable/DESIGN.md",
+          "upstreamPath": "design-md/lovable/DESIGN.md",
+          "bytes": 17384,
+          "sha256": "92790895c833104072643929ba56ebbf42c8f88ffb7bff1926462545d0ace6c7",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/mastercard/DESIGN.md",
+          "upstreamPath": "design-md/mastercard/DESIGN.md",
+          "bytes": 26995,
+          "sha256": "e76ceaa187f43bd24b8338d2b2314e71e9225b36492e40f32a55782281a10437",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/meta/DESIGN.md",
+          "upstreamPath": "design-md/meta/DESIGN.md",
+          "bytes": 37986,
+          "sha256": "306dfad97c006d47b134fb0dbd55ff68d3baa526844d6eb37346373c9ef35339",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/minimax/DESIGN.md",
+          "upstreamPath": "design-md/minimax/DESIGN.md",
+          "bytes": 37920,
+          "sha256": "2658b96488bb629749259b152c5ba2912a0e8feb6a03477e265879abd9264c50",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/mintlify/DESIGN.md",
+          "upstreamPath": "design-md/mintlify/DESIGN.md",
+          "bytes": 44083,
+          "sha256": "754ffcf35dcd39ef8aef450085ce936aaca5b872ff92caa66be99e91a5c3d5ec",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/miro/DESIGN.md",
+          "upstreamPath": "design-md/miro/DESIGN.md",
+          "bytes": 36542,
+          "sha256": "87c71f76297277d64f9679e015a50da88e72d86d7b41badf8733eae1e4cde335",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/mistral.ai/DESIGN.md",
+          "upstreamPath": "design-md/mistral.ai/DESIGN.md",
+          "bytes": 35508,
+          "sha256": "40e2c692d72c54bae1e43446e2d059b71d773668d39d71ccb7ededa9fa07d145",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/mongodb/DESIGN.md",
+          "upstreamPath": "design-md/mongodb/DESIGN.md",
+          "bytes": 32077,
+          "sha256": "4523f10efd5ccd46f9aeac3b98626e24bcf907bc0c1e46500cb0e3920f932e71",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/nike/DESIGN.md",
+          "upstreamPath": "design-md/nike/DESIGN.md",
+          "bytes": 36697,
+          "sha256": "d2a3d363665839e2ddc15c91b8a9f3e92b1962ff55a7ca5d964ab3bb88b8186c",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/nintendo-2001/DESIGN.md",
+          "upstreamPath": "design-md/nintendo-2001/DESIGN.md",
+          "bytes": 38977,
+          "sha256": "9630af17090d5c39ba9d8b5915a597a96c7552efe1422b3b8c3f31fb3e636716",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/notion/DESIGN.md",
+          "upstreamPath": "design-md/notion/DESIGN.md",
+          "bytes": 35176,
+          "sha256": "fa9d6e78216d8f3e5d3990709ca2de6bc2e268e945bb94f255fd1bfb15455266",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/nvidia/DESIGN.md",
+          "upstreamPath": "design-md/nvidia/DESIGN.md",
+          "bytes": 35591,
+          "sha256": "d649be85daf075c98a17071e707e3901c6e19150044a81716acd01ef1169cc83",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/ollama/DESIGN.md",
+          "upstreamPath": "design-md/ollama/DESIGN.md",
+          "bytes": 32747,
+          "sha256": "3f36f897e5aad870344dd97e282c8f125ad208dc99449bb08dd38b9259d2f451",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/opencode.ai/DESIGN.md",
+          "upstreamPath": "design-md/opencode.ai/DESIGN.md",
+          "bytes": 32647,
+          "sha256": "d1a8893c4b8ac90b1e86230eee2effa8bd15add3582853477920e32432336dda",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/pinterest/DESIGN.md",
+          "upstreamPath": "design-md/pinterest/DESIGN.md",
+          "bytes": 36392,
+          "sha256": "26a202fd244e9213d5e2475d81581828da1dd97e089e44639d9783d04f96e4a8",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/playstation/DESIGN.md",
+          "upstreamPath": "design-md/playstation/DESIGN.md",
+          "bytes": 39766,
+          "sha256": "2a56c109af6cb847fa091b768f719b498ac56b582d010860e73ea5fb72a1590d",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/posthog/DESIGN.md",
+          "upstreamPath": "design-md/posthog/DESIGN.md",
+          "bytes": 40498,
+          "sha256": "01f497f751d56296bfcd5eb8806325a4bb4786d364941ec6e65c65fa9ee6d362",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/raycast/DESIGN.md",
+          "upstreamPath": "design-md/raycast/DESIGN.md",
+          "bytes": 41275,
+          "sha256": "6e2c5137e4d914b70996d589688374a801b6f29a35c9c019c22abb5e0170bda3",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/renault/DESIGN.md",
+          "upstreamPath": "design-md/renault/DESIGN.md",
+          "bytes": 30076,
+          "sha256": "b343df9a67e57f248e9eee704f52b17dff9cf6a46d1dc9f8d7ab36741940db59",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/replicate/DESIGN.md",
+          "upstreamPath": "design-md/replicate/DESIGN.md",
+          "bytes": 31495,
+          "sha256": "c22062d7b4174bf9ced7bc61c48389086cf6eed96a958e098ee70389893b0a15",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/resend/DESIGN.md",
+          "upstreamPath": "design-md/resend/DESIGN.md",
+          "bytes": 31461,
+          "sha256": "99536f1b2380511a539f7f3466d46d351e4bf35a5af0c0df395bdc20af05c9be",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/revolut/DESIGN.md",
+          "upstreamPath": "design-md/revolut/DESIGN.md",
+          "bytes": 32034,
+          "sha256": "b7fa8473315541f5d7e7d76f68a77105d255e6dae00d31d5eb34621d1d52de59",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/runwayml/DESIGN.md",
+          "upstreamPath": "design-md/runwayml/DESIGN.md",
+          "bytes": 14353,
+          "sha256": "b0e69bf643f89bb57ac0b82a3bf025e59ff1478c244cb0528ad1e38b3f80dac9",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/sanity/DESIGN.md",
+          "upstreamPath": "design-md/sanity/DESIGN.md",
+          "bytes": 21231,
+          "sha256": "ea1c442de2b23443f79af46524a81f33951606c8ff043ea9c25ba886264fbdd8",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/sentry/DESIGN.md",
+          "upstreamPath": "design-md/sentry/DESIGN.md",
+          "bytes": 35444,
+          "sha256": "655c91d7d23b5e869a966b7f1b63ae650567ad5d69003cfc64b0ee62c8e02c1f",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/shopify/DESIGN.md",
+          "upstreamPath": "design-md/shopify/DESIGN.md",
+          "bytes": 27067,
+          "sha256": "495e89b8d0a1848ded013c040f7a2ae62077e9d87fc4385350e25dee02ccdb38",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/slack/DESIGN.md",
+          "upstreamPath": "design-md/slack/DESIGN.md",
+          "bytes": 24529,
+          "sha256": "03cb243015a2e11d0faf05caba7f3d0c7fda6839b1f5ce707a23e8d46d1a11bd",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/spacex/DESIGN.md",
+          "upstreamPath": "design-md/spacex/DESIGN.md",
+          "bytes": 19679,
+          "sha256": "495450c79faab54d12d677649ca0a2c30a60f64f536a802e945ad54185c5baad",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/spotify/DESIGN.md",
+          "upstreamPath": "design-md/spotify/DESIGN.md",
+          "bytes": 12955,
+          "sha256": "72e964a6cf551d0603f9854f2f42ee08e97ad4d9e17e037f50f6233508288295",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/starbucks/DESIGN.md",
+          "upstreamPath": "design-md/starbucks/DESIGN.md",
+          "bytes": 37329,
+          "sha256": "e20338ee10226c63cf2588207288c08e12d60754a53f681657adaf364dfe8fa7",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/stripe/DESIGN.md",
+          "upstreamPath": "design-md/stripe/DESIGN.md",
+          "bytes": 24606,
+          "sha256": "5c8806b7dd3e0c2554ccba9d1e2a7c78e7c6e50e44fcf6ff5daea6026f8a9ed9",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/supabase/DESIGN.md",
+          "upstreamPath": "design-md/supabase/DESIGN.md",
+          "bytes": 21315,
+          "sha256": "f57287d7f44d59e8169dc4b4304ff03c1a2efb37f5433b9c04460caae7710880",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/superhuman/DESIGN.md",
+          "upstreamPath": "design-md/superhuman/DESIGN.md",
+          "bytes": 21877,
+          "sha256": "3640298bd2957aee80ce88eb465a7541ba835ec105cba364a6a621d885c7f34f",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/tesla/DESIGN.md",
+          "upstreamPath": "design-md/tesla/DESIGN.md",
+          "bytes": 22212,
+          "sha256": "19f2f7e6073d708f46d2512e6bab3c7c417cf2b4d9f57ff6ec6f2e056ea942b0",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/theverge/DESIGN.md",
+          "upstreamPath": "design-md/theverge/DESIGN.md",
+          "bytes": 28368,
+          "sha256": "5da2c3116e6845826b043ac115a80896a399efda2cebc0188981fba2ef9bb526",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/together.ai/DESIGN.md",
+          "upstreamPath": "design-md/together.ai/DESIGN.md",
+          "bytes": 38343,
+          "sha256": "aee472c583f55a2f2c7ee1c403a96dddadb3ff6dc518335451f431e313bf43cf",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/uber/DESIGN.md",
+          "upstreamPath": "design-md/uber/DESIGN.md",
+          "bytes": 34760,
+          "sha256": "f30d2257d2d090790332d00ccb16cd2516c3c6008be61ad2ce83c4e991bcc803",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/vercel/DESIGN.md",
+          "upstreamPath": "design-md/vercel/DESIGN.md",
+          "bytes": 41405,
+          "sha256": "d0951b93c2b4ce9840c715c9f9b3e58a386c6c58ae5cc0f804dec3b116b95bd8",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/vodafone/DESIGN.md",
+          "upstreamPath": "design-md/vodafone/DESIGN.md",
+          "bytes": 28106,
+          "sha256": "293a40951e654283978fa744b24177a159d8f2a60f402bc735bf081618af0ef6",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/voltagent/DESIGN.md",
+          "upstreamPath": "design-md/voltagent/DESIGN.md",
+          "bytes": 25915,
+          "sha256": "4457887741ae5e965e205282b03c4bff83e47dd7a03cd7f38c64623a17569fcd",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/warp/DESIGN.md",
+          "upstreamPath": "design-md/warp/DESIGN.md",
+          "bytes": 24438,
+          "sha256": "5b1201f7b1b4e72570d148d1f980fd1cb35e6e4122d48dd271787aa3538a25ad",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/webflow/DESIGN.md",
+          "upstreamPath": "design-md/webflow/DESIGN.md",
+          "bytes": 28179,
+          "sha256": "9230c7b3951371fc2edc04958962e32bb7ec9a9b703aa6b72eaf5c7991b7c984",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/wired/DESIGN.md",
+          "upstreamPath": "design-md/wired/DESIGN.md",
+          "bytes": 23661,
+          "sha256": "eb439dcc573401dc30583f40e7eef8a60b769232da59e524de6dce56d5c3593e",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/wise/DESIGN.md",
+          "upstreamPath": "design-md/wise/DESIGN.md",
+          "bytes": 24586,
+          "sha256": "442df0ad7380efd8712f5574bdca34a73cfb41a2a43454ff459863a6258af547",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/x.ai/DESIGN.md",
+          "upstreamPath": "design-md/x.ai/DESIGN.md",
+          "bytes": 21781,
+          "sha256": "9c9ef45d8c0c3b9a7622833cdff8bd125ed6bf296a82cc7274215276706e52eb",
+          "adapted": false
+        },
+        {
+          "path": "awesome-design-md/design-md/zapier/DESIGN.md",
+          "upstreamPath": "design-md/zapier/DESIGN.md",
+          "bytes": 22995,
+          "sha256": "9aee43ba8ece1b4fd0753b4cad0a29f3497331882fa376f0dd4fea8a018c32fc",
+          "adapted": false
+        }
+      ]
+    },
+    "taste-skill": {
+      "sourceUrl": "https://github.com/leonxlnx/taste-skill",
+      "commit": "ccbc15639c97057cbfcf32ecebc38ef716e4bb37",
+      "commitDate": "2026-08-24T23:23:56+08:00",
+      "license": "MIT",
+      "licenseFile": "taste-skill/LICENSE",
+      "role": "Optional visual-direction guidance pack with three dials. Experimental upstream; never a global rule.",
+      "importedPaths": [
+        "LICENSE",
+        "skills/taste-skill/SKILL.md",
+        "skills/redesign-skill/SKILL.md",
+        "skills/image-to-code-skill/SKILL.md"
+      ],
+      "reviewedAt": "2026-09-06",
+      "reviewNote": "Markdown skills only. The repository's skill.sh is a path lookup and its scripts/ are README asset builders; neither is imported or run. The default design-taste-frontend is upstream-labelled v2 experimental, so it is exposed as an optional versioned pack rather than a global rule.",
+      "adapterVersion": "1.0.0",
+      "fileCount": 5,
+      "totalBytes": 143745,
+      "treeSha256": "85626baba625a3ffe795387963ed45725ad5c5e3e080e9ec4b52ec23aedce386",
+      "files": [
+        {
+          "path": "taste-skill/LICENSE",
+          "upstreamPath": "LICENSE",
+          "bytes": 1065,
+          "sha256": "4575a543ab88dad12ccea7d97e563d0bce5b448b06072e65d3264497dad326df",
+          "adapted": false
+        },
+        {
+          "path": "taste-skill/guidance/design-taste-frontend.md",
+          "upstreamPath": "skills/taste-skill/SKILL.md",
+          "bytes": 87511,
+          "sha256": "d902cf0360854bfb70be30b6be7c44ce1a435bdc71496fe2041ee33047888c38",
+          "adapted": true
+        },
+        {
+          "path": "taste-skill/guidance/image-to-code.md",
+          "upstreamPath": "skills/image-to-code-skill/SKILL.md",
+          "bytes": 36422,
+          "sha256": "483e23ec63f5ae99c2bf2d788800690e6051b6f2ab86bcd18a065a224aa5750e",
+          "adapted": true
+        },
+        {
+          "path": "taste-skill/guidance/redesign-existing-projects.md",
+          "upstreamPath": "skills/redesign-skill/SKILL.md",
+          "bytes": 15357,
+          "sha256": "b68e90f4f6de321580686497d6b008f1ef299dd018031798116a456338015fcd",
+          "adapted": true
+        },
+        {
+          "path": "taste-skill/pack.json",
+          "upstreamPath": "(generated)",
+          "bytes": 3390,
+          "sha256": "a474ffb74703fcb2de8a36b8a1f9bb085568f0cdea147714a7ea993a6e4fd89b",
+          "adapted": true
+        }
+      ]
+    },
+    "impeccable": {
+      "sourceUrl": "https://github.com/pbakaus/impeccable",
+      "commit": "831cabee8b4bc1a2b66e5ae22003e9a19b57d464",
+      "commitDate": "2026-09-05T16:34:46-07:00",
+      "license": "Apache-2.0",
+      "licenseFile": "impeccable/LICENSE",
+      "role": "Optional shaping, critique, audit and polish guidance. Guidance layer only \u2014 no launcher, no engine, no hooks.",
+      "importedPaths": [
+        "LICENSE",
+        "NOTICE.md",
+        "ENGINE_VERSION",
+        "skill/SKILL.src.md",
+        "skill/reference/{shape,critique,audit,polish,craft-floor}.md"
+      ],
+      "reviewedAt": "2026-09-06",
+      "reviewNote": "Guidance markdown only. The upstream skill launcher (skill/scripts/) downloads a platform engine binary, and the upstream plugin ships PostToolUse/Stop hooks; neither is imported. No lifecycle scripts exist in the upstream package. The core skill document is adapted to remove its launcher setup section.",
+      "adapterVersion": "1.0.0",
+      "fileCount": 9,
+      "totalBytes": 94615,
+      "treeSha256": "9e18eeea5d5fe5da0bc30c8ccf727d952fad58454ed69e40854207dd4d30f908",
+      "files": [
+        {
+          "path": "impeccable/LICENSE",
+          "upstreamPath": "LICENSE",
+          "bytes": 10766,
+          "sha256": "02bb8c3b4e70190e3986c0404ad2fd8d639b4f534252d82379cc1b502b6d1812",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/NOTICE-upstream.md",
+          "upstreamPath": "NOTICE.md",
+          "bytes": 503,
+          "sha256": "c60a093c2845fd9fb82f9c6f742ece31f379f8190b535309d32d66c45ccffdcb",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/guidance/audit.md",
+          "upstreamPath": "skill/reference/audit.md",
+          "bytes": 7559,
+          "sha256": "3a7a62764d266c08eece760b01bc24fa45f1543cd26bfc8dfdf28f4dde976a80",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/guidance/craft-floor.md",
+          "upstreamPath": "skill/reference/craft-floor.md",
+          "bytes": 7694,
+          "sha256": "577d5ca8935a61202024dea1654f563e1c493238b2cd4a55d5a564832d4ee0f5",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/guidance/critique.md",
+          "upstreamPath": "skill/reference/critique.md",
+          "bytes": 45576,
+          "sha256": "ea865253745fa1b6521355e0288a7e05c3ace0a45ae4e6b4fd94d85bc7f80f6e",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/guidance/impeccable-core.md",
+          "upstreamPath": "skill/SKILL.src.md",
+          "bytes": 9588,
+          "sha256": "439ef65369f58ff44d023f6d3775699924b1035735026709214e730416cc9e55",
+          "adapted": true
+        },
+        {
+          "path": "impeccable/guidance/polish.md",
+          "upstreamPath": "skill/reference/polish.md",
+          "bytes": 6972,
+          "sha256": "ffa7da1f776fc8122913e62d5a3cd29b86e349053fed68ed3d8320b2a1f72e41",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/guidance/shape.md",
+          "upstreamPath": "skill/reference/shape.md",
+          "bytes": 3907,
+          "sha256": "890ba166dfd7930e5fb868ef3c4fb7a505195f0e8900c35030c1223e5bc302d2",
+          "adapted": false
+        },
+        {
+          "path": "impeccable/pack.json",
+          "upstreamPath": "(generated)",
+          "bytes": 2050,
+          "sha256": "41b37c52647f3ab377393abbf572489f0c71568d849f899afada917a65d1ddd7",
+          "adapted": true
+        }
+      ]
+    }
+  }
+}

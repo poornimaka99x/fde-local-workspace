@@ -11,7 +11,7 @@ export function ChatsView(): JSX.Element {
       <div className="stack" style={{ justifyContent: 'space-between' }}>
         <div>
           <h1>Chats</h1>
-          <p className="lede">General Claude conversations, separate from governed FDE runs.</p>
+      <p className="lede">General Claude, Bedrock and ChatGPT / Codex conversations, separate from governed FDE runs.</p>
         </div>
         <Link className="action" to="/chats/new">New chat</Link>
       </div>

@@ -36,6 +36,13 @@ web page. What it is not: a service, a shared tool, or anything with an account.
 | Terminal → environment | The session gets a fixed allowlist: `HOME`, `PATH`, `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `CLAUDE_PROFILES_DIR`, `LANG`, `TERM`, `COLORTERM`, plus `FDE_CONTROLLER`/`FDE_MCP_SYNC`/`FDE_CLAUDE_BIN` when the operator set them for this server. Anything whose name looks like a credential is dropped even from that list, and diagnostics report variable *names* only. |
 | Terminal → WebSocket | A browser cannot set a header on a WebSocket, so the stream is authenticated by a single-use ticket issued over the authenticated resume call: 32 random bytes, bound to one run, valid for 60 seconds, spent on first use. It is checked *before* the handshake, so an unauthenticated client never gets a socket; the origin check applies to the upgrade too, and a refused upgrade is answered on the raw socket and closed. |
 | Terminal → transcript | The last 256 KiB of screen output is kept in memory so a reattaching tab sees where it got to. It is never written to disk. Closing a tab detaches a viewer and nothing else; stopping is an explicit action, and force-stopping a second one behind a confirmation. On server shutdown running sessions are hung up rather than orphaned — the run itself stays resumable from a terminal. |
+| Panel → account | A design-panel participant is run with `AccountService.profileEnv()` for **one** account: `CLAUDE_CONFIG_DIR` and `CLAUDE_PROFILE` for that profile only, on top of the same fixed session allowlist. No profile's environment is merged with another's, no credential file is opened, and anything whose name looks like a credential is dropped. |
+| Panel → subprocess | `spawn` with `shell: false` and an argument array the browser cannot influence: no executable, flag list, environment, output path, hook, URL or command comes from a request. Participants run with `--tools ''`, `--restricted`, `--strict-mcp-config`, `--no-chrome`, slash commands disabled and plan-only permissions, so concept generation cannot write a repository. At most three run at once; each has a wall-clock ceiling, an output ceiling and a kill on Stop. |
+| Panel → prompt | The controller composes every prompt and hands it to the console for one process. It is never logged, never returned to the browser, and never assembled from a request body. Model output is written by the controller into the run; only the operator-visible proposal and safe metadata are persisted. |
+| Panel → media | Binary bytes never become prompt text. The console feature-detects whether the installed CLI documents a file flag; where it does not, a panel that selected an image is refused before it starts. |
+| Panel → failure text | Provider output is never copied into a log line or a response body. Recognised failures are rewritten into fixed sentences (not logged in, rate limited, model unavailable); everything else becomes one generic sentence. Logs carry an exit code and nothing else. |
+| Panel → browser | The browser may select only server-provided ids: an account, a model, an effort, a lens, a reference and a pack dial inside its own declared range. Everything is validated against the catalogs this server offered, and every controller answer is validated against a pinned `schemaVersion: 1`. |
+| Panel → third party | Vendored design sources are inert markdown, verified against `design-sources.lock.json` before use and refused if they drifted. No hook manifest, launcher, engine binary or lifecycle script is imported, installed or run, by default or otherwise. Guidance text is wrapped in a shared-context block that tells the model to treat it as data. |
 | Input that becomes argv | Project names, descriptions, requirements, shape names and upload filenames are rejected outright if they contain control characters, and are bounded in length. Identifiers are pattern-checked. Everything is passed as an argument array. |
 
 ## What an attacker would have to do
@@ -73,6 +80,14 @@ web page. What it is not: a service, a shared tool, or anything with an account.
   those is a controller command with validated arguments; the console still has
   no way to assign a role, approve a plan, grant a Codex write, deploy or
   publish, and adds none.
+- The console can now run design-panel participants: real Claude processes,
+  one per participant, up to three at a time. They have no tools, no MCP and no
+  write path, and the controller decides which of them may start — but they do
+  spend the operator's provider usage, and a stopped participant is a killed
+  process rather than a cancelled request.
+- A design panel adds no approval and removes none. Plan approval, role
+  approval and the degraded-reconciliation approval are typed by the operator;
+  the console shows the phrase and offers no button for any of them.
 - The console can now start a terminal session. That is the largest surface it
   has: a real process, with the operator's own profile, streaming to a browser
   tab. It is bounded to one command, one run, one process, and a stream nothing

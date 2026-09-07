@@ -28,43 +28,47 @@ export function ClaudeSettings({
   const selected = availableAccounts.find((account) => account.id === accountId) ?? null
   const models = selected?.models ?? []
   const selectedModel = models.find((option) => option.id === model) ?? models[0] ?? null
+  const managedCodex = includeCodex && accountId === 'codex'
 
   useEffect(() => {
-    if (accountId === 'codex' || selected !== null || !availableAccounts[0]) return
+    if ((includeCodex && accountId === 'codex') || selected !== null || !availableAccounts[0]) return
     onAccount(availableAccounts[0].id)
-  }, [accountId, availableAccounts, onAccount, selected])
+  }, [accountId, availableAccounts, includeCodex, onAccount, selected])
 
   useEffect(() => {
-    if (accountId === 'codex') return
+    if (managedCodex) return
     if (selectedModel === null) return
     if (!models.some((option) => option.id === model)) onModel(selectedModel.id)
     if (!selectedModel.efforts.includes(effort)) onEffort(selectedModel.efforts[0] ?? 'auto')
-  }, [accountId, effort, model, models, onEffort, onModel, selectedModel])
+  }, [effort, managedCodex, model, models, onEffort, onModel, selectedModel])
 
   const statusLabel = selected?.authState.replace('_', ' ') ?? null
-  const canLogin = selected?.provider === 'anthropic' && selected.authState !== 'authenticated'
+  const canLogin = (selected?.provider === 'anthropic' || selected?.provider === 'codex') &&
+    selected.authState !== 'authenticated'
 
   return (
     <>
       {accounts.error ? <ErrorState error={accounts.error} /> : null}
       <div className="form-grid">
         <label>
-          <strong>Claude account / Orchestrator</strong>
+          <strong>{includeCodex ? 'Chat account / Orchestrator' : 'Chat account'}</strong>
           <select value={accountId} onChange={(event) => { onAccount(event.target.value); setShowLogin(false) }}>
             {availableAccounts.map((account) => (
               <option key={account.id} value={account.id}>{account.label}</option>
             ))}
-            {includeCodex ? <option value="codex">ChatGPT/Codex</option> : null}
+            {includeCodex && !availableAccounts.some((account) => account.id === 'codex')
+              ? <option value="codex">ChatGPT / Codex</option>
+              : null}
           </select>
         </label>
         <label>
           <strong>Model</strong>
           <select
-            value={accountId === 'codex' ? 'default' : model}
-            disabled={accountId === 'codex' || selected === null}
+            value={managedCodex ? 'default' : model}
+            disabled={managedCodex || selected === null}
             onChange={(event) => onModel(event.target.value)}
           >
-            {(accountId === 'codex' ? [{ id: 'default', label: 'Managed in Codex' }] : models).map((option) => (
+            {(managedCodex ? [{ id: 'default', label: 'Managed in Codex' }] : models).map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
           </select>
@@ -72,11 +76,11 @@ export function ClaudeSettings({
         <label>
           <strong>Effort</strong>
           <select
-            value={accountId === 'codex' ? 'auto' : effort}
-            disabled={accountId === 'codex' || selectedModel === null}
+            value={managedCodex ? 'auto' : effort}
+            disabled={managedCodex || selectedModel === null}
             onChange={(event) => onEffort(event.target.value as ClaudeEffort)}
           >
-            {(accountId === 'codex' ? ['auto'] : selectedModel?.efforts ?? ['auto']).map((option) => (
+            {(managedCodex ? ['auto'] : selectedModel?.efforts ?? ['auto']).map((option) => (
               <option key={option} value={option}>{option === 'auto' ? 'Default' : option}</option>
             ))}
           </select>

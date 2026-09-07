@@ -157,6 +157,7 @@ delivery-plan     intake → development plan
 build             intake → implementation → verification
 pr-review         intake → review → verification
 design-to-build   intake → solution architecture/design → presentation → planning → implementation → verification
+design-panel      intake → solution architecture → adversarial review → reconciliation → presentation
 release           verification → deployment → observability
 operate           intake → observability
 full              all twelve stages
@@ -246,6 +247,14 @@ fde project show <project-id>       its repositories and its runs
 fde start "..." --project <id>      a run inside that project
 fde attach <run-id> <file>          copy an input in, hashed and recorded
 fde attachments <run-id>            what has been attached
+
+                                    a design panel: same context, several accounts
+fde design-panel create <run-id> --brief-file b.md --propose-plan \
+    --participant work:flow --participant msc:visual --participant alt:system
+fde design-panel show <run-id>      participants, digests, next step
+fde design-panel start <run-id> claude_work --print-prompt
+fde design-panel reconcile <run-id> once two proposals are in
+APPROVE DEGRADED RECONCILIATION <run-id>   yours to type, when only one is
 fde shapes                          the named plan shapes
 mcp-sync --run <run-id>             wire the connector once roles are confirmed
 
@@ -306,6 +315,11 @@ credentials. Symlinks and unknown binary metadata are left untouched.
 | `illegal transition` | you skipped a stage | `fde status <run-id>` shows the next legal one |
 | `GitHub Copilot is not part of this FDE ecosystem` | you called `ask-copilot` | use `ask-ms-copilot` — "Copilot" here always means Microsoft 365 |
 | `no such project` | the project id doesn't exist | `fde projects` |
+| `Roles are not confirmed` on a panel | you tried to start a designer before the combined approval | assign the remaining roles, then `APPROVE PLAN <run-id>` |
+| `Panel participants work the 'solutioning' stage` | the run has not reached it yet | `fde resume <run-id> --next` |
+| `only 1 proposal succeeded` | one account failed or was stopped | retry it, or `fde design-panel approve-degraded <run-id>` |
+| `no '## Comparison' section` | the reconciliation answer arrived in the wrong shape | reconcile again; nothing was written |
+| `does not match design-sources.lock.json` | a vendored design source drifted | `vendor/bin/design-sources audit`, then `update` |
 | `repository path does not exist` | a project repo path is wrong or not yet cloned | give an existing directory; FDE never clones one |
 | `refusing to attach a symlink` | the file you pointed at is a link | attach the real file |
 | `over the ... byte limit` | the attachment is above the 100 MiB ceiling, or a lower one you set | attach a smaller file; the ceiling only goes down |

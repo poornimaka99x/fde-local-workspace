@@ -1,6 +1,7 @@
 import type { AdvisoryLocks } from './locks'
 import type { AccountService } from './accounts'
 import type { ChatService } from './chats'
+import type { DesignPanelService } from './design-panel'
 import type { SessionManager } from './sessions'
 import type { ChangeWatcher } from './watch'
 
@@ -10,4 +11,5 @@ export interface Services {
   sessions: SessionManager
   accounts: AccountService
   chats: ChatService
+  designPanels: DesignPanelService
 }

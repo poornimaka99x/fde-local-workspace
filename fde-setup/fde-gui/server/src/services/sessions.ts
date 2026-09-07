@@ -357,7 +357,7 @@ export function sessionEnv(config: GuiConfig): NodeJS.ProcessEnv {
     COLORTERM: 'truecolor',
   }
   // Installation overrides, when the operator set them for this server.
-  for (const name of ['FDE_CONTROLLER', 'FDE_MCP_SYNC', 'FDE_CLAUDE_BIN'] as const) {
+  for (const name of ['FDE_CONTROLLER', 'FDE_MCP_SYNC', 'FDE_CLAUDE_BIN', 'FDE_CODEX_BIN'] as const) {
     const value = process.env[name]
     if (typeof value === 'string' && value !== '') base[name] = value
   }

@@ -50,6 +50,24 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
 
       <Warnings warnings={run.warnings} />
 
+      {run.designPanel?.panelId ? (
+        <div className="card">
+          <div className="stack" style={{ justifyContent: 'space-between' }}>
+            <span>
+              <strong>This run is a design panel.</strong>{' '}
+              <span className="muted">
+                {run.designPanel.succeededCount ?? 0} of{' '}
+                {run.designPanel.participants?.length ?? 0} proposals in ·{' '}
+                {(run.designPanel.state ?? 'unknown').replace(/_/g, ' ')}
+              </span>
+            </span>
+            <Link className="action" to={`/runs/${run.runId}/design-panel`}>
+              Open the design panel
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       <div className="card">
         <strong>Next</strong>
         <div className="mono">{run.nextAction ?? 'nothing recorded'}</div>

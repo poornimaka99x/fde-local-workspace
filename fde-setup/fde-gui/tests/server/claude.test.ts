@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { authed, makeHarness, type Harness } from './harness'
 import { FakeTerminal, fakeSpawn } from './fake-terminal'
@@ -29,8 +29,47 @@ describe('Claude accounts and general chats', () => {
       id: 'work', profile: 'work', authState: 'authenticated', authMethod: 'test-subscription',
     })
     expect(account.models.find((item: { id: string }) => item.id === 'haiku').efforts).toEqual(['auto'])
+    const codex = response.json().accounts.find((item: { id: string }) => item.id === 'codex')
+    expect(codex).toMatchObject({
+      label: 'ChatGPT / Codex', provider: 'codex', authState: 'authenticated', authMethod: 'ChatGPT',
+    })
+    expect(codex.models.find((item: { id: string }) => item.id === 'gpt-5.6-sol').efforts).toContain('ultra')
     expect(response.payload).not.toContain('.credentials.json')
     expect(response.payload).not.toContain(harness.token)
+  })
+
+  it('starts Codex login through the selected ChatGPT account CLI', async () => {
+    const response = await harness.app.inject({
+      method: 'POST', url: '/api/claude/accounts/codex/login',
+      headers: mutating(harness.token), payload: {},
+    })
+    expect(response.statusCode).toBe(201)
+    expect(FakeTerminal.spawned.at(-1)?.options.file).toBe(harness.config.codexBin)
+    expect(FakeTerminal.spawned.at(-1)?.options.args).toEqual(['login'])
+    expect(FakeTerminal.spawned.at(-1)?.options.env.CLAUDE_CONFIG_DIR).toBeUndefined()
+  })
+
+  it('loads only safe Bedrock routing settings into the restricted chat environment', () => {
+    const bedrock = path.join(harness.config.profilesRoot, 'bedrock')
+    mkdirSync(bedrock, { recursive: true })
+    writeFileSync(path.join(bedrock, 'settings.json'), JSON.stringify({ env: {
+      AWS_PROFILE: 'fde-bedrock',
+      AWS_REGION: 'eu-west-1',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'eu.anthropic.claude-sonnet',
+      AWS_ACCESS_KEY_ID: 'must-not-leak',
+      AWS_SECRET_ACCESS_KEY: 'must-not-leak',
+    } }))
+    const service = new AccountService(harness.config)
+    const env = service.profileEnv('bedrock')
+    expect(env).toMatchObject({
+      AWS_PROFILE: 'fde-bedrock',
+      AWS_REGION: 'eu-west-1',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'eu.anthropic.claude-sonnet',
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_SDK_LOAD_CONFIG: '1',
+    })
+    expect(env.AWS_ACCESS_KEY_ID).toBeUndefined()
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined()
   })
 
   it('starts exactly the selected profile login command in an isolated PTY', async () => {
@@ -134,6 +173,42 @@ describe('Claude accounts and general chats', () => {
     expect(calls[1]?.args).toEqual(expect.arrayContaining(['--resume', chat.claudeSessionId]))
   })
 
+  it('runs ChatGPT chats through Codex with isolated config, read-only sandbox and durable resume', async () => {
+    const calls: Parameters<ChatCommandRunner>[0][] = []
+    const session = '33333333-3333-3333-3333-333333333333'
+    const runner: ChatCommandRunner = (options) => {
+      calls.push(options)
+      const prompt = options.args.at(-1) ?? ''
+      return {
+        completed: Promise.resolve({
+          code: 0,
+          stdout: [
+            JSON.stringify({ type: 'thread.started', thread_id: session }),
+            JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: `Codex reply: ${prompt}` } }),
+          ].join('\n'),
+        }),
+        kill: () => undefined,
+      }
+    }
+    const chats = new ChatService(harness.config, new AccountService(harness.config), runner)
+    const chat = chats.create({ accountId: 'codex', model: 'gpt-5.6-sol', effort: 'ultra', cwd: harness.root })
+    const first = await chats.send(chat.chatId, 'First')
+    await chats.send(chat.chatId, 'Second')
+
+    expect(first.claudeSessionId).toBe(session)
+    expect(first.messages.at(-1)?.content).toBe('Codex reply: First')
+    expect(calls[0]?.file).toBe(harness.config.codexBin)
+    expect(calls[0]?.args).toEqual(expect.arrayContaining([
+      'exec', '--ignore-user-config', '--ignore-rules', '--strict-config',
+      '--sandbox', 'read-only', '-c', 'approval_policy="never"',
+      '--model', 'gpt-5.6-sol', 'model_reasoning_effort="ultra"', 'First',
+    ]))
+    expect(calls[0]?.args).not.toContain('--tools')
+    expect(calls[1]?.args).toEqual(expect.arrayContaining([
+      'exec', 'resume', 'sandbox_mode="read-only"', session, 'Second',
+    ]))
+  })
+
   it('turns Claude login failures into a useful message without exposing output', async () => {
     const runner: ChatCommandRunner = () => ({
       completed: Promise.resolve({
@@ -152,6 +227,20 @@ describe('Claude accounts and general chats', () => {
     const failedSession = failed.claudeSessionId
     await chats.send(chat.chatId, 'Hello again')
     expect(chats.get(chat.chatId).claudeSessionId).not.toBe(failedSession)
+  })
+
+  it('recovers a chat interrupted by a GUI restart instead of leaving it running forever', () => {
+    const accounts = new AccountService(harness.config)
+    const chats = new ChatService(harness.config, accounts)
+    const chat = chats.create({ accountId: 'work', model: 'default', effort: 'auto', cwd: harness.root })
+    const stored = path.join(harness.config.chatsRoot, `${chat.chatId}.json`)
+    writeFileSync(stored, JSON.stringify({ ...chat, status: 'running' }))
+
+    const restarted = new ChatService(harness.config, accounts)
+    expect(restarted.get(chat.chatId)).toMatchObject({
+      status: 'failed',
+      lastError: expect.stringContaining('interrupted'),
+    })
   })
 
   it('bounds text attachments and refuses credential paths', async () => {

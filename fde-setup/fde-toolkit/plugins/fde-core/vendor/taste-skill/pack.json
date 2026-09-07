@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "packId": "taste",
+  "label": "Taste",
+  "source": "taste-skill",
+  "sourceUrl": "https://github.com/leonxlnx/taste-skill",
+  "commit": "ccbc15639c97057cbfcf32ecebc38ef716e4bb37",
+  "license": "MIT",
+  "stability": "experimental",
+  "stabilityNote": "Upstream describes design-taste-frontend v2 as an experimental pre-release that iterates between releases. It is offered as an optional, versioned guidance pack \u2014 never an unconditional rule.",
+  "changes": [
+    "Adds an anti-generic visual direction to independent concept generation.",
+    "Adds three dials \u2014 variance, motion and density \u2014 recorded in the panel manifest.",
+    "Does not change accessibility obligations, product requirements or the project design system."
+  ],
+  "conflictsWith": [
+    "impeccable"
+  ],
+  "dials": [
+    {
+      "id": "variance",
+      "label": "Design variance",
+      "min": 1,
+      "max": 10,
+      "default": 8,
+      "help": "1 = perfect symmetry, 10 = deliberate asymmetry"
+    },
+    {
+      "id": "motion",
+      "label": "Motion intensity",
+      "min": 1,
+      "max": 10,
+      "default": 6,
+      "help": "1 = static, 10 = cinematic; reduced-motion support is required at any value"
+    },
+    {
+      "id": "density",
+      "label": "Visual density",
+      "min": 1,
+      "max": 10,
+      "default": 4,
+      "help": "1 = airy, 10 = packed"
+    }
+  ],
+  "documents": {
+    "primary": "guidance/design-taste-frontend.md",
+    "redesign": "guidance/redesign-existing-projects.md",
+    "imageToCode": "guidance/image-to-code.md"
+  },
+  "phases": {
+    "solutioning": {
+      "documents": [
+        "primary"
+      ],
+      "maxBytes": 20000
+    },
+    "review": {
+      "documents": [],
+      "maxBytes": 0
+    },
+    "reconciliation": {
+      "documents": [],
+      "maxBytes": 0
+    }
+  },
+  "entries": [
+    {
+      "id": "design-taste-frontend",
+      "path": "guidance/design-taste-frontend.md",
+      "title": "design-taste-frontend",
+      "description": "Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check."
+    },
+    {
+      "id": "redesign-existing-projects",
+      "path": "guidance/redesign-existing-projects.md",
+      "title": "redesign-existing-projects",
+      "description": "Upgrades existing websites and apps to premium quality. Audits current design, identifies generic AI patterns, and applies high-end design standards without breaking functionality. Works with any CSS framework or vanilla CSS."
+    },
+    {
+      "id": "image-to-code",
+      "path": "guidance/image-to-code.md",
+      "title": "image-to-code",
+      "description": "Elite website image-to-code skill for Codex. For visually important web tasks, it must first generate the design image(s) itself, deeply analyze them, then implement the website to match them as closely as possible. In Codex, it must prefer large, readable, section-specific images instead of tiny compressed boards, generate fresh standalone images for sections or detail views instead of cropping old ones, avoid lazy under-generation, avoid cards-inside-cards-inside-cards UI, and keep the hero clean, spacious, readable, and visible on a small laptop."
+    }
+  ]
+}

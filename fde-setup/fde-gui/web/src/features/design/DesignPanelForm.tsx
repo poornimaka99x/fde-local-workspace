@@ -1,0 +1,703 @@
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { ApiError, apiSend } from '../../lib/api'
+import { announceChange } from '../../lib/changes'
+import { useApi } from '../../lib/useApi'
+import { formatBytes, shortHash } from '../../lib/format'
+import { ErrorState, Loading } from '../../components/States'
+import { AttachmentUpload } from '../../components/AttachmentUpload'
+import { ClaudeSettings } from '../../components/ClaudeSettings'
+import type {
+  AttachmentRecord,
+  ClaudeAccountsResponse,
+  ClaudeEffort,
+  DesignLensList,
+  DesignPanelResponse,
+  DesignReferenceCatalog,
+  GuidancePackList,
+  ProjectListResponse,
+  RunSummary,
+} from '../../lib/types'
+
+/**
+ * Starting a design panel, in the two steps it actually has.
+ *
+ * A panel is a normal run first — that is what gives it a project, a plan, a
+ * role assignment and a place in history. Only then is its context sealed, and
+ * the form says so plainly, because after that point the inputs cannot change.
+ */
+
+interface ParticipantDraft {
+  accountId: string
+  model: string
+  effort: ClaudeEffort
+  lensId: string
+  lens: string
+}
+
+const OUTPUT_TARGETS = [
+  {
+    id: 'recommendation',
+    label: 'Recommendation only',
+    help: 'One reconciled design recommendation as a document. Nothing is built.',
+  },
+  {
+    id: 'prototype',
+    label: 'Prototype',
+    help: 'Adds a described prototype — screens, states and the surface to build it on.',
+  },
+  {
+    id: 'design-to-code',
+    label: 'Design-to-code handoff',
+    help: 'Adds an implementation handoff. It does not authorise a repository write: implementation stays a separate stage behind its own approval.',
+  },
+] as const
+
+const MODES = [
+  {
+    id: 'independent',
+    label: 'Independent first (recommended)',
+    help: 'No participant sees another proposal until every one of them has finished or failed.',
+  },
+  {
+    id: 'collaborative',
+    label: 'Collaborative',
+    help: 'Staged handoffs are visible to later participants and recorded in the run log.',
+  },
+] as const
+
+export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Element {
+  const search = new URLSearchParams(window.location.search)
+  const [runId, setRunId] = useState<string | null>(search.get('runId'))
+  const [project, setProject] = useState(projectId ?? '')
+  const [brief, setBrief] = useState('')
+  const [orchestrator, setOrchestrator] = useState('work')
+  const [orchestratorModel, setOrchestratorModel] = useState('default')
+  const [orchestratorEffort, setOrchestratorEffort] = useState<ClaudeEffort>('auto')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+  const [status, setStatus] = useState('')
+
+  const projects = useApi<ProjectListResponse>('/api/projects')
+  const accounts = useApi<ClaudeAccountsResponse>('/api/claude/accounts')
+  const lenses = useApi<DesignLensList>('/api/design-panel/lenses')
+  const references = useApi<DesignReferenceCatalog>('/api/design-panel/references')
+  const packs = useApi<GuidancePackList>('/api/design-panel/packs')
+  const attachments = useApi<{ attachments: AttachmentRecord[] }>(
+    runId === null ? null : `/api/runs/${encodeURIComponent(runId)}/attachments`,
+  )
+
+  const eligible = useMemo(
+    () => (accounts.data?.accounts ?? []).filter((account) => account.designPanelEligible),
+    [accounts.data],
+  )
+  const lensOptions = lenses.data?.lenses ?? []
+
+  const [participants, setParticipants] = useState<ParticipantDraft[]>([])
+  const [outputTarget, setOutputTarget] = useState<string>('recommendation')
+  const [mode, setMode] = useState<string>('independent')
+  const [selectedAttachments, setSelectedAttachments] = useState<string[]>([])
+  const [includeProductMd, setIncludeProductMd] = useState(false)
+  const [includeDesignMd, setIncludeDesignMd] = useState(false)
+  const [primaryReference, setPrimaryReference] = useState('')
+  const [secondaryReference, setSecondaryReference] = useState('')
+  const [enabledPacks, setEnabledPacks] = useState<Record<string, Record<string, number>>>({})
+  const [acknowledgeConflict, setAcknowledgeConflict] = useState(false)
+
+  // Three eligible accounts and three lenses is the shape this is for; anything
+  // less still works, and the operator can remove a row.
+  useEffect(() => {
+    if (participants.length > 0 || eligible.length === 0 || lensOptions.length === 0) return
+    setParticipants(
+      eligible.slice(0, Math.min(3, Math.max(2, eligible.length))).map((account, index) => ({
+        accountId: account.id,
+        model: 'default',
+        effort: 'auto' as ClaudeEffort,
+        lensId: lensOptions[index % lensOptions.length]?.id ?? '',
+        lens: '',
+      })),
+    )
+  }, [eligible, lensOptions, participants.length])
+
+  const conflict = useMemo(() => {
+    const on = Object.keys(enabledPacks)
+    for (const pack of packs.data?.packs ?? []) {
+      if (!on.includes(pack.packId)) continue
+      const clash = pack.conflictsWith.find((other) => on.includes(other))
+      if (clash !== undefined) return `${pack.label} and ${clash}`
+    }
+    return null
+  }, [enabledPacks, packs.data])
+
+  const createRun = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    setStatus('Creating the run…')
+    try {
+      const body: Record<string, unknown> = {
+        orchestrator,
+        model: orchestratorModel,
+        effort: orchestratorEffort,
+        shape: 'design-panel',
+        requirement: brief.trim().slice(0, 4000),
+      }
+      if (project !== '') body.projectId = project
+      const created = await apiSend<{ run: RunSummary }>('/api/runs', 'POST', body)
+      announceChange()
+      setRunId(created.run.runId)
+      setStatus(`Run ${created.run.runId} created. Choose the panel's inputs and participants.`)
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not reach the local server.'))
+      setStatus('The run was not created.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createPanel = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    if (runId === null) return
+    setBusy(true)
+    setError(null)
+    setStatus('Sealing the shared context…')
+    try {
+      const referenceIds = [primaryReference, secondaryReference]
+        .filter((value) => value !== '')
+        .filter((value, index, all) => all.indexOf(value) === index)
+      await apiSend<DesignPanelResponse>(
+        `/api/runs/${encodeURIComponent(runId)}/design-panel`,
+        'POST',
+        {
+          brief: brief.trim(),
+          participants: participants.map((participant) => ({
+            accountId: participant.accountId,
+            model: participant.model,
+            effort: participant.effort,
+            lensId: participant.lensId,
+            ...(participant.lens.trim() === '' ? {} : { lens: participant.lens.trim() }),
+          })),
+          mode,
+          outputTarget,
+          attachmentIds: selectedAttachments,
+          includeProductMd,
+          includeDesignMd,
+          referenceIds,
+          packs: enabledPacks,
+          acknowledgePackConflict: acknowledgeConflict,
+          proposePlan: true,
+        },
+      )
+      announceChange()
+      window.history.pushState(null, '', `/runs/${runId}/design-panel`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not reach the local server.'))
+      setStatus('The panel was not created. Nothing has been sealed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const setParticipant = (index: number, patch: Partial<ParticipantDraft>): void => {
+    setParticipants((current) =>
+      current.map((participant, position) =>
+        position === index ? { ...participant, ...patch } : participant))
+  }
+
+  const togglePack = (packId: string, on: boolean): void => {
+    setEnabledPacks((current) => {
+      const next = { ...current }
+      if (!on) {
+        delete next[packId]
+        return next
+      }
+      const pack = (packs.data?.packs ?? []).find((item) => item.packId === packId)
+      next[packId] = Object.fromEntries((pack?.dials ?? []).map((dial) => [dial.id, dial.default]))
+      return next
+    })
+  }
+
+  const duplicateAccounts =
+    new Set(participants.map((participant) => participant.accountId)).size !== participants.length
+  const duplicateLenses =
+    new Set(participants.map((participant) => participant.lensId)).size !== participants.length
+  const canSubmit =
+    runId !== null && participants.length >= 2 && !duplicateAccounts && !duplicateLenses &&
+    brief.trim() !== '' && (conflict === null || acknowledgeConflict) && !busy
+
+  return (
+    <>
+      <h1>Start a design panel</h1>
+      <p className="lede">
+        Two or three Claude accounts are given the same sealed project context, work
+        independently, and are then reconciled into one recommendation. It is a normal FDE run:
+        it appears in the project, it needs your plan and role approval, and every account keeps
+        its own credentials.
+      </p>
+
+      {error ? <ErrorState error={error} /> : null}
+      <p className="visually-hidden" role="status" aria-live="polite">{status}</p>
+
+      <ol className="panel-steps">
+        <li aria-current={runId === null ? 'step' : undefined}>
+          <span className="badge">{runId === null ? '1 · now' : '1 · done'}</span> Create the run
+        </li>
+        <li aria-current={runId !== null ? 'step' : undefined}>
+          <span className="badge">{runId === null ? '2 · next' : '2 · now'}</span> Seal the context and configure the panel
+        </li>
+      </ol>
+
+      {runId === null ? (
+        <form className="card" onSubmit={(event) => void createRun(event)}>
+          <fieldset>
+            <legend><strong>The run</strong></legend>
+            <p>
+              <label htmlFor="panel-project"><strong>Project</strong></label>
+              <br />
+              <select
+                id="panel-project"
+                required
+                value={project}
+                onChange={(event) => setProject(event.target.value)}
+              >
+                <option value="">choose a project…</option>
+                {(projects.data?.projects ?? []).map((option) => (
+                  <option key={option.projectId} value={option.projectId}>
+                    {option.name ?? option.projectId}
+                  </option>
+                ))}
+              </select>
+            </p>
+            <p>
+              <label htmlFor="panel-brief"><strong>Design brief</strong></label>
+              <br />
+              <span className="muted" id="panel-brief-help">
+                What is being designed, for whom, and what would make it good. Every participant
+                gets exactly this text.
+              </span>
+              <br />
+              <textarea
+                id="panel-brief"
+                aria-describedby="panel-brief-help"
+                value={brief}
+                rows={6}
+                required
+                maxLength={20000}
+                style={{ width: '100%', maxWidth: 720 }}
+                onChange={(event) => setBrief(event.target.value)}
+              />
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend><strong>Orchestrator</strong></legend>
+            <p className="muted" style={{ marginTop: 0 }}>
+              The account that holds the run together and, later, reconciles the proposals.
+            </p>
+            <ClaudeSettings
+              accountId={orchestrator}
+              model={orchestratorModel}
+              effort={orchestratorEffort}
+              onAccount={setOrchestrator}
+              onModel={setOrchestratorModel}
+              onEffort={setOrchestratorEffort}
+            />
+          </fieldset>
+          <div className="stack">
+            <button className="action" type="submit" disabled={busy || project === '' || brief.trim() === ''}>
+              {busy ? 'Creating…' : 'Create the run'}
+            </button>
+            <a className="action" href={project === '' ? '/projects' : `/projects/${project}`}>Cancel</a>
+          </div>
+        </form>
+      ) : (
+        <form className="card" onSubmit={(event) => void createPanel(event)}>
+          <p className="banner warn" role="note">
+            <strong>The context is sealed when you create the panel.</strong> Attach everything the
+            panel should see first — after this, participants receive exactly these bytes and
+            nothing else.
+          </p>
+
+          <fieldset>
+            <legend><strong>Design brief</strong></legend>
+            <p style={{ marginTop: 0 }}>
+              <label htmlFor="panel-brief-sealed">
+                <span className="muted">
+                  Every participant receives exactly this text. Edit it here until you seal.
+                </span>
+              </label>
+              <br />
+              <textarea
+                id="panel-brief-sealed"
+                value={brief}
+                rows={5}
+                required
+                maxLength={20000}
+                style={{ width: '100%', maxWidth: 720 }}
+                onChange={(event) => setBrief(event.target.value)}
+              />
+            </p>
+          </fieldset>
+
+          <fieldset>
+            <legend><strong>Shared inputs</strong></legend>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Selected once, for everyone. No participant is given anything the others are not.
+            </p>
+            <AttachmentUpload runId={runId} onUploaded={attachments.reload} />
+            {attachments.loading ? <Loading label="Listing attachments…" /> : null}
+            {(attachments.data?.attachments ?? []).length === 0 ? (
+              <p className="muted">Nothing attached yet. A brief on its own is a valid panel.</p>
+            ) : (
+              <ul className="checklist">
+                {(attachments.data?.attachments ?? []).map((attachment) => (
+                  <li key={attachment.attachmentId}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selectedAttachments.includes(attachment.attachmentId)}
+                        onChange={(event) =>
+                          setSelectedAttachments((current) =>
+                            event.target.checked
+                              ? [...current, attachment.attachmentId]
+                              : current.filter((id) => id !== attachment.attachmentId))}
+                      />{' '}
+                      {attachment.originalName}{' '}
+                      <span className="muted">
+                        {attachment.mediaType} · {formatBytes(attachment.size)} ·{' '}
+                        {shortHash(attachment.sha256)}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <ul className="checklist">
+              <li>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={includeProductMd}
+                    onChange={(event) => setIncludeProductMd(event.target.checked)}
+                  />{' '}
+                  Include the project's <code>PRODUCT.md</code> when it exists
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={includeDesignMd}
+                    onChange={(event) => setIncludeDesignMd(event.target.checked)}
+                  />{' '}
+                  Include the project's <code>DESIGN.md</code> when it exists
+                </label>
+              </li>
+            </ul>
+          </fieldset>
+
+          <fieldset>
+            <legend><strong>Participants</strong></legend>
+            {accounts.error ? <ErrorState error={accounts.error} /> : null}
+            {eligible.length < 2 ? (
+              <p className="banner danger" role="alert">
+                Fewer than two configured Claude identities carry the <code>ui-ux-design</code>{' '}
+                capability, so a panel cannot be formed on this machine.
+              </p>
+            ) : null}
+            {duplicateAccounts ? (
+              <p className="banner warn" role="alert">
+                Each account may take part once. The same account twice is one opinion, not a panel.
+              </p>
+            ) : null}
+            {duplicateLenses ? (
+              <p className="banner warn" role="alert">Each participant needs a distinct lens.</p>
+            ) : null}
+            {participants.map((participant, index) => (
+              <div className="card participant-row" key={`participant-${index}`}>
+                <div className="form-grid">
+                  <label>
+                    <strong>Account</strong>
+                    <select
+                      value={participant.accountId}
+                      onChange={(event) => setParticipant(index, {
+                        accountId: event.target.value, model: 'default', effort: 'auto',
+                      })}
+                    >
+                      {eligible.map((account) => (
+                        <option key={account.id} value={account.id}>{account.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <strong>Model</strong>
+                    <select
+                      value={participant.model}
+                      onChange={(event) => setParticipant(index, { model: event.target.value, effort: 'auto' })}
+                    >
+                      {(eligible.find((account) => account.id === participant.accountId)?.models ?? [])
+                        .map((model) => (
+                          <option key={model.id} value={model.id}>{model.label}</option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    <strong>Effort</strong>
+                    <select
+                      value={participant.effort}
+                      onChange={(event) => setParticipant(index, { effort: event.target.value as ClaudeEffort })}
+                    >
+                      {(eligible.find((account) => account.id === participant.accountId)?.models
+                        .find((model) => model.id === participant.model)?.efforts ?? ['auto'])
+                        .map((option) => (
+                          <option key={option} value={option}>
+                            {option === 'auto' ? 'Default' : option}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    <strong>Design lens</strong>
+                    <select
+                      value={participant.lensId}
+                      onChange={(event) => setParticipant(index, { lensId: event.target.value, lens: '' })}
+                    >
+                      {lensOptions.map((lens) => (
+                        <option key={lens.id} value={lens.id}>{lens.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p>
+                  <label htmlFor={`lens-text-${index}`}>
+                    <span className="muted">
+                      Lens brief — edit it to steer this participant. Empty uses the default.
+                    </span>
+                  </label>
+                  <br />
+                  <textarea
+                    id={`lens-text-${index}`}
+                    rows={3}
+                    maxLength={4000}
+                    style={{ width: '100%' }}
+                    placeholder={lensOptions.find((lens) => lens.id === participant.lensId)?.text ?? ''}
+                    value={participant.lens}
+                    onChange={(event) => setParticipant(index, { lens: event.target.value })}
+                  />
+                </p>
+                {participants.length > 2 ? (
+                  <button
+                    className="action"
+                    type="button"
+                    onClick={() => setParticipants((current) =>
+                      current.filter((_item, position) => position !== index))}
+                  >
+                    Remove {participant.accountId}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+            {participants.length < 3 && eligible.length > participants.length ? (
+              <button
+                className="action"
+                type="button"
+                onClick={() => setParticipants((current) => {
+                  const account = eligible.find((item) =>
+                    !current.some((participant) => participant.accountId === item.id))
+                  const lens = lensOptions.find((item) =>
+                    !current.some((participant) => participant.lensId === item.id))
+                  if (account === undefined) return current
+                  return [...current, {
+                    accountId: account.id, model: 'default', effort: 'auto' as ClaudeEffort,
+                    lensId: lens?.id ?? lensOptions[0]?.id ?? '', lens: '',
+                  }]
+                })}
+              >
+                Add a third participant
+              </button>
+            ) : null}
+          </fieldset>
+
+          <fieldset>
+            <legend><strong>What the panel produces</strong></legend>
+            {OUTPUT_TARGETS.map((option) => (
+              <p key={option.id} style={{ margin: '6px 0' }}>
+                <label>
+                  <input
+                    type="radio"
+                    name="output-target"
+                    value={option.id}
+                    checked={outputTarget === option.id}
+                    onChange={() => setOutputTarget(option.id)}
+                  />{' '}
+                  <strong>{option.label}</strong>
+                  <br />
+                  <span className="muted">{option.help}</span>
+                </label>
+              </p>
+            ))}
+          </fieldset>
+
+          <fieldset>
+            <legend><strong>How they work</strong></legend>
+            {MODES.map((option) => (
+              <p key={option.id} style={{ margin: '6px 0' }}>
+                <label>
+                  <input
+                    type="radio"
+                    name="panel-mode"
+                    value={option.id}
+                    checked={mode === option.id}
+                    onChange={() => setMode(option.id)}
+                  />{' '}
+                  <strong>{option.label}</strong>
+                  <br />
+                  <span className="muted">{option.help}</span>
+                </label>
+              </p>
+            ))}
+          </fieldset>
+
+          <fieldset>
+            <legend><strong>Design-language reference</strong> <span className="muted">optional</span></legend>
+            {references.data?.available === false ? (
+              <p className="muted">No reference catalog is vendored on this machine.</p>
+            ) : (
+              <>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  {references.data?.warning ??
+                    'References are inspiration for an original direction, not authorisation to impersonate a brand.'}
+                </p>
+                <div className="form-grid">
+                  <label>
+                    <strong>Primary</strong>
+                    <select value={primaryReference} onChange={(event) => setPrimaryReference(event.target.value)}>
+                      <option value="">none</option>
+                      {(references.data?.entries ?? []).map((entry) => (
+                        <option key={entry.id} value={entry.id}>{entry.id}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <strong>Secondary</strong>
+                    <select
+                      value={secondaryReference}
+                      disabled={primaryReference === ''}
+                      onChange={(event) => setSecondaryReference(event.target.value)}
+                    >
+                      <option value="">none</option>
+                      {(references.data?.entries ?? [])
+                        .filter((entry) => entry.id !== primaryReference)
+                        .map((entry) => (
+                          <option key={entry.id} value={entry.id}>{entry.id}</option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+                {primaryReference !== '' ? (
+                  <p className="muted">
+                    {(references.data?.entries ?? []).find((entry) => entry.id === primaryReference)?.description}
+                    <br />
+                    Source {references.data?.source} at {shortHash(references.data?.commit ?? null)} ({references.data?.license})
+                  </p>
+                ) : null}
+              </>
+            )}
+          </fieldset>
+
+          <fieldset>
+            <legend><strong>Guidance packs</strong> <span className="muted">optional</span></legend>
+            {(packs.data?.packs ?? []).length === 0 ? (
+              <p className="muted">No guidance packs are vendored on this machine.</p>
+            ) : null}
+            {(packs.data?.packs ?? []).map((pack) => {
+              const on = Object.prototype.hasOwnProperty.call(enabledPacks, pack.packId)
+              return (
+                <div className="card" key={pack.packId}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(event) => togglePack(pack.packId, event.target.checked)}
+                    />{' '}
+                    <strong>{pack.label}</strong>{' '}
+                    <span className="badge">{pack.license}</span>{' '}
+                    {pack.stability === 'experimental'
+                      ? <span className="badge warn">experimental upstream</span>
+                      : null}
+                  </label>
+                  <ul className="muted">
+                    {pack.changes.map((change) => <li key={change}>{change}</li>)}
+                  </ul>
+                  {pack.stabilityNote ? <p className="muted">{pack.stabilityNote}</p> : null}
+                  {pack.detector?.enabledByDefault === false ? (
+                    <p className="muted">
+                      Its executable detector stays off. Enabling one would download an engine
+                      binary and install editor hooks, which is a separate, explicit decision — and
+                      no hook can bypass this toolkit's approvals.
+                    </p>
+                  ) : null}
+                  {on && pack.dials.length > 0 ? (
+                    <div className="form-grid">
+                      {pack.dials.map((dial) => (
+                        <label key={dial.id}>
+                          <strong>{dial.label}</strong>
+                          <input
+                            type="number"
+                            min={dial.min}
+                            max={dial.max}
+                            step={1}
+                            value={enabledPacks[pack.packId]?.[dial.id] ?? dial.default}
+                            aria-describedby={`dial-help-${pack.packId}-${dial.id}`}
+                            onChange={(event) => setEnabledPacks((current) => ({
+                              ...current,
+                              [pack.packId]: {
+                                ...current[pack.packId],
+                                [dial.id]: Number(event.target.value),
+                              },
+                            }))}
+                          />
+                          <span className="muted" id={`dial-help-${pack.packId}-${dial.id}`}>
+                            {dial.help}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+            {conflict !== null ? (
+              <div className="banner warn" role="alert">
+                <strong>{conflict} give conflicting stylistic direction.</strong>
+                <p style={{ margin: '6px 0 0' }}>
+                  Turn one off, or enable both deliberately — the panel is told they disagree, and
+                  neither overrides accessibility, the brief or the existing design system.
+                </p>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={acknowledgeConflict}
+                    onChange={(event) => setAcknowledgeConflict(event.target.checked)}
+                  />{' '}
+                  Enable both anyway
+                </label>
+              </div>
+            ) : null}
+          </fieldset>
+
+          <div className="stack">
+            <button className="action" type="submit" disabled={!canSubmit}>
+              {busy ? 'Sealing…' : 'Seal context and create the panel'}
+            </button>
+            <a className="action" href={`/runs/${runId}`}>Open the run instead</a>
+          </div>
+          <p className="muted">
+            Creating the panel proposes the plan and selects the designers. It approves nothing:
+            you still type <code>APPROVE PLAN {runId}</code> in the run session before any account
+            starts work.
+          </p>
+        </form>
+      )}
+    </>
+  )
+}

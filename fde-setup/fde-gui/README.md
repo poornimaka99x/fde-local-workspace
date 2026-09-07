@@ -12,6 +12,12 @@ It can also resume a Claude-led run: Resume starts exactly
 streams it to the tab. A Codex-led run is labelled honestly instead — it is
 driven from its own Codex task.
 
+It can also run a **design panel**: two or three Claude accounts are given the
+same sealed project context, work independently, and are reconciled into one
+recommendation. The console runs the accounts; the controller owns the sealed
+context, the participant lifecycle, the information barrier and every artifact.
+See `docs/FDE-DESIGN-PANEL.md`.
+
 General chats are deliberately separate from FDE runs. A chat stores its own
 metadata and messages under `~/.claude-shared/chats`, resumes one opaque Claude
 conversation, and starts Claude in restricted print mode with all tools disabled,
@@ -68,7 +74,10 @@ tab and sends it as a bearer header. A new launch invalidates the old link.
 | `FDE_GUI_TOKEN` | random | fixed token, for tests and scripted launches |
 | `FDE_CONTROLLER` | `$CLAUDE_SHARED/bin/fde` | the controller binary |
 | `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `FDE_CHATS_DIR`, `CLAUDE_PROFILES_DIR` | as the controller's | which FDE roots to use |
-| `FDE_CLAUDE_BIN` | `claude` from `PATH` | native Claude Code CLI used for status, login and chat |
+| `FDE_CLAUDE_BIN` | `claude` from `PATH` | native Claude Code CLI used for status, login, chat and design panels |
+| `FDE_GUI_PANEL_TIMEOUT_MS` | `900000` | wall-clock ceiling for one design-panel participant |
+| `FDE_GUI_PANEL_CONCURRENCY` | `3` | participant subprocesses at once; may only be lowered |
+| `FDE_GUI_PANEL_MAX_PROPOSAL_BYTES` | `1048576` | largest proposal carried back to the controller |
 
 For UI work, `npm run dev:web` runs Vite on `127.0.0.1:5199` and proxies `/api`
 to a server you start separately with `npm run dev:server`.
@@ -86,8 +95,9 @@ server/src/
   schemas/            zod validation of every controller answer
   services/accounts.ts  profile discovery and auth status
   services/chats.ts   durable, tool-disabled Claude conversations
-  routes/             health, projects, runs, files, sessions, Claude and chats
-web/src/              React UI: projects, runs, chats, sessions and health
+  services/design-panel.ts  bounded, isolated participant execution
+  routes/             health, projects, runs, files, sessions, Claude, chats, design panels
+web/src/              React UI: projects, runs, chats, design panels, sessions and health
 tests/                server tests (stub controller) and component tests
 ```
 
@@ -133,6 +143,14 @@ The rules it is built to:
   `claude auth login` for a configured, validated profile. Its PTY uses the same
   one-time WebSocket tickets as run sessions. Bedrock remains externally
   authenticated through AWS credentials.
+- **A design panel is the controller's, not the console's.** Every panel fact
+  comes from `fde design-panel … --json`. The console asks for a participant's
+  prompt, runs that one account under its own profile with all tools disabled,
+  and hands the answer back to `fde design-panel record`. It composes no prompt,
+  writes nothing under `artifacts/design-panel/`, never returns a prompt to the
+  browser, and never logs provider output — only an exit code. Three
+  participants at most, each with a timeout, an output ceiling and a real kill
+  on Stop; work orphaned by a restart becomes a retryable interruption.
 - **General chat has no FDE authority.** Claude starts with `--restricted`,
   `--strict-mcp-config`, `--tools ""`, `--permission-prompts none`,
   `--no-chrome`, disabled slash commands and plan-only permissions. This keeps

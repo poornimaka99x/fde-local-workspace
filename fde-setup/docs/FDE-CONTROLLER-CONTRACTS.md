@@ -35,6 +35,30 @@ fde start [requirement] --project <project-id>
 fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>]
           [--model <alias-or-id>] [--effort auto|low|medium|high|xhigh|max]
           [-- <requirement>]
+
+fde design-panel create <run-id> --json [--brief <text> | --brief-file <path> | --brief-stdin]
+          --participant <agent>:<lens>[:<effort>[:<model>]] ...
+          [--lens <participant>=<text>] [--mode independent|collaborative]
+          [--output recommendation|prototype|design-to-code]
+          [--attachment <attachment-id> ...] [--include-product-md] [--include-design-md]
+          [--reference <catalog-id> ...] [--pack <pack>[:<dial>=<n>,...]]
+          [--acknowledge-pack-conflict] [--media-support none|file]
+          [--propose-plan] [--replace]
+fde design-panel show <run-id> --json
+fde design-panel context <run-id> --json
+fde design-panel start <run-id> <participant-id> [--json | --print-prompt]
+fde design-panel record <run-id> <participant-id> --status ok|failed
+          [--stdin | --file <path>] [--error <text>] [--json]
+fde design-panel stop <run-id> <participant-id> [--json]
+fde design-panel retry <run-id> <participant-id> [--json]
+fde design-panel recover <run-id> [--json]
+fde design-panel approve-degraded <run-id>
+fde design-panel reconcile <run-id> [--json | --print-prompt]
+fde design-panel record-reconciliation <run-id> --status ok|failed
+          [--stdin | --file <path>] [--error <text>] [--json]
+fde design-panel references --json
+fde design-panel packs --json
+fde design-panel lenses --json
 ```
 
 ## Checking compatibility first
@@ -304,3 +328,138 @@ fde attachments <run-id> --json
 They add no state machine, no approval shortcut and no bypass. Plan approval,
 Codex write approval, deployment approval and publication approval are unchanged
 and are still typed by the operator, every time.
+
+## Design panels
+
+A design panel is a normal run in the `design-panel` shape, whose `uiUxDesign`
+role is held by two or three Claude identities. The controller owns the panel
+record exactly as it owns the plan and the roles: `design-panel.json`,
+`artifacts/design-panel/context-manifest.json`, `common-context.md` and every
+proposal are written by `fde` and by nothing else.
+
+### Multi-valued role assignments
+
+`uiUxDesign` joins `research` and `review` as a role a run may give to several
+identities. On the wire that is the existing shape — `assignments.uiUxDesign` is
+a list, and `status --json` reports `multi: true` on that row. **A record written
+when it was single-valued still reads**: a bare string is normalised to a
+one-element list by every reader, and no record is rewritten to migrate it.
+
+### `design-panel show --json`
+
+```json
+{
+  "schemaVersion": 1,
+  "designPanel": {
+    "schemaVersion": 1,
+    "runId": "20260906-returns-aaaa",
+    "panelId": "panel-a1b2c3d4",
+    "state": "running",
+    "mode": "independent",
+    "outputTarget": "recommendation",
+    "rolesConfirmed": true,
+    "pendingRoles": [],
+    "runState": "solutioning",
+    "conceptStageReady": true,
+    "reconcileStageReady": false,
+    "barrierOpenedAt": null,
+    "degradedApprovedAt": null,
+    "context": { "contextSha256": "…", "manifestSha256": "…", "commonContextBytes": 4096 },
+    "contextManifest": { "…the manifest as written…": null },
+    "participants": [
+      {
+        "participantId": "claude_work", "label": "Claude: work",
+        "model": "opus", "effort": "high", "lensId": "flow",
+        "state": "succeeded", "attempts": 1, "durationMs": 61000,
+        "commonContextSha256": "…", "promptSha256": "…",
+        "proposalPath": "artifacts/design-panel/proposals/claude_work.md",
+        "proposalPresent": true, "error": null
+      }
+    ],
+    "succeededCount": 1,
+    "reconciliation": { "state": "pending" },
+    "artifacts": [{ "path": "artifacts/design-panel/final-design.md", "present": false }],
+    "nextAction": "…"
+  },
+  "nextAction": "…"
+}
+```
+
+Participant states are `pending`, `running`, `succeeded`, `failed`, `stopped`
+and `interrupted`. The last four are terminal; only `failed`, `stopped` and
+`interrupted` can be retried.
+
+### `design-panel start --json`
+
+Applies every guard — plan confirmed, roles confirmed, the run in `solutioning`,
+the participant holding `uiUxDesign`, the participant `pending`, at most three
+running — and answers with the exact prompt for that one participant:
+
+```json
+{
+  "schemaVersion": 1, "runId": "…", "panelId": "…", "participantId": "claude_work",
+  "profile": "work", "model": "opus", "effort": "high", "attempt": 1,
+  "commonContextSha256": "…", "promptSha256": "…", "promptBytes": 4096,
+  "prompt": "…the shared context, then this participant's lens block…",
+  "mediaPaths": ["/…/inputs/files/screen-ab12.png"],
+  "proposalPath": "artifacts/design-panel/proposals/claude_work.md"
+}
+```
+
+The shared context is a **strict prefix** of the prompt, and
+`commonContextSha256` is the digest of that prefix. It is identical for every
+participant in a panel, and the controller refuses to start a participant whose
+prompt would break the independent-first barrier.
+
+A reader is expected to run that one account and hand the answer back through
+`design-panel record`. It must not compose a prompt of its own, and must not
+write into `artifacts/design-panel/`.
+
+### `design-panel reconcile --json`
+
+Refuses unless the run is in `reconciliation`, every participant has finished or
+failed, and at least two proposals succeeded — or exactly one did **and**
+`design-panel approve-degraded` has been typed. It opens the information
+barrier, records that opening as an event, and answers with the reconciliation
+prompt, `degraded`, and the orchestrator identity to run it with.
+
+`design-panel record-reconciliation` refuses an answer that does not carry
+`## Comparison`, `## Reconciliation` and `## Final design recommendation` — plus
+`## Design-to-code handoff` when the output target is `design-to-code` — in that
+order, with no empty section. A refused answer writes nothing.
+
+### Events
+
+Appended to the run's `events.jsonl`, append-only like everything else:
+
+```text
+design-panel.created            design-panel.context-sealed
+design-panel.participant.started    design-panel.participant.succeeded
+design-panel.participant.failed     design-panel.participant.stopped
+design-panel.participant.retried    design-panel.interrupted
+design-panel.participants-finished  design-panel.barrier-opened
+design-panel.degraded-approved      design-panel.reconciliation.started
+design-panel.reconciliation.failed  design-panel.reconciliation.completed
+design-panel.final-selected
+```
+
+A degraded-reconciliation approval is also appended to `approvals.jsonl` as
+`design-panel-degraded-approval`. It is a separate record type from the Codex
+and publication approvals and does not appear in the `approvals` view, which
+continues to report only those two.
+
+### `status --json`
+
+Gains one additive field, `designPanel`: `null` for a run without one, a small
+summary otherwise (`panelId`, `state`, `mode`, `outputTarget`, `contextSha256`,
+`participants`, `succeededCount`, `reconciliation.state`). A panel written by a
+schema this controller does not speak answers `{"readable": false}` rather than
+a guess. `schemaVersion` is unchanged: a field was added, not redefined.
+
+### Catalogs
+
+`design-panel references|packs|lenses --json` describe what an operator may
+choose from. They read only the vendored tree under
+`fde-toolkit/plugins/fde-core/vendor/`, verify each file against
+`design-sources.lock.json` before using it, and refuse anything that has drifted
+(exit 2) or is not in the lock at all.

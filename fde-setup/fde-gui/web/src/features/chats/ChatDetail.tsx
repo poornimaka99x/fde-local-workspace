@@ -34,7 +34,7 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
         setError(new ApiError(
           502,
           'claude-failed',
-          result.chat.lastError ?? 'Claude did not complete this message.',
+          result.chat.lastError ?? 'The selected provider did not complete this message.',
         ))
       }
       state.reload()
@@ -51,7 +51,7 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
       await apiSend(`/api/chats/${encodeURIComponent(chatId)}/stop`, 'POST', {})
       state.reload()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not stop Claude.'))
+      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not stop the response.'))
     }
   }
 
@@ -83,6 +83,9 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
   if (state.error && state.data === null) return <ErrorState error={state.error} onRetry={state.reload} />
   const chat = state.data?.chat
   if (!chat) return <Loading label="Loading chat…" />
+  const assistantName = chat.provider === 'codex'
+    ? 'ChatGPT / Codex'
+    : chat.provider === 'bedrock' ? 'Claude on Bedrock' : 'Claude'
 
   return (
     <>
@@ -130,11 +133,11 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
         {chat.messages.length === 0 ? <p className="muted">Send the first message.</p> : null}
         {chat.messages.map((item) => (
           <article className={`chat-message ${item.role}`} key={item.id}>
-            <header><strong>{item.role === 'user' ? 'You' : 'Claude'}</strong><span className="muted">{formatTime(item.createdAt)}</span></header>
+            <header><strong>{item.role === 'user' ? 'You' : assistantName}</strong><span className="muted">{formatTime(item.createdAt)}</span></header>
             {item.role === 'assistant' ? <Markdown source={item.content} /> : <p>{item.content}</p>}
           </article>
         ))}
-        {(sending || chat.status === 'running') ? <div className="chat-message assistant muted" role="status">Claude is responding…</div> : null}
+        {(sending || chat.status === 'running') ? <div className="chat-message assistant muted" role="status">{assistantName} is responding…</div> : null}
       </div>
       <form className="card chat-composer" onSubmit={(event) => void send(event)}>
         <label htmlFor="chat-message"><strong>Message</strong></label>

@@ -51,6 +51,14 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
         A run starts by choosing who orchestrates it and saying what you want. Roles, the plan and
         every approval come next, in the conversation — not here.
       </p>
+      <p className="card">
+        Designing a screen or a flow?{' '}
+        <a href={project === '' ? '/design-panel/new' : `/design-panel/new?projectId=${encodeURIComponent(project)}`}>
+          Start a design panel
+        </a>{' '}
+        instead: two or three Claude accounts get the same sealed context, work independently, and
+        are reconciled into one recommendation.
+      </p>
       {error ? <ErrorState error={error} /> : null}
       <form className="card" onSubmit={(event) => void submit(event)}>
         <p>

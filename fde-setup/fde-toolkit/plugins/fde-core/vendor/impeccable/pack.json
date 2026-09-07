@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "packId": "impeccable",
+  "label": "Impeccable",
+  "source": "impeccable",
+  "sourceUrl": "https://github.com/pbakaus/impeccable",
+  "commit": "831cabee8b4bc1a2b66e5ae22003e9a19b57d464",
+  "license": "Apache-2.0",
+  "stability": "stable",
+  "changes": [
+    "Adds shaping guidance to independent concept generation.",
+    "Adds critique and audit lenses to the review stage.",
+    "Adds polish guidance after reconciliation, never before it.",
+    "Adds no executable detector: the hook and engine layer is off and is a separate, explicit decision."
+  ],
+  "conflictsWith": [
+    "taste"
+  ],
+  "detector": {
+    "enabled": false,
+    "enabledByDefault": false,
+    "engineVersion": "0.1.2",
+    "requires": "an explicit, separately confirmed operator action on the design-sources settings page",
+    "networkBehaviour": "The upstream launcher downloads a platform engine binary from the project's GitHub release channel into ~/.impeccable/bin/<version>/ when it is not already present, verified against a .sha256 sidecar and failing closed when that sidecar is missing. FDE performs no such download and vendors no launcher.",
+    "hooks": "Upstream ships a Claude plugin hook manifest that runs the launcher on PostToolUse (Edit|Write) and on Stop. FDE installs no hook manifest, and an upstream hook could not bypass FDE plan, write, publication or deployment approval if one were installed."
+  },
+  "documents": {
+    "core": "guidance/impeccable-core.md",
+    "shape": "guidance/shape.md",
+    "critique": "guidance/critique.md",
+    "audit": "guidance/audit.md",
+    "polish": "guidance/polish.md",
+    "craftFloor": "guidance/craft-floor.md"
+  },
+  "phases": {
+    "solutioning": {
+      "documents": [
+        "core",
+        "shape"
+      ],
+      "maxBytes": 12000
+    },
+    "review": {
+      "documents": [
+        "critique",
+        "audit"
+      ],
+      "maxBytes": 20000
+    },
+    "reconciliation": {
+      "documents": [
+        "polish",
+        "craftFloor"
+      ],
+      "maxBytes": 12000
+    }
+  }
+}

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 
 import { open, readdir as readdirAsync, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { GuiConfig } from '../config'
-import type { AccountService, Effort } from './accounts'
+import type { AccountService, ChatProvider, Effort } from './accounts'
 
 export const CHAT_ID_PATTERN = /^chat-[0-9]{8}-[a-f0-9]{8}$/
 
@@ -34,7 +34,7 @@ export interface ChatRecord {
   title: string
   accountId: string
   profile: string
-  provider: 'anthropic' | 'bedrock'
+  provider: ChatProvider
   model: string
   effort: Effort
   projectId: string | null
@@ -112,7 +112,7 @@ function isInside(root: string, candidate: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
 }
 
-/** Durable chat metadata and messages; Claude owns the opaque conversation id. */
+/** Durable chat metadata and messages; the provider owns the opaque conversation id. */
 export class ChatService {
   private readonly active = new Map<string, RunningCommand>()
 
@@ -120,7 +120,9 @@ export class ChatService {
     private readonly config: GuiConfig,
     private readonly accounts: AccountService,
     private readonly runCommand: ChatCommandRunner = defaultRunner,
-  ) {}
+  ) {
+    this.recoverInterruptedChats()
+  }
 
   list(): ChatSummary[] {
     let entries: string[] = []
@@ -174,7 +176,7 @@ export class ChatService {
       effort: input.effort,
       projectId: input.projectId ?? null,
       cwd: input.cwd,
-      claudeSessionId: randomUUID(),
+      claudeSessionId: account.provider === 'codex' ? '' : randomUUID(),
       createdAt: now,
       updatedAt: now,
       status: 'idle',
@@ -331,7 +333,9 @@ export class ChatService {
     // A failed first launch may still reserve its session id inside Claude
     // Code. Retrying that chat must start with a fresh opaque id rather than
     // collide with the failed local session record.
-    if (firstTurn && chat.status === 'failed') chat.claudeSessionId = randomUUID()
+    if (firstTurn && chat.status === 'failed') {
+      chat.claudeSessionId = chat.provider === 'codex' ? '' : randomUUID()
+    }
     const now = new Date().toISOString()
     chat.messages.push({ id: randomUUID(), role: 'user', content: prompt, createdAt: now })
     if (chat.title === 'New chat') chat.title = prompt.trim().replace(/\s+/g, ' ').slice(0, 80)
@@ -343,24 +347,44 @@ export class ChatService {
     const context = await this.attachmentContext(chat.attachments)
     const outgoing = context === '' ? prompt : `${context}${prompt}`
 
-    const args = [
-      '--print', outgoing,
-      '--output-format', 'json',
-      '--permission-mode', 'plan',
-      '--permission-prompts', 'none',
-      '--tools', '',
-      '--restricted',
-      '--strict-mcp-config',
-      '--no-chrome',
-      '--disable-slash-commands',
-    ]
-    if (firstTurn) args.push('--session-id', chat.claudeSessionId)
-    else args.push('--resume', chat.claudeSessionId)
-    if (chat.model !== 'default') args.push('--model', chat.model)
-    if (chat.effort !== 'auto') args.push('--effort', chat.effort)
+    const isCodex = chat.provider === 'codex'
+    let args: string[]
+    if (isCodex) {
+      const safety = [
+        '--ignore-user-config',
+        '--ignore-rules',
+        '--strict-config',
+        '--skip-git-repo-check',
+        '--json',
+        '-c', 'approval_policy="never"',
+      ]
+      args = firstTurn
+        ? ['exec', ...safety, '--sandbox', 'read-only']
+        : ['exec', 'resume', ...safety, '-c', 'sandbox_mode="read-only"']
+      if (chat.model !== 'default') args.push('--model', chat.model)
+      if (chat.effort !== 'auto') args.push('-c', `model_reasoning_effort="${chat.effort}"`)
+      if (!firstTurn) args.push(chat.claudeSessionId)
+      args.push(outgoing)
+    } else {
+      args = [
+        '--print', outgoing,
+        '--output-format', 'json',
+        '--permission-mode', 'plan',
+        '--permission-prompts', 'none',
+        '--tools', '',
+        '--restricted',
+        '--strict-mcp-config',
+        '--no-chrome',
+        '--disable-slash-commands',
+      ]
+      if (firstTurn) args.push('--session-id', chat.claudeSessionId)
+      else args.push('--resume', chat.claudeSessionId)
+      if (chat.model !== 'default') args.push('--model', chat.model)
+      if (chat.effort !== 'auto') args.push('--effort', chat.effort)
+    }
 
     const command = this.runCommand({
-      file: this.config.claudeBin,
+      file: isCodex ? this.config.codexBin : this.config.claudeBin,
       args,
       cwd: chat.cwd,
       env: this.accounts.profileEnv(chat.accountId),
@@ -369,26 +393,36 @@ export class ChatService {
     try {
       const result = await command.completed
       const latest = this.read(chatId)
+      const codexReply = isCodex ? this.parseCodexReply(result.stdout) : null
       let envelope: Record<string, unknown> | null = null
-      try {
-        envelope = JSON.parse(result.stdout.trim()) as Record<string, unknown>
-      } catch {
-        /* A non-JSON failure is mapped to the generic safe message below. */
+      if (!isCodex) {
+        try {
+          envelope = JSON.parse(result.stdout.trim()) as Record<string, unknown>
+        } catch {
+          /* A non-JSON failure is mapped to the generic safe message below. */
+        }
       }
-      if (result.code !== 0 || envelope?.is_error === true) {
-        // Never copy Claude output into logs: it can contain conversation or
+      if (
+        result.code !== 0 ||
+        envelope?.is_error === true ||
+        (isCodex && (codexReply?.content === null || codexReply?.error !== null))
+      ) {
+        // Never copy provider output into logs: it can contain conversation or
         // attachment content. The exit code is enough to correlate a failure.
-        process.stderr.write(`fde-gui: chat ${chatId} — claude exited ${result.code}\n`)
+        process.stderr.write(`fde-gui: chat ${chatId} — ${chat.provider} exited ${result.code}\n`)
         latest.status = 'failed'
         latest.lastError = this.safeFailureMessage(
-          typeof envelope?.result === 'string' ? envelope.result : result.stdout,
+          codexReply?.error ?? (typeof envelope?.result === 'string' ? envelope.result : result.stdout),
+          chat.provider,
         )
         latest.updatedAt = new Date().toISOString()
         this.write(latest)
         return latest
       }
-      let content = result.stdout.trim()
-      if (envelope !== null) {
+      let content = codexReply?.content ?? result.stdout.trim()
+      if (isCodex && typeof codexReply?.sessionId === 'string') {
+        latest.claudeSessionId = codexReply.sessionId
+      } else if (envelope !== null) {
         if (typeof envelope.result === 'string') content = envelope.result
         if (typeof envelope.session_id === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(envelope.session_id)) {
           latest.claudeSessionId = envelope.session_id
@@ -409,10 +443,10 @@ export class ChatService {
       this.write(latest)
       return latest
     } catch {
-      process.stderr.write(`fde-gui: chat ${chatId} — could not start claude\n`)
+      process.stderr.write(`fde-gui: chat ${chatId} — could not start ${chat.provider}\n`)
       const latest = this.read(chatId)
       latest.status = 'failed'
-      latest.lastError = 'Claude could not be started for this account.'
+      latest.lastError = `${chat.provider === 'codex' ? 'Codex' : 'Claude'} could not be started for this account.`
       latest.updatedAt = new Date().toISOString()
       this.write(latest)
       return latest
@@ -462,21 +496,77 @@ export class ChatService {
     renameSync(temporary, target)
   }
 
+  /** A subprocess cannot survive a GUI server restart; do not show its chat as running forever. */
+  private recoverInterruptedChats(): void {
+    let entries: string[]
+    try {
+      entries = readdirSync(this.config.chatsRoot)
+    } catch {
+      return
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.json')) continue
+      const chatId = name.slice(0, -'.json'.length)
+      if (!CHAT_ID_PATTERN.test(chatId)) continue
+      try {
+        const chat = this.read(chatId)
+        if (chat.status !== 'running') continue
+        chat.status = 'failed'
+        chat.lastError = 'The previous response was interrupted when the FDE console stopped. Send it again to retry.'
+        chat.updatedAt = new Date().toISOString()
+        this.write(chat)
+      } catch {
+        /* Ignore unrelated or malformed records; list() already excludes them. */
+      }
+    }
+  }
+
   private file(chatId: string): string {
     return path.join(this.config.chatsRoot, `${chatId}.json`)
   }
 
-  private safeFailureMessage(output: string): string {
+  private parseCodexReply(output: string): { content: string | null; sessionId: string | null; error: string | null } {
+    let content: string | null = null
+    let sessionId: string | null = null
+    let error: string | null = null
+    for (const line of output.split('\n')) {
+      if (line.trim() === '') continue
+      let event: Record<string, unknown>
+      try {
+        event = JSON.parse(line) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      if (event.type === 'thread.started') {
+        const candidate = event.thread_id ?? event.threadId ?? event.id
+        if (typeof candidate === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(candidate)) sessionId = candidate
+      }
+      if (event.type === 'item.completed' && event.item && typeof event.item === 'object') {
+        const item = event.item as Record<string, unknown>
+        if (item.type === 'agent_message' && typeof item.text === 'string') content = item.text
+      }
+      if (event.type === 'turn.failed' || event.type === 'error') {
+        const detail = event.error && typeof event.error === 'object'
+          ? (event.error as Record<string, unknown>).message
+          : event.message
+        error = typeof detail === 'string' ? detail : 'The Codex turn failed.'
+      }
+    }
+    return { content, sessionId, error }
+  }
+
+  private safeFailureMessage(output: string, provider: ChatProvider): string {
+    const name = provider === 'codex' ? 'ChatGPT / Codex' : 'Claude'
     if (/not logged in|please run \/login|unauthori[sz]ed|authentication/i.test(output)) {
-      return 'This Claude account is not logged in. Use Login for the selected account, then try again.'
+      return `This ${name} account is not logged in. Use Login for the selected account, then try again.`
     }
     if (/usage limit|rate limit|too many requests/i.test(output)) {
-      return 'This Claude account has reached a usage or rate limit. Try again later or select another account.'
+      return `This ${name} account has reached a usage or rate limit. Try again later or select another account.`
     }
     if (/invalid model|model .*not (?:available|found)|unsupported model/i.test(output)) {
-      return 'The selected Claude model is not available for this account. Choose another model and try again.'
+      return `The selected ${name} model is not available for this account. Choose another model and try again.`
     }
-    return 'Claude did not complete this message. Check the selected account, model and connection, then try again.'
+    return `${name} did not complete this message. Check the selected account, model and connection, then try again.`
   }
 
   private summary(chat: ChatRecord): ChatSummary {

@@ -89,7 +89,7 @@ export function registerClaudeRoutes(
   app.get<{ Params: { accountId: string } }>('/api/claude/accounts/:accountId/status', async (request, reply) => {
     const parsed = accountParams.safeParse(request.params)
     if (!parsed.success || services.accounts.getConfigured(parsed.data?.accountId ?? '') === null) {
-      return problem(reply, 404, 'account-not-found', 'That Claude account is not configured.')
+      return problem(reply, 404, 'account-not-found', 'That chat account is not configured.')
     }
     return await services.accounts.status(parsed.data.accountId, true)
   })
@@ -98,12 +98,12 @@ export function registerClaudeRoutes(
     const parsed = accountParams.safeParse(request.params)
     if (!parsed.success) return problem(reply, 400, 'invalid-account', 'That account id is not valid.')
     const account = services.accounts.getConfigured(parsed.data.accountId)
-    if (account === null) return problem(reply, 404, 'account-not-found', 'That Claude account is not configured.')
+    if (account === null) return problem(reply, 404, 'account-not-found', 'That chat account is not configured.')
     if (account.provider === 'bedrock') {
       return problem(reply, 409, 'external-auth', 'Bedrock authentication is managed through AWS credentials.')
     }
-    if (!services.accounts.binaryAvailable()) {
-      return problem(reply, 503, 'claude-unavailable', 'The Claude CLI is not available to this console.')
+    if (!services.accounts.binaryAvailable(account.provider)) {
+      return problem(reply, 503, 'chat-provider-unavailable', 'The selected chat CLI is not available to this console.')
     }
     if (!services.sessions.available) {
       return problem(reply, 503, 'terminal-unavailable', 'Interactive login needs the terminal backend.')
@@ -181,10 +181,10 @@ export function registerClaudeRoutes(
     }
     const auth = await services.accounts.status(accountId)
     if (auth.state === 'login_required') {
-      return problem(reply, 409, 'login-required', 'Sign in to this Claude account before creating the chat.')
+      return problem(reply, 409, 'login-required', 'Sign in to the selected account before creating the chat.')
     }
     if (auth.state === 'unavailable') {
-      return problem(reply, 503, 'claude-unavailable', 'The selected Claude account is not available.')
+      return problem(reply, 503, 'chat-provider-unavailable', 'The selected chat account is not available.')
     }
     let cwd = existsSync(config.sharedRoot) ? config.sharedRoot : process.cwd()
     if (projectId) {

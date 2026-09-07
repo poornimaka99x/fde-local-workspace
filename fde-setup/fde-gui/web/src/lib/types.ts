@@ -171,7 +171,20 @@ export interface RunStatus {
   attachments: AttachmentRecord[]
   outputHygiene: HygieneView | null
   session: SessionView
+  designPanel: RunDesignPanelSummary | null
   warnings: string[]
+}
+
+export interface RunDesignPanelSummary {
+  schemaVersion?: number
+  readable?: boolean
+  panelId: string | null
+  state: string | null
+  mode?: string
+  outputTarget?: string
+  contextSha256?: string | null
+  succeededCount?: number
+  participants?: { participantId: string; label: string; state: string }[]
 }
 
 export interface RunFileEntry {
@@ -236,7 +249,7 @@ export interface SessionListResponse {
   sessions: ConsoleSession[]
 }
 
-export type ClaudeEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type ClaudeEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 export interface ClaudeModelOption {
   id: string
@@ -248,11 +261,13 @@ export interface ClaudeAccount {
   id: string
   label: string
   profile: string
-  provider: 'anthropic' | 'bedrock'
+  provider: 'anthropic' | 'bedrock' | 'codex'
   profilePresent: boolean
   authState: 'authenticated' | 'login_required' | 'external' | 'unavailable'
   authMethod: string | null
   models: ClaudeModelOption[]
+  capabilities: string[]
+  designPanelEligible: boolean
 }
 
 export interface ClaudeAccountsResponse {
@@ -279,7 +294,7 @@ export interface ChatRecord {
   title: string
   accountId: string
   profile: string
-  provider: 'anthropic' | 'bedrock'
+  provider: 'anthropic' | 'bedrock' | 'codex'
   model: string
   effort: ClaudeEffort
   projectId: string | null
@@ -312,4 +327,169 @@ export interface FsBrowseResponse {
   parent: string | null
   entries: FsEntry[]
   truncated: boolean
+}
+
+// -- design panel -----------------------------------------------------------
+
+export type PanelParticipantState =
+  | 'pending' | 'running' | 'succeeded' | 'failed' | 'stopped' | 'interrupted'
+
+export interface PanelParticipant {
+  participantId: string
+  agentId: string
+  profile: string | null
+  label: string
+  model: string
+  effort: string
+  lensId: string
+  lensLabel: string
+  lens: string | null
+  state: PanelParticipantState | string
+  attempts: number
+  startedAt: string | null
+  endedAt: string | null
+  durationMs: number | null
+  error: string | null
+  proposalPath: string | null
+  proposalPresent: boolean
+  proposalBytes: number | null
+  commonContextSha256: string | null
+  promptSha256: string | null
+}
+
+export interface PanelContextManifest {
+  contextSha256?: string
+  commonContextBytes?: number
+  commonContextPath?: string
+  brief?: { sha256: string; bytes: number }
+  repositories?: { path: string; head: string | null }[]
+  inputFiles?: {
+    attachmentId: string
+    originalName: string
+    mediaType: string
+    bytes: number
+    sha256: string
+    passthrough: string
+    truncated?: boolean
+  }[]
+  productMd?: { path: string; sha256: string; included: boolean; reason?: string } | null
+  designMd?: { path: string; sha256: string; included: boolean; reason?: string } | null
+  designReferences?: {
+    referenceId: string
+    role: string
+    name: string
+    commit: string
+    license: string
+    sha256: string
+    truncated: boolean
+  }[]
+  guidancePacks?: {
+    packId: string
+    commit: string
+    license: string
+    stability: string
+    options: Record<string, number>
+    documents: { document: string; path: string; includedBytes: number; totalBytes: number; truncated: boolean }[]
+  }[]
+}
+
+export interface DesignPanel {
+  schemaVersion: number
+  runId: string
+  panelId: string
+  projectId: string | null
+  state: string
+  mode: string
+  outputTarget: string
+  createdAt: string | null
+  updatedAt: string | null
+  brief: string
+  rolesConfirmed: boolean
+  pendingRoles: string[]
+  designerRole: string[]
+  runState: string | null
+  conceptStageReady: boolean
+  reconcileStageReady: boolean
+  barrierOpenedAt: string | null
+  degradedApprovedAt: string | null
+  packConflictAcknowledged: boolean
+  packs: Record<string, Record<string, number>>
+  references: string[]
+  context: { contextSha256?: string; manifestSha256?: string; commonContextBytes?: number; manifestPath?: string }
+  contextManifest: PanelContextManifest | null
+  participants: PanelParticipant[]
+  succeededCount: number
+  reconciliation: { state?: string; agentId?: string; error?: string | null; degraded?: boolean }
+  artifacts: { path: string; present: boolean }[]
+  comparisonDimensions: string[]
+  nextAction: string | null
+}
+
+export interface DesignPanelResponse {
+  schemaVersion: number
+  designPanel: DesignPanel
+}
+
+export interface DesignReferenceEntry {
+  id: string
+  name: string | null
+  description: string | null
+  sourceUrl: string | null
+  sha256: string | null
+}
+
+export interface DesignReferenceCatalog {
+  schemaVersion: number
+  available: boolean
+  source: string | null
+  commit: string | null
+  license: string | null
+  warning: string | null
+  entries: DesignReferenceEntry[]
+}
+
+export interface GuidancePackDial {
+  id: string
+  label: string
+  min: number
+  max: number
+  default: number
+  help: string | null
+}
+
+export interface GuidancePack {
+  packId: string
+  label: string
+  license: string | null
+  commit: string | null
+  sourceUrl: string | null
+  stability: string | null
+  stabilityNote: string | null
+  changes: string[]
+  conflictsWith: string[]
+  dials: GuidancePackDial[]
+  detector: {
+    enabled?: boolean
+    enabledByDefault?: boolean
+    engineVersion?: string
+    requires?: string
+    networkBehaviour?: string
+    hooks?: string
+  } | null
+}
+
+export interface GuidancePackList {
+  schemaVersion: number
+  packs: GuidancePack[]
+}
+
+export interface DesignLens {
+  id: string
+  label: string
+  text: string
+}
+
+export interface DesignLensList {
+  schemaVersion: number
+  lenses: DesignLens[]
 }

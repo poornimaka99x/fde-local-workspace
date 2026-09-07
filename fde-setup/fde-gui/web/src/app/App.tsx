@@ -14,6 +14,10 @@ import { HealthView } from '../features/health/HealthView'
 import { SessionsView } from '../features/sessions/SessionsView'
 
 const ChatsView = lazy(() => import('../features/chats/ChatsView').then((module) => ({ default: module.ChatsView })))
+const DesignPanelForm = lazy(() =>
+  import('../features/design/DesignPanelForm').then((module) => ({ default: module.DesignPanelForm })))
+const DesignPanelView = lazy(() =>
+  import('../features/design/DesignPanelView').then((module) => ({ default: module.DesignPanelView })))
 const NewChatForm = lazy(() => import('../features/chats/NewChatForm').then((module) => ({ default: module.NewChatForm })))
 const ChatDetail = lazy(() => import('../features/chats/ChatDetail').then((module) => ({ default: module.ChatDetail })))
 
@@ -53,6 +57,7 @@ export function App(): JSX.Element {
 
   const search = new URLSearchParams(window.location.search)
   const runMatch = /^\/runs\/([^/]+)$/.exec(path)
+  const panelMatch = /^\/runs\/([^/]+)\/design-panel$/.exec(path)
   const projectMatch = /^\/projects\/([^/]+)$/.exec(path)
   const projectEditMatch = /^\/projects\/([^/]+)\/edit$/.exec(path)
   const chatMatch = /^\/chats\/([^/]+)$/.exec(path)
@@ -146,6 +151,10 @@ export function App(): JSX.Element {
           <Suspense fallback={<div className="card muted">Loading view…</div>}>
             {path === '/runs/new' ? (
               <NewRunForm projectId={search.get('projectId') ?? undefined} />
+            ) : path === '/design-panel/new' ? (
+              <DesignPanelForm projectId={search.get('projectId') ?? undefined} />
+            ) : panelMatch?.[1] ? (
+              <DesignPanelView runId={decodeURIComponent(panelMatch[1])} />
             ) : path === '/chats/new' ? (
               <NewChatForm />
             ) : path === '/projects/new' ? (

@@ -342,6 +342,38 @@ unknown run or project. Events are paginated rather than dumped. Human output is
 unchanged. The full shapes are in
 [`docs/FDE-CONTROLLER-CONTRACTS.md`](docs/FDE-CONTROLLER-CONTRACTS.md).
 
+## Design panels
+
+One design brief, two or three Claude accounts, the same sealed context, one
+reconciled recommendation.
+
+```bash
+fde start --json -o work --project <project-id> --shape design-panel -- "Rework returns"
+fde design-panel create <run-id> --brief-file brief.md --propose-plan \
+    --participant work:flow --participant msc:visual:high --participant alt:system
+fde approve-plan <run-id>              # still typed by you
+fde design-panel start <run-id> claude_work --print-prompt
+```
+
+It is a normal run in a named shape, not a second orchestration system:
+`uiUxDesign` may simply be held by several identities. The controller builds the
+shared context **once**, writes it and its manifest into the run, and gives every
+participant those exact bytes with only a distinct lens block appended — so "they
+all got the same context" is a SHA-256 you can check, not a promise. Until
+reconciliation, no participant's prompt may contain another's proposal.
+
+Concept generation writes nothing but the run: participants run with all tools
+disabled, and implementation stays a separate stage behind its own approval.
+Reconciliation needs two proposals, or an explicitly typed degraded approval, and
+produces a comparison, a reconciliation with accepted and rejected ideas, and a
+final design under `artifacts/design-panel/`.
+
+Optional, off by default, and pinned to reviewed commits: a catalog of
+design-language references and two guidance packs (Taste, Impeccable). Their
+provenance, licences and the audit behind them are in
+[`docs/FDE-DESIGN-SOURCES.md`](docs/FDE-DESIGN-SOURCES.md); how to run a panel is
+in [`docs/FDE-DESIGN-PANEL.md`](docs/FDE-DESIGN-PANEL.md).
+
 ## The control center (local, read-only)
 
 `fde-gui/` is a local operator console over this controller: projects, runs,
@@ -354,7 +386,8 @@ cd fde-gui && npm install && npm start
 ```
 
 It reads runs through `fde … --json`, and can create a project, edit one, create
-a run and attach a file — each one a controller command, not a write of its own.
+a run, attach a file and drive a design panel — each one a controller command,
+not a write of its own.
 It can resume a Claude-led run in an embedded terminal — exactly
 `fde-start --resume <run-id>`, one process per run — and a Codex-led run is
 labelled honestly rather than given a resume button that could not work.

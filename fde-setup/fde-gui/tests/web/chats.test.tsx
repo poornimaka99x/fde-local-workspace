@@ -7,14 +7,24 @@ import { ChatDetail } from '../../web/src/features/chats/ChatDetail'
 import type { ChatRecord } from '../../web/src/lib/types'
 
 const accounts = {
-  accounts: [{
-    id: 'work', label: 'Claude: work', profile: 'work', provider: 'anthropic',
-    profilePresent: true, authState: 'authenticated', authMethod: 'subscription',
-    models: [
-      { id: 'default', label: 'Account default', efforts: ['auto', 'low', 'medium', 'high'] },
-      { id: 'opus', label: 'Claude Opus', efforts: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] },
-    ],
-  }],
+  accounts: [
+    {
+      id: 'work', label: 'Claude: work', profile: 'work', provider: 'anthropic',
+      profilePresent: true, authState: 'authenticated', authMethod: 'subscription',
+      models: [
+        { id: 'default', label: 'Account default', efforts: ['auto', 'low', 'medium', 'high'] },
+        { id: 'opus', label: 'Claude Opus', efforts: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] },
+      ],
+    },
+    {
+      id: 'codex', label: 'ChatGPT / Codex', profile: 'codex', provider: 'codex',
+      profilePresent: true, authState: 'authenticated', authMethod: 'ChatGPT',
+      models: [
+        { id: 'default', label: 'Account default', efforts: ['auto', 'low', 'medium', 'high'] },
+        { id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+      ],
+    },
+  ],
 }
 
 function response(body: unknown, status = 200): Response {
@@ -47,7 +57,7 @@ describe('general chat UI', () => {
     }))
     const user = userEvent.setup()
     render(<NewChatForm />)
-    await waitFor(() => expect(screen.getByLabelText(/Claude account/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText(/Chat account/)).toBeInTheDocument())
     await user.type(screen.getByLabelText(/Title/), 'Architecture question')
     await user.selectOptions(screen.getByLabelText(/Project context/), 'returns-a1b2')
     await user.selectOptions(screen.getByLabelText(/Model/), 'opus')
@@ -59,11 +69,25 @@ describe('general chat UI', () => {
     expect(window.location.pathname).toBe('/chats/chat-20260904-abcdef12')
   })
 
+  it('offers the signed-in ChatGPT account with its Codex model and effort choices', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/claude/accounts') return response(accounts)
+      return response({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] })
+    }))
+    const user = userEvent.setup()
+    render(<NewChatForm />)
+    const account = await screen.findByLabelText('Chat account')
+    await user.selectOptions(account, 'codex')
+    await user.selectOptions(screen.getByLabelText('Model'), 'gpt-5.6-sol')
+    expect(screen.getByRole('option', { name: 'ultra' })).toBeInTheDocument()
+    expect(screen.getByText('ChatGPT')).toBeInTheDocument()
+  })
+
   it('renders the transcript and sends the next message', async () => {
     let chat: ChatRecord = {
       schemaVersion: 1 as const,
       chatId: 'chat-20260904-abcdef12', title: 'Architecture', accountId: 'work', profile: 'work',
-      provider: 'anthropic' as const, model: 'opus', effort: 'high' as const, projectId: null,
+      provider: 'codex' as const, model: 'gpt-5.6-sol', effort: 'high' as const, projectId: null,
       cwd: '/tmp', claudeSessionId: '11111111-1111-1111-1111-111111111111',
       createdAt: '2026-09-04T00:00:00Z', updatedAt: '2026-09-04T00:00:00Z',
       status: 'idle' as const, lastError: null,
@@ -83,6 +107,7 @@ describe('general chat UI', () => {
     const user = userEvent.setup()
     render(<ChatDetail chatId={chat.chatId} />)
     expect(await screen.findByText('Ready.')).toBeInTheDocument()
+    expect(screen.getByText('ChatGPT / Codex')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Message'), 'What changed?')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(screen.getByText('What changed?')).toBeInTheDocument())

@@ -12,6 +12,7 @@ import { registerHealthRoutes } from './routes/health'
 import { registerFsRoutes } from './routes/fs'
 import { registerProjectRoutes } from './routes/projects'
 import { registerRunRoutes } from './routes/runs'
+import { registerDesignPanelRoutes } from './routes/design-panel'
 import { ControllerError } from './services/controller'
 import { FilePathError } from './services/files'
 import { AdvisoryLocks } from './services/locks'
@@ -22,6 +23,7 @@ import { registerSessionRoutes } from './routes/sessions'
 import { registerClaudeRoutes } from './routes/claude'
 import { AccountService } from './services/accounts'
 import { ChatService } from './services/chats'
+import { DesignPanelService } from './services/design-panel'
 
 const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -42,14 +44,16 @@ const MISSING_BUILD_PAGE = `<!doctype html><html lang="en"><head><meta charset="
 
 export function buildApp(config: GuiConfig, services?: Partial<Services>): FastifyInstance {
   const accounts = services?.accounts ?? new AccountService(config)
+  const watcher = services?.watcher ?? new ChangeWatcher()
   const resolved: Services = {
     locks: services?.locks ?? new AdvisoryLocks(),
-    watcher: services?.watcher ?? new ChangeWatcher(),
+    watcher,
     // No backend unless one is supplied: an installation without node-pty says
     // so rather than pretending it can open a terminal.
     sessions: services?.sessions ?? new SessionManager(null),
     accounts,
     chats: services?.chats ?? new ChatService(config, accounts),
+    designPanels: services?.designPanels ?? new DesignPanelService(config, accounts, watcher),
   }
   resolved.watcher.start([config.runsRoot, config.projectsRoot])
   const app = Fastify({
@@ -93,6 +97,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   registerFsRoutes(app, config)
   registerProjectRoutes(app, config, resolved)
   registerRunRoutes(app, config, resolved)
+  registerDesignPanelRoutes(app, resolved)
 
   // The terminal routes live inside their own plugin so the websocket support
   // is loaded before the route that needs it. Hooks from the root — headers,
@@ -107,6 +112,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     resolved.watcher.stop()
     resolved.sessions.shutdown()
     resolved.chats.shutdown()
+    resolved.designPanels.shutdown()
   })
 
   const sendIndex = async (reply: FastifyReply): Promise<unknown> => {

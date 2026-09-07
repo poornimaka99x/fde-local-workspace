@@ -29,6 +29,12 @@ export function ProjectDetail({ projectId }: { projectId: string }): JSX.Element
           <Link className="action" to={`/runs/new?projectId=${encodeURIComponent(project.projectId)}`}>
             New run
           </Link>
+          <Link
+            className="action"
+            to={`/design-panel/new?projectId=${encodeURIComponent(project.projectId)}`}
+          >
+            Start design panel
+          </Link>
         </div>
       </div>
       <Warnings warnings={warnings} />

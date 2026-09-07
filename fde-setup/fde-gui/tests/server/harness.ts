@@ -12,6 +12,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { buildApp } from '../../server/src/app'
 import { loadConfig, type GuiConfig } from '../../server/src/config'
+import { AccountService } from '../../server/src/services/accounts'
+import { ChatService } from '../../server/src/services/chats'
+import { DesignPanelService, type PanelCommandRunner } from '../../server/src/services/design-panel'
 import { AdvisoryLocks } from '../../server/src/services/locks'
 import { SessionManager, type SpawnTerminal } from '../../server/src/services/sessions'
 import { ChangeWatcher } from '../../server/src/services/watch'
@@ -37,7 +40,7 @@ const flagValue = (name) => {
 }
 const key = positional.join('-').replace(/[^A-Za-z0-9._-]/g, '_')
 
-if (args.includes('--stdin')) {
+if (args.includes('--stdin') || args.includes('--brief-stdin')) {
   const received = fs.readFileSync(0)
   fs.writeFileSync(path.join(dir, 'stdin-' + key + '.bin'), received)
 }
@@ -90,9 +93,30 @@ if (args.includes('--print')) {
 process.exit(0)
 `
 
+const CODEX_STUB = `#!/usr/bin/env node
+const args = process.argv.slice(2)
+if (args[0] === 'login' && args[1] === 'status') {
+  process.stderr.write('Logged in using ChatGPT\\n')
+  process.exit(0)
+}
+if (args[0] === 'exec') {
+  const prompt = args[args.length - 1] || ''
+  const resumed = args[1] === 'resume'
+  const session = resumed ? args[args.length - 2] : '22222222-2222-2222-2222-222222222222'
+  process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: session }) + '\\n')
+  process.stdout.write(JSON.stringify({
+    type: 'item.completed', item: { type: 'agent_message', text: 'Codex reply: ' + prompt },
+  }) + '\\n')
+  process.exit(0)
+}
+process.exit(0)
+`
+
 export interface Harness {
   config: GuiConfig
   app: ReturnType<typeof buildApp>
+  accounts: AccountService
+  designPanels: DesignPanelService
   locks: AdvisoryLocks
   watcher: ChangeWatcher
   sessions: SessionManager
@@ -115,6 +139,10 @@ export async function makeHarness(
     maxUploadBytes?: number
     spawnTerminal?: SpawnTerminal | null
     withLauncher?: boolean
+    /** Write a registry so identities have capabilities a design panel can use. */
+    withDesignRegistry?: boolean
+    panelRunner?: PanelCommandRunner
+    panelTimeoutMs?: number
   } = {},
 ): Promise<Harness> {
   const root = mkdtempSync(path.join(os.tmpdir(), 'fde-gui-test-'))
@@ -124,6 +152,32 @@ export async function makeHarness(
   const runsRoot = path.join(shared, 'runs')
   for (const dir of [path.join(shared, 'bin'), stubDir, runsRoot, path.join(shared, 'projects'), path.join(home, '.claude-profiles', 'work')]) {
     mkdirSync(dir, { recursive: true })
+  }
+  if (options.withDesignRegistry === true) {
+    // The identity registry the controller ships, reduced to what a panel needs:
+    // three Claude accounts that MAY hold the uiUxDesign role, and one that
+    // deliberately may not.
+    mkdirSync(path.join(shared, 'config'), { recursive: true })
+    for (const profile of ['msc', 'alt', 'plain']) {
+      mkdirSync(path.join(home, '.claude-profiles', profile), { recursive: true })
+    }
+    const design = ['orchestration', 'solutioning', 'ui-ux-design', 'design-system', 'review']
+    writeFileSync(
+      path.join(shared, 'config', 'agents.json'),
+      JSON.stringify({
+        roles: ['orchestrator', 'uiUxDesign'],
+        agents: {
+          claude_work: { label: 'Claude: work', kind: 'claude', profile: 'work', capabilities: design },
+          claude_msc: { label: 'Claude: msc', kind: 'claude', profile: 'msc', capabilities: design },
+          claude_alt: { label: 'Claude: alt', kind: 'claude', profile: 'alt', capabilities: design },
+          claude_plain: {
+            label: 'Claude: plain', kind: 'claude', profile: 'plain',
+            capabilities: ['orchestration', 'research'],
+          },
+        },
+        roleCapability: { orchestrator: 'orchestration', uiUxDesign: 'ui-ux-design' },
+      }),
+    )
   }
   writeFileSync(path.join(stubDir, 'calls.log'), '')
 
@@ -141,6 +195,9 @@ export async function makeHarness(
   const claudePath = path.join(shared, 'bin', 'claude-test')
   writeFileSync(claudePath, CLAUDE_STUB)
   chmodSync(claudePath, 0o755)
+  const codexPath = path.join(shared, 'bin', 'codex-test')
+  writeFileSync(codexPath, CODEX_STUB)
+  chmodSync(codexPath, 0o755)
 
   const token = 'test-token-not-a-real-one'
   const config = loadConfig({
@@ -152,6 +209,10 @@ export async function makeHarness(
     FDE_GUI_TOKEN: token,
     FDE_GUI_PORT: '7317',
     FDE_CLAUDE_BIN: claudePath,
+    FDE_CODEX_BIN: codexPath,
+    ...(options.panelTimeoutMs === undefined
+      ? {}
+      : { FDE_GUI_PANEL_TIMEOUT_MS: String(options.panelTimeoutMs) }),
     ...(options.maxUploadBytes === undefined
       ? {}
       : { FDE_GUI_MAX_UPLOAD_BYTES: String(options.maxUploadBytes) }),
@@ -161,12 +222,19 @@ export async function makeHarness(
   const locks = new AdvisoryLocks()
   const watcher = new ChangeWatcher(10)
   const sessions = new SessionManager(options.spawnTerminal ?? null)
-  const app = buildApp(config, { locks, watcher, sessions })
+  const accounts = new AccountService(config)
+  const designPanels = new DesignPanelService(config, accounts, watcher, options.panelRunner)
+  const app = buildApp(config, {
+    locks, watcher, sessions, accounts, designPanels,
+    chats: new ChatService(config, accounts),
+  })
   await app.ready()
 
   return {
     config,
     app,
+    accounts,
+    designPanels,
     locks,
     watcher,
     sessions,
