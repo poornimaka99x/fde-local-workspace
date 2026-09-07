@@ -14,6 +14,7 @@ import {
   attachmentCreatedSchema,
   attachmentListSchema,
   runCreatedSchema,
+  runDeletedSchema,
   runListSchema,
   statusSchema,
   type RunSummary,
@@ -284,6 +285,55 @@ export function registerRunRoutes(
       return await reply.status(201).send(runCreatedSchema.parse(raw))
     } finally {
       release()
+    }
+  })
+
+  app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (request, reply) => {
+    const { runId } = request.params
+    if (!requireRunId(runId)) {
+      return problem(reply, 400, 'invalid-run-id', 'That is not a valid run id.')
+    }
+    const releaseRun = services.locks.tryAcquire(`run:${runId}`)
+    if (releaseRun === null) return problem(reply, 409, 'busy', 'This run is being changed right now.')
+    const releaseSession = services.locks.tryAcquire(`session:${runId}`)
+    if (releaseSession === null) {
+      releaseRun()
+      return problem(reply, 409, 'busy', 'This run is starting or changing its console session.')
+    }
+    const releasePanel = services.designPanels.beginRunDeletion(runId)
+    if (releasePanel === null) {
+      releaseSession()
+      releaseRun()
+      return problem(reply, 409, 'run-active', 'Stop all design-panel work before deleting this run.')
+    }
+    let releaseProject = (): void => undefined
+    try {
+      if (services.sessions.isRunning(runId)) {
+        return problem(reply, 409, 'run-active', 'Stop this run’s console session before deleting it.')
+      }
+      const status = statusSchema.parse(
+        await runControllerJson(config, ['status', runId, '--json', '--events-limit', '1']),
+      )
+      if (status.projectId) {
+        const acquired = services.locks.tryAcquire(`project:${status.projectId}`)
+        if (acquired === null) {
+          return problem(reply, 409, 'busy', 'This run’s project is being changed right now.')
+        }
+        releaseProject = acquired
+      }
+      const raw = await runControllerJson(
+        config,
+        ['delete', runId, '--confirm', runId, '--json'],
+      )
+      const deleted = runDeletedSchema.parse(raw)
+      if (services.sessions.get(runId) !== null) services.sessions.delete(runId)
+      services.watcher.touch()
+      return deleted
+    } finally {
+      releaseProject()
+      releasePanel()
+      releaseSession()
+      releaseRun()
     }
   })
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authed, makeHarness, type Harness } from './harness'
-import { claudeSession } from './fixtures'
+import { claudeSession, statusFixture } from './fixtures'
 
 const RUN = '20260901-max-1-aaaa'
 const PROJECT = 'returns-modernisation-a1b2'
@@ -66,6 +66,21 @@ describe('safe mutations', () => {
         session: claudeSession,
       },
       nextAction: 'fde plan … --stages <stages>',
+    })
+    harness.fixture(`delete-${RUN}`, {
+      schemaVersion: 1,
+      deletedRun: {
+        runId: RUN,
+        projectId: PROJECT,
+        state: 'awaiting_plan',
+        deletedAt: '2026-09-07T11:00:00+00:00',
+        recoverable: true,
+      },
+    })
+    harness.fixture(`status-${RUN}`, {
+      ...statusFixture(RUN),
+      projectId: PROJECT,
+      project: { projectId: PROJECT, name: 'Returns modernisation', repoPaths: [] },
     })
     harness.fixture(`attach-${RUN}`, {
       schemaVersion: 1,
@@ -253,6 +268,16 @@ describe('safe mutations', () => {
     const call = harness.calls()[0] ?? []
     expect(call[call.length - 2]).toBe('--')
     expect(call[call.length - 1]).toBe('--dangerously-do-something')
+  })
+
+  it('deletes a run through the controller with exact confirmation', async () => {
+    const response = await harness.app.inject({
+      method: 'DELETE', url: `/api/runs/${RUN}`, headers: mutating(harness.token),
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().deletedRun).toMatchObject({ runId: RUN, recoverable: true })
+    expect(harness.calls()[0]).toEqual(['status', RUN, '--json', '--events-limit', '1'])
+    expect(harness.calls()[1]).toEqual(['delete', RUN, '--confirm', RUN, '--json'])
   })
 
   it('never asks the controller for a role, an approval or an unknown orchestrator', async () => {

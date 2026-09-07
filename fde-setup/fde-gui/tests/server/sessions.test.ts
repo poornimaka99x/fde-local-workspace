@@ -46,6 +46,13 @@ describe('resume sessions', () => {
       ...statusFixture(CODEX_RUN),
       session: codexSession,
     })
+    harness.fixture(`delete-${RUN}`, {
+      schemaVersion: 1,
+      deletedRun: {
+        runId: RUN, projectId: null, state: 'research',
+        deletedAt: '2026-09-07T11:00:00+00:00', recoverable: true,
+      },
+    })
   })
   afterEach(async () => harness.destroy())
 
@@ -194,6 +201,23 @@ describe('resume sessions', () => {
     expect(deleted.json()).toEqual({ deleted: { kind: 'session-history', runId: RUN } })
     expect(harness.sessions.get(RUN)).toBeNull()
     expect(() => harness.sessions.attach(RUN, () => undefined, () => undefined)).toThrow()
+  })
+
+  it('refuses to delete a run with a live console and clears finished history after deletion', async () => {
+    await resume(RUN)
+    const active = await harness.app.inject({
+      method: 'DELETE', url: `/api/runs/${RUN}`, headers: mutating(harness.token),
+    })
+    expect(active.statusCode).toBe(409)
+    expect(active.json()).toMatchObject({ type: 'about:fde/run-active' })
+    expect(harness.calls().filter((args) => args[0] === 'delete')).toEqual([])
+
+    FakeTerminal.spawned[0]?.finish(0)
+    const deleted = await harness.app.inject({
+      method: 'DELETE', url: `/api/runs/${RUN}`, headers: mutating(harness.token),
+    })
+    expect(deleted.statusCode).toBe(200)
+    expect(harness.sessions.get(RUN)).toBeNull()
   })
 
   it('can delete finished account-login session history from the session list', async () => {

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link } from '../../lib/router'
 import { formatBytes, formatTime, shortHash, stateTone } from '../../lib/format'
 import { useApi } from '../../lib/useApi'
-import { apiGet } from '../../lib/api'
+import { ApiError, apiGet, apiSend } from '../../lib/api'
+import { announceChange } from '../../lib/changes'
 import type { EventPage, FileListResponse, RunStatus } from '../../lib/types'
 import { AttachmentUpload } from '../../components/AttachmentUpload'
 import { SessionPanel } from './SessionPanel'
@@ -16,6 +17,8 @@ type TabId = (typeof TAB_IDS)[number]
 export function RunDetail({ runId }: { runId: string }): JSX.Element {
   const autoStart = new URLSearchParams(window.location.search).get('startSession') === '1'
   const [tab, setTab] = useState<TabId>(autoStart ? 'session' : 'overview')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<ApiError | null>(null)
   const status = useApi<RunStatus>(`/api/runs/${encodeURIComponent(runId)}`, 20000)
   const files = useApi<FileListResponse>(`/api/runs/${encodeURIComponent(runId)}/files`)
 
@@ -25,6 +28,23 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
 
   const inputFiles = (files.data?.entries ?? []).filter((entry) => entry.path.startsWith('inputs/'))
   const artifactFiles = (files.data?.entries ?? []).filter((entry) => entry.path.startsWith('artifacts/'))
+
+  const deleteRun = async (): Promise<void> => {
+    if (!window.confirm(
+      `Delete run “${run.runId}”? Its complete record, attachments, and artifacts will move to recoverable trash. Repositories and project metadata are not deleted.`,
+    )) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await apiSend(`/api/runs/${encodeURIComponent(run.runId)}`, 'DELETE')
+      announceChange()
+      window.history.pushState(null, '', '/runs')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    } catch (cause) {
+      setDeleteError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not delete this run.'))
+      setDeleting(false)
+    }
+  }
 
   return (
     <>
@@ -45,9 +65,13 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
           <button className="action" type="button" onClick={status.reload}>
             Refresh
           </button>
+          <button className="action danger" type="button" disabled={deleting} onClick={() => void deleteRun()}>
+            {deleting ? 'Deleting…' : 'Delete run'}
+          </button>
         </div>
       </div>
 
+      {deleteError ? <ErrorState error={deleteError} /> : null}
       <Warnings warnings={run.warnings} />
 
       {run.designPanel?.panelId ? (

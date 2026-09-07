@@ -30,7 +30,10 @@ Old records can be removed from their list with an explicit confirmation.
 Deleting a chat moves its JSON record to `~/.claude-shared/chats/.trash` and
 never touches attached source files. Deleting a finished console session only
 forgets its in-memory terminal history; it does not delete the FDE run. Deleting
-a project is controller-owned, moves only its metadata to
+a run is controller-owned and moves its complete directory, including inputs,
+events and artifacts, to `~/.claude-shared/runs/.trash`; a running terminal or
+design-panel worker must be stopped first. Deleting a project is also
+controller-owned and moves only its metadata to
 `~/.claude-shared/projects/.trash`, leaves repositories unchanged, and is
 refused while any live chat or run still references that project.
 

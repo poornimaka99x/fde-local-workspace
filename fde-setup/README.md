@@ -305,11 +305,14 @@ fde project create --name "Returns modernisation" --repo ~/code/returns-api
 fde start "MAX-142 returns orchestration" --project returns-modernisation-a1b2
 fde projects                       # names, repositories, run counts
 fde project show <project-id>      # its repositories and its runs
+fde delete <run-id> --confirm <run-id>       # move a complete run to recoverable trash
+fde project delete <project-id> --confirm <project-id>  # only when no run/chat refers to it
 ```
 
 Runs created before projects existed keep working and are listed as unassigned.
 Repository paths must already exist: nothing here initialises, clones, modifies
-or deletes a repository.
+or deletes a repository. Deleted run and project records are moved under the
+corresponding `.trash` directory rather than erased permanently.
 
 **Attachments** copy an input file into the run, hash it, and record it in an
 append-only ledger.

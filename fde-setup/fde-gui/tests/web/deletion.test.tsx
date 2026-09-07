@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatsView } from '../../web/src/features/chats/ChatsView'
 import { ProjectsView } from '../../web/src/features/projects/ProjectsView'
 import { SessionsView } from '../../web/src/features/sessions/SessionsView'
+import { RunsView } from '../../web/src/features/runs/RunsView'
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -108,5 +109,46 @@ describe('deleting old records', () => {
     await user.click(await screen.findByRole('button', { name: 'Delete project' }))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/Repositories are never deleted.*runs or chats will be refused/))
     expect(await screen.findByText('No projects yet')).toBeInTheDocument()
+  })
+
+  it('confirms complete run deletion and refreshes the run list', async () => {
+    let deleted = false
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'DELETE') {
+        deleted = true
+        return response({
+          schemaVersion: 1,
+          deletedRun: {
+            runId: '20260901-old-aaaa', projectId: null, state: 'complete',
+            deletedAt: '2026-09-07T00:00:00Z', recoverable: true,
+          },
+        })
+      }
+      if (url.startsWith('/api/runs')) {
+        return response({
+          schemaVersion: 1,
+          runs: deleted ? [] : [{
+            runId: '20260901-old-aaaa', state: 'complete', projectId: null,
+            requirement: 'Old work', updatedAt: '2026-09-01T00:00:00Z', orchestrator: null,
+            session: { provider: null, profile: null, sessionId: null, resumable: false, resumeReason: null },
+          }],
+          total: deleted ? 0 : 1,
+          returned: deleted ? 0 : 1,
+          warnings: [],
+        })
+      }
+      return response({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(<RunsView />)
+    await user.click(await screen.findByRole('button', { name: 'Delete run' }))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/attachments, and artifacts.*recoverable trash/))
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/runs/20260901-old-aaaa',
+      expect.objectContaining({ method: 'DELETE' }),
+    ))
+    expect(await screen.findByText(/No runs exist yet/)).toBeInTheDocument()
   })
 })

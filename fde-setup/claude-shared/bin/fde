@@ -1165,6 +1165,57 @@ def list_runs():
     return out
 
 
+def cmd_delete(args):
+    """Move a complete run record to recoverable trash.
+
+    The confirmation is deliberately part of the controller contract so a GUI,
+    script or direct CLI invocation cannot bypass it. Repository paths recorded
+    by the run are references and are never touched.
+    """
+    run_id = args.run_id
+    if args.confirm != run_id:
+        die("run deletion requires --confirm with the exact run id", 2)
+    run = Run(run_id)
+    manifest = run.manifest()
+    project_id = manifest.get("projectId")
+    state = manifest.get("state")
+    trash = RUNS / ".trash"
+    if trash.is_symlink():
+        die("run trash is a symlink; refusing to use it", 5)
+    trash.mkdir(parents=True, exist_ok=True)
+    deleted_at = iso()
+    run.event("run.deleted", deletedAt=deleted_at, previousState=state,
+              projectId=project_id)
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = trash / f"{run_id}-{stamp}-{secrets.token_hex(3)}"
+    os.replace(run.dir, target)
+
+    # Project history remains controller-owned. This is an audit reference, not
+    # a cascade; the project record and every repository remain unchanged.
+    if (isinstance(project_id, str) and valid_project_id(project_id)
+            and not project_dir(project_id).is_symlink()
+            and (project_dir(project_id) / "project.json").is_file()):
+        project_event(project_id, "run.deleted", runId=run_id,
+                      deletedAt=deleted_at, previousState=state)
+
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "deletedRun": {
+            "runId": run_id,
+            "projectId": project_id,
+            "state": state,
+            "deletedAt": deleted_at,
+            "recoverable": True,
+        },
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"deleted  {run_id}")
+    print("kept     complete run record in recoverable run trash")
+    print("repos    unchanged")
+    return 0
+
+
 # ------------------------------------------------------------- machine views --
 
 # The GUI and any other machine reader consume these. Human output stays exactly
@@ -2831,6 +2882,7 @@ def cmd_plan(args):
 
 CONTRACTS = [
     "list --json",
+    "delete --json",
     "status --json",
     "projects --json",
     "project show --json",
@@ -6114,6 +6166,13 @@ def main(argv=None):
     s.add_argument("--json", action="store_true",
                    help="print the created run as JSON; narration goes to stderr")
     s.set_defaults(fn=cmd_start)
+
+    s = sub.add_parser("delete", help="move a run and all its records to recoverable trash")
+    s.add_argument("run_id")
+    s.add_argument("--confirm", required=True, metavar="RUN-ID",
+                   help="must exactly match run_id")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_delete)
 
     s = sub.add_parser("orchestrator", help="choose who orchestrates this run — the first decision")
     s.add_argument("run_id")

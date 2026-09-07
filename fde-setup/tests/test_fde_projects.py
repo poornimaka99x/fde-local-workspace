@@ -235,6 +235,44 @@ class TestRunProjectLinkage(ProjectTest):
         self.sb.fde("project", "update", project["projectId"], "--name", "Renamed")
         self.assertEqual((self.sb.run_dir(run_id) / "events.jsonl").read_text(), before)
 
+    def test_delete_moves_the_complete_run_to_recoverable_trash(self):
+        project = self.create_project()
+        result = self.sb.fde("start", "MAX-5 old run", "--orchestrator", "work",
+                             "--project", project["projectId"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run_id = next(l.split()[1] for l in result.stdout.splitlines()
+                      if l.startswith("run "))
+        run_dir = self.sb.run_dir(run_id)
+        evidence = run_dir / "artifacts" / "research" / "keep.md"
+        evidence.write_text("recoverable evidence")
+
+        deleted = self.sb.fde("delete", run_id, "--confirm", run_id, "--json")
+        self.assertEqual(deleted.returncode, 0, deleted.stderr)
+        payload = json.loads(deleted.stdout)["deletedRun"]
+        self.assertEqual(payload["runId"], run_id)
+        self.assertEqual(payload["projectId"], project["projectId"])
+        self.assertTrue(payload["recoverable"])
+        self.assertFalse(run_dir.exists())
+
+        trashed = list((self.sb.shared / "runs" / ".trash").iterdir())
+        self.assertEqual(len(trashed), 1)
+        self.assertEqual((trashed[0] / "artifacts" / "research" / "keep.md").read_text(),
+                         "recoverable evidence")
+        events = [json.loads(line) for line in
+                  (trashed[0] / "events.jsonl").read_text().splitlines() if line.strip()]
+        self.assertEqual(events[-1]["event"], "run.deleted")
+        self.assertEqual(self.json_of("project", "show", project["projectId"])
+                         ["project"]["runCount"], 0)
+        project_events = self.json_of("project", "show", project["projectId"])["events"]
+        self.assertEqual(project_events[-1]["event"], "run.deleted")
+
+    def test_delete_requires_exact_confirmation_and_preserves_the_run_on_refusal(self):
+        run_id = self.sb.start("MAX-delete-confirm")
+        refused = self.sb.fde("delete", run_id, "--confirm", "a-different-run")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("exact run id", refused.stderr)
+        self.assertTrue(self.sb.run_dir(run_id).is_dir())
+
 
 # -- attachments -------------------------------------------------------------
 

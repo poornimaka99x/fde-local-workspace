@@ -117,6 +117,7 @@ export class DesignPanelService {
    * tolerate a slot with nothing running in it yet.
    */
   private readonly active = new Map<string, RunningPanelCommand | null>()
+  private readonly deletingRuns = new Set<string>()
   private references: CachedCatalog<ReferenceCatalog> | null = null
   private packs: CachedCatalog<PackList> | null = null
   private lenses: CachedCatalog<LensList> | null = null
@@ -202,6 +203,13 @@ export class DesignPanelService {
     return false
   }
 
+  /** Reserve a run against new panel work while its controller record moves. */
+  beginRunDeletion(runId: string): (() => void) | null {
+    if (this.deletingRuns.has(runId) || this.hasActiveWork(runId)) return null
+    this.deletingRuns.add(runId)
+    return () => this.deletingRuns.delete(runId)
+  }
+
   isRunning(runId: string, participantId: string): boolean {
     return this.active.has(`${runId}:${participantId}`)
   }
@@ -257,6 +265,9 @@ export class DesignPanelService {
     // so a refusal never leaves a slot behind.
     if (this.active.has(key)) {
       throw new PanelBusy(`${participantId} is already running`)
+    }
+    if (this.deletingRuns.has(runId)) {
+      throw new PanelBusy('This run is being deleted; no participant can start.')
     }
     if (this.active.size >= this.config.panelConcurrency) {
       throw new PanelBusy(
@@ -396,6 +407,9 @@ export class DesignPanelService {
   }
 
   async stopParticipant(runId: string, participantId: string, force = false): Promise<PanelView> {
+    if (this.deletingRuns.has(runId)) {
+      throw new PanelBusy('This run is being deleted; its panel cannot be changed.')
+    }
     // `null` is a slot reserved for a process that has not been spawned yet.
     const command = this.active.get(`${runId}:${participantId}`) ?? null
     if (command !== null) {
@@ -412,6 +426,9 @@ export class DesignPanelService {
   }
 
   async retryParticipant(runId: string, participantId: string): Promise<PanelView> {
+    if (this.deletingRuns.has(runId)) {
+      throw new PanelBusy('This run is being deleted; its panel cannot be changed.')
+    }
     await runControllerJson(this.config,
       ['design-panel', 'retry', runId, participantId, '--json'])
     this.watcher.touch()
@@ -420,6 +437,9 @@ export class DesignPanelService {
 
   async reconcile(runId: string): Promise<PanelView> {
     const key = `${runId}:reconciliation`
+    if (this.deletingRuns.has(runId)) {
+      throw new PanelBusy('This run is being deleted; reconciliation cannot start.')
+    }
     if (this.active.has(key)) {
       throw new PanelBusy('this panel is already reconciling')
     }
@@ -536,6 +556,7 @@ export class DesignPanelService {
       }
     }
     this.active.clear()
+    this.deletingRuns.clear()
   }
 }
 

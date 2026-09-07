@@ -66,6 +66,21 @@ export const runListSchema = z
   })
   .passthrough()
 
+export const runDeletedSchema = z
+  .object({
+    schemaVersion: SCHEMA_VERSION,
+    deletedRun: z
+      .object({
+        runId: z.string(),
+        projectId: z.string().nullish(),
+        state: z.string().nullish(),
+        deletedAt: z.string(),
+        recoverable: z.literal(true),
+      })
+      .passthrough(),
+  })
+  .passthrough()
+
 export const projectSchema = z
   .object({
     projectId: z.string(),

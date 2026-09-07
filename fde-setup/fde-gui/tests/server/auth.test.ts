@@ -70,9 +70,8 @@ describe('local API access control', () => {
     }
   })
 
-  it('offers no route for deleting runs, approving, publishing or bypassing session checks', async () => {
+  it('offers no route for approving, publishing or bypassing session checks', async () => {
     const changes: [string, string][] = [
-      ['DELETE', '/api/runs/20260901-max-1-aaaa'],
       ['POST', '/api/runs/20260901-max-1-aaaa/approve'],
       ['POST', '/api/runs/20260901-max-1-aaaa/session/resume'],
       ['POST', '/api/runs/20260901-max-1-aaaa/publish'],
