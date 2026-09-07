@@ -12,6 +12,7 @@ import { registerHealthRoutes } from './routes/health'
 import { registerFsRoutes } from './routes/fs'
 import { registerProjectRoutes } from './routes/projects'
 import { registerRunRoutes } from './routes/runs'
+import { registerRoutingRoutes } from './routes/routing'
 import { registerDesignPanelRoutes } from './routes/design-panel'
 import { ControllerError } from './services/controller'
 import { FilePathError } from './services/files'
@@ -97,6 +98,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   registerFsRoutes(app, config)
   registerProjectRoutes(app, config, resolved)
   registerRunRoutes(app, config, resolved)
+  registerRoutingRoutes(app, config, resolved)
   registerDesignPanelRoutes(app, resolved)
 
   // The terminal routes live inside their own plugin so the websocket support

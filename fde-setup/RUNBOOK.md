@@ -349,6 +349,20 @@ reason, and nothing is overwritten. It will not go below a task's quality floor,
 and raising a tier, an effort or an account makes you type
 `APPROVE ROUTING <run-id>`.
 
+If you change the plan or reassign a role after approving, the frozen route no
+longer describes the run and every invocation is refused until you approve
+again. `fde status` tells you which, and:
+
+```bash
+fde plan <run-id> --add presentation     # un-approves the plan; then:
+fde approve-plan <run-id>
+
+fde roles <run-id> --reassign --set review=<identity>   # plan stays approved:
+fde approve-plan <run-id> --reapprove
+```
+
+The old freeze is kept on the record as a superseded approval, not deleted.
+
 Costs are shown in **cost units** — relative weights from
 `~/.claude-shared/config/routing-policy.json`, not money. There are no provider
 prices in this toolkit, and every figure is labelled an estimate. Edit that file

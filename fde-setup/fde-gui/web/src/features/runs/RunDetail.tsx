@@ -7,11 +7,12 @@ import { announceChange } from '../../lib/changes'
 import type { EventPage, FileListResponse, RunStatus } from '../../lib/types'
 import { AttachmentUpload } from '../../components/AttachmentUpload'
 import { SessionPanel } from './SessionPanel'
+import { RoutingMatrix } from './RoutingMatrix'
 import { FileBrowser } from '../../components/FileBrowser'
 import { ErrorState, Loading, Warnings } from '../../components/States'
 import { Tabs } from '../../components/Tabs'
 
-const TAB_IDS = ['overview', 'session', 'inputs', 'artifacts', 'events', 'approvals'] as const
+const TAB_IDS = ['overview', 'session', 'routing', 'inputs', 'artifacts', 'events', 'approvals'] as const
 type TabId = (typeof TAB_IDS)[number]
 
 export function RunDetail({ runId }: { runId: string }): JSX.Element {
@@ -105,6 +106,11 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
         tabs={[
           { id: 'overview', label: 'Overview' },
           { id: 'session', label: 'Session' },
+          {
+            id: 'routing',
+            label: 'Routing',
+            badge: run.routing?.taskCount ?? undefined,
+          },
           { id: 'inputs', label: 'Inputs', badge: run.attachments.length },
           { id: 'artifacts', label: 'Artifacts', badge: artifactFiles.length },
           { id: 'events', label: 'Events', badge: run.events.total },
@@ -117,6 +123,7 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
       <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`} tabIndex={-1}>
         {tab === 'overview' ? <Overview run={run} /> : null}
         {tab === 'session' ? <SessionPanel run={run} autoStart={autoStart} /> : null}
+        {tab === 'routing' ? <RoutingMatrix run={run} /> : null}
         {tab === 'inputs' ? (
           <Inputs
             run={run}

@@ -108,7 +108,7 @@ describe('creating and editing through the controller', () => {
     }],
   }
 
-  it('collects project, ask, account, model, effort and shape when creating a run', async () => {
+  it('falls back to manual selection when automatic routing is unavailable', async () => {
     stubFetch((url, init) =>
       url === '/api/claude/accounts'
         ? jsonResponse(accountsResponse)
@@ -134,10 +134,13 @@ describe('creating and editing through the controller', () => {
     await user.click(screen.getByRole('button', { name: 'Create run' }))
 
     await waitFor(() => expect(sent).toHaveLength(1))
+    // The routing policy endpoint answers nothing here, so the form offers
+    // manual selection and says so rather than promising a route it cannot get.
     expect(sent[0]?.body).toEqual({
       orchestrator: 'work',
       model: 'sonnet',
       effort: 'high',
+      routing: 'manual',
       projectId: 'returns-a1b2',
       requirement: 'MAX-1 returns research',
       shape: 'research',

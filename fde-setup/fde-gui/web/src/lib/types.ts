@@ -172,7 +172,371 @@ export interface RunStatus {
   outputHygiene: HygieneView | null
   session: SessionView
   designPanel: RunDesignPanelSummary | null
+  /** Null for a run that selects its model and effort manually. */
+  routing: RoutingSummary | null
   warnings: string[]
+}
+
+/**
+ * A telemetry figure with its provenance attached.
+ *
+ * The state is the point. A number the page can show is `reported` or
+ * `estimated`; anything else is `unavailable` with a reason and no value, and
+ * must be rendered as "unavailable" — never as zero.
+ */
+export interface RoutingUsageValue {
+  state: 'reported' | 'estimated' | 'unavailable'
+  value?: number | string | null
+  source?: string | null
+  reason?: string | null
+}
+
+export type RoutingUsage = Record<string, RoutingUsageValue>
+
+export interface RoutingDimension {
+  id: string
+  label: string
+  score: number
+  evidence: string
+}
+
+export interface RoutingRiskFlag {
+  flag: string
+  floor?: string | null
+  evidence: string
+}
+
+export interface RoutingAssessment {
+  score: number
+  maxScore: number
+  band: string
+  bandFromScore?: string | null
+  dimensions: RoutingDimension[]
+  confidence: string
+  riskFlags: RoutingRiskFlag[]
+  qualityFloor: string
+  riskFloor?: string | null
+  strictestStageFloor?: string | null
+  overrides: string[]
+  missingInformation: string[]
+  clarification?: string | null
+}
+
+export interface RoutingChoice {
+  model: string
+  effort: string
+  tier: string
+  costUnits?: number | null
+  expectedCostUnits?: number | null
+}
+
+export interface RoutingRejection extends RoutingChoice {
+  reason: string
+}
+
+export interface RoutingEscalationCeiling {
+  tier?: string | null
+  effort?: string | null
+  maxRetries?: number | null
+  rungsAbove?: number | null
+  requiresRecordedFailureAbove?: Record<string, unknown> | null
+}
+
+export interface RoutingProgress {
+  taskId?: string | null
+  attempts: number
+  retries: number
+  escalations: number
+  attemptsAtCurrentRung: number
+  lastOutcome?: string | null
+  lastClassification?: string | null
+  lastModel?: string | null
+  lastEffort?: string | null
+  spentCostUnits: number
+  maxRetries?: number | null
+}
+
+/**
+ * Whether a check is genuinely independent of whoever produced the work.
+ *
+ * `independent: false` with `requiresDegradedApproval: true` is a real state,
+ * not a missing value: the check exists but shares the producer's account, and
+ * the page has to say so in words.
+ */
+export interface RoutingIndependence {
+  independent: boolean
+  of: string[]
+  reason: string
+  requiresDegradedApproval: boolean
+}
+
+export interface RoutingOrchestrator {
+  accountId?: string | null
+  account?: string | null
+  accountLabel?: string | null
+  accountAvailable?: boolean | null
+  provider?: string | null
+  routable: boolean
+  model?: string | null
+  modelLabel?: string | null
+  effort?: string | null
+  tier?: string | null
+  qualityFloor?: string | null
+  costUnits?: number | null
+  expectedCostUnits?: number | null
+  estimatedCostUnits?: number | null
+  retryProbability?: number | null
+  reason: string
+  strategyRule?: string | null
+  limitations: string[]
+  escalationCeiling?: RoutingEscalationCeiling | null
+  alternatives: RoutingChoice[]
+  rejected: RoutingRejection[]
+  overridden?: boolean | null
+}
+
+/**
+ * One row of the execution matrix.
+ *
+ * Account identity, specialist method, model and effort are four separate
+ * fields on purpose, and the UI keeps them four separate columns.
+ */
+export interface RoutedTask {
+  taskId: string
+  stage: string
+  stageLabel?: string | null
+  objective?: string | null
+  requiredRole: string
+  roleLabel?: string | null
+  specialist?: string | null
+  specialistReason?: string | null
+  reason?: string | null
+  discretionary?: boolean | null
+  accountId?: string | null
+  accountLabel?: string | null
+  accountAvailable?: boolean | null
+  provider?: string | null
+  routable: boolean
+  model?: string | null
+  effort?: string | null
+  tier?: string | null
+  qualityFloor?: string | null
+  band?: string | null
+  dependsOn: string[]
+  parallelizable: boolean
+  estimatedCostUnits?: number | null
+  costUnits?: number | null
+  escalationCeiling?: RoutingEscalationCeiling | null
+  strategyRule?: string | null
+  alternatives: RoutingChoice[]
+  rejected: RoutingRejection[]
+  independence?: RoutingIndependence | null
+  progress?: RoutingProgress | null
+  overridden?: boolean | null
+}
+
+export interface RoutingLimits {
+  maxSpecialists?: number | null
+  maxSpecialistsPerStage?: number | null
+  maxParallel?: number | null
+  maxRetries?: number | null
+  maxCostUnits?: number | null
+  maxAutomaticTier?: string | null
+  maxAutomaticEffort?: string | null
+  requireIndependentReview?: boolean | null
+}
+
+export interface RoutingNotScheduled {
+  stage?: string | null
+  role?: string | null
+  reason: string
+}
+
+export interface RoutingOverrideEntry {
+  at?: string | null
+  operator?: string | null
+  target: string
+  field: string
+  from?: string | number | null
+  to?: string | number | null
+  reason: string
+  escalation: boolean
+  previousDecisionHash?: string | null
+  decisionHash?: string | null
+}
+
+export interface RoutingSupersededApproval {
+  approvedAt?: string | null
+  approvedBy?: string | null
+  approvedWithPlanHash?: string | null
+  decisionHash?: string | null
+  supersededAt?: string | null
+  reason: string
+}
+
+export interface RoutingDecision {
+  schemaVersion: number
+  policyRevision: string
+  mode: string
+  strategy: string
+  assessment: RoutingAssessment
+  effectiveBand?: string | null
+  limitBand?: string | null
+  orchestrator: RoutingOrchestrator
+  tasks: RoutedTask[]
+  limits: RoutingLimits
+  estimatedCostUnits: number
+  costUnitsAreEstimates: boolean
+  notScheduled: RoutingNotScheduled[]
+  unroutable: Record<string, unknown>[]
+  warnings: string[]
+  specialistCount?: number | null
+  discretionaryCount?: number | null
+  maxObservedParallel?: number | null
+  decisionHash: string
+  proposedAt?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  approvedWithPlanHash?: string | null
+  planHash?: string | null
+  overrides: RoutingOverrideEntry[]
+  supersededApprovals: RoutingSupersededApproval[]
+  provisional?: boolean | null
+  provisionalReason?: string | null
+}
+
+export interface RoutingPreviewResponse {
+  schemaVersion: number
+  preview: RoutingDecision
+}
+
+/** The bounded summary `GET /api/runs/:runId` carries. */
+export interface RoutingSummary {
+  present: boolean
+  readable: boolean
+  error?: string | null
+  message?: string | null
+  policyRevision?: string | null
+  mode?: string | null
+  strategy?: string | null
+  band?: string | null
+  score?: number | null
+  maxScore?: number | null
+  confidence?: string | null
+  qualityFloor?: string | null
+  riskFlags: string[]
+  clarification?: string | null
+  missingInformation: string[]
+  orchestrator?: Record<string, unknown> | null
+  taskCount?: number | null
+  specialistCount?: number | null
+  tasks: RoutedTask[]
+  tasksTruncated?: boolean | null
+  limits?: RoutingLimits | null
+  estimatedCostUnits?: number | null
+  spentCostUnits?: number | null
+  costUnitsAreEstimates?: boolean | null
+  usage: RoutingUsage
+  approved: boolean
+  approvedAt?: string | null
+  proposedAt?: string | null
+  decisionHash?: string | null
+  approvedWithPlanHash?: string | null
+  planHashMatches?: boolean | null
+  overrideCount?: number | null
+  notScheduled: RoutingNotScheduled[]
+  unroutable: Record<string, unknown>[]
+  warnings: string[]
+}
+
+export interface RoutingShowResponse {
+  schemaVersion: number
+  runId: string
+  routing: RoutingDecision
+  summary: RoutingSummary | null
+}
+
+export interface RoutingExplainResponse {
+  schemaVersion: number
+  runId: string
+  policyRevision?: string | null
+  policyRevisionOnDisk?: string | null
+  policyDrift?: string | null
+  strategy?: string | null
+  strategyRule?: string | null
+  assessment: RoutingAssessment
+  target: {
+    taskId?: string | null
+    stage?: string | null
+    requiredRole?: string | null
+    specialist?: string | null
+    specialistReason?: string | null
+    accountId?: string | null
+    model?: string | null
+    effort?: string | null
+    tier?: string | null
+    qualityFloor?: string | null
+    reason?: string | null
+    limitations: string[]
+    estimatedCostUnits?: number | null
+    escalationCeiling?: RoutingEscalationCeiling | null
+    independence?: RoutingIndependence | null
+  }
+  alternativesConsidered: RoutingChoice[]
+  rejected: RoutingRejection[]
+  limits?: RoutingLimits | null
+  notScheduled: RoutingNotScheduled[]
+  costUnitsAreEstimates?: boolean | null
+}
+
+export interface RoutingAttempt {
+  at?: string | null
+  taskId?: string | null
+  attempt?: number | null
+  mode?: string | null
+  stage?: string | null
+  model?: string | null
+  effort?: string | null
+  tier?: string | null
+  estimatedCostUnits?: number | null
+  outcome?: string | null
+  classification?: string | null
+  exit?: number | null
+  artifact?: string | null
+  usage: RoutingUsage
+  notes: string[]
+  evidence: string[]
+  supersedes?: Record<string, unknown> | null
+  recordedBy?: string | null
+}
+
+export interface RoutingAttemptsResponse {
+  schemaVersion: number
+  runId: string
+  attempts: RoutingAttempt[]
+  ledger: RoutingAttempt[]
+  progress: RoutingProgress[]
+  spentCostUnits: number
+  approvedCostUnits?: number | null
+  costUnitsAreEstimates?: boolean | null
+  usage: RoutingUsage
+}
+
+export interface RoutingPolicyResponse {
+  capabilities: string[]
+  contracts: string[]
+  policy: {
+    state: 'available' | 'unavailable'
+    code?: string | null
+    message?: string | null
+    policyRevision?: string | null
+    strategies?: string[]
+    providers?: string[]
+    costUnitsAreEstimates?: boolean | null
+    monetaryPricing?: string | null
+  }
+  previewMinRequirementChars: number
+  strategies: string[]
 }
 
 export interface RunDesignPanelSummary {

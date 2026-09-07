@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
 import contextlib
 import datetime as _dt
 import errno
@@ -3031,6 +3032,10 @@ def cmd_plan(args):
 CONTRACTS = [
     "list --json",
     "routing preview --json",
+    "routing attempts --json",
+    "routing outcome --json",
+    "routing report --json",
+    "design-panel create --routing --strategy",
     "routing propose --json",
     "routing show --json",
     "routing explain --json",
@@ -3303,7 +3308,14 @@ def cmd_approve_plan(args):
     if not plan.get("approvalRequired"):
         die(f"run {run.id} does not require a separate combined plan approval", 5)
     stale, why = routing_needs_reapproval(run)
-    if plan.get("executionApprovedAt") and not (stale and args.reapprove):
+    if args.reapprove and not stale:
+        die(f"run {run.id}'s approved route still matches its plan and roles; there is "
+            f"nothing to re-approve", 5)
+    if plan.get("executionApprovedAt") and not args.reapprove:
+        # Amending the plan un-approves it, so that case reaches the normal gate
+        # and supersedes the old route there. A role reassignment does not
+        # un-approve the plan, and that is the case which would otherwise leave a
+        # frozen route refusing every invocation with no way to replace it.
         if stale:
             die(f"{why}.\n"
                 f"       The frozen route no longer describes this run, so nothing can be "
@@ -3311,9 +3323,6 @@ def cmd_approve_plan(args):
                 f"       Re-approve the combined plan, roles and route: "
                 f"fde approve-plan {run.id} --reapprove", 5)
         die(f"run {run.id}'s plan is already approved", 5)
-    if args.reapprove and not stale:
-        die(f"run {run.id}'s approved route still matches its plan and roles; there is "
-            f"nothing to re-approve", 5)
     assignments = roles.get("assignments") or {}
     missing = _missing_required_roles(run, assignments)
     if missing:
@@ -3535,7 +3544,18 @@ def cmd_status(args):
         if routing_doc.get("overrides"):
             print(f"  overrides  {len(routing_doc['overrides'])} recorded — "
                   f"fde routing show {run.id}")
-        print("  usage      unavailable — no provider has reported usage for this run")
+        spent = routing_spent_cost_units(run)
+        cap = (routing_doc.get("limits") or {}).get("maxCostUnits") or 0
+        attempts = routing_attempts(run)
+        print(f"  attempts   {len(attempts)} recorded, "
+              f"~{spent:g} of {cap:g} approved cost units spent (estimates)")
+        rollup = routing_usage_rollup(run)
+        reported = [field for field, value in rollup.items()
+                    if isinstance(value, dict) and value.get("state") == "reported"
+                    and field not in ("attempts", "retries", "escalations")]
+        print(f"  usage      "
+              + (f"reported: {', '.join(reported)}" if reported else
+                 "no provider has reported usage — unavailable, not zero"))
 
     report = artifact_report(run)
     print("\nartifacts")
@@ -4014,11 +4034,19 @@ def cmd_invoke(args):
         "taskId": (route or {}).get("taskId"),
         "model": (route or {}).get("model"),
         "effort": (route or {}).get("effort"),
+        "tier": (route or {}).get("tier"),
+        "attempt": (route or {}).get("attempt"),
+        "mode": (route or {}).get("mode"),
         "specialist": (route or {}).get("specialist"),
         "source": "approved-routing" if route else "manual",
     }
+    if route and route.get("attemptReason"):
+        resolved_route["attemptReason"] = _safe_line(route["attemptReason"],
+                                                     ROUTING_MAX_REASON_CHARS)
 
     if args.dry_run:
+        # A dry run reserves nothing and records nothing: it is the answer to
+        # "what would this do", and an answer that spends a retry is not one.
         print(json.dumps({"argv": argv, "env": extra_env, "stage": stage,
                           "agent": agent_id, "roles": held, "write": bool(args.write),
                           "route": resolved_route}))
@@ -4037,12 +4065,18 @@ def cmd_invoke(args):
 
     out_dir = run.artifacts_dir / STAGE_DIR.get(stage, stage)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{stage}-{agent_id}-{started:%Y%m%dT%H%M%S}.md"
+    # A routed attempt names itself in the filename. A failed attempt is
+    # evidence for the escalation that follows it, so it is filed beside its
+    # successor rather than replaced by it.
+    attempt_marker = (f"-a{resolved_route['attempt']}"
+                      if resolved_route.get("attempt") else "")
+    out = out_dir / f"{stage}-{agent_id}{attempt_marker}-{started:%Y%m%dT%H%M%S}.md"
     write_atomic(out, (
         f"# {stage} — {agent_label(agents, agent_id)}\n\n"
         f"- run: {run.id}\n- stage: {stage}\n- roles held: {', '.join(held)}\n"
         f"- mode: {'write (approved)' if args.write else 'read-only'}\n"
-        + (f"- routed task: {resolved_route['taskId']}\n"
+        + (f"- routed task: {resolved_route['taskId']}"
+           f" (attempt {resolved_route['attempt']}, {resolved_route['mode']})\n"
            f"- model/effort: {resolved_route['model']} / {resolved_route['effort']}\n"
            if resolved_route["taskId"] else
            "- model/effort: selected manually for this run\n")
@@ -4052,12 +4086,27 @@ def cmd_invoke(args):
         f"> verify claims about the codebase against the codebase.\n\n"
         f"---\n\n{proc.stdout.strip()}\n"
         + (f"\n\n## stderr\n\n```\n{proc.stderr.strip()[:4000]}\n```\n" if proc.stderr.strip() else "")))
+    # The attempt is recorded whatever happened, before anything is judged. Its
+    # duration is measured here so it is 'reported'; token counts are not
+    # available on this path, so they stay 'unavailable' rather than becoming 0.
+    attempt_usage = None
+    if route and route.get("plan"):
+        attempt_usage = blank_usage(
+            "the CLI invocation path does not return provider usage")
+        attempt_usage["durationMs"] = usage_value(
+            "reported", int((now() - started).total_seconds() * 1000),
+            "measured by the controller")
+        record_routing_attempt(
+            run, route["routing"], route["task"], route["plan"],
+            usage=attempt_usage,
+            outcome="fail" if proc.returncode != 0 else "unknown",
+            artifact=str(out.relative_to(run.dir)), exit_code=proc.returncode)
     run.event("invoke.end", agent=agent_id, stage=stage, exit=proc.returncode,
               artifact=str(out), route=resolved_route,
               # Usage is reported by a provider or it is unavailable. It is never
               # inferred, and never written as zero.
-              usage={"state": "unavailable", "reason":
-                     "this invocation path does not receive provider usage reporting"})
+              usage=attempt_usage or {"state": "unavailable", "reason":
+                                      "this run selects its model and effort manually"})
 
     sys.stdout.write(proc.stdout)
     if proc.stderr.strip():
@@ -4245,6 +4294,12 @@ ROUTING_CAPABILITIES = [
     "routing.start-auto",
     "routing.invoke-task-id",
     "routing.status-summary",
+    "routing.attempts",
+    "routing.outcome",
+    "routing.retry-ceilings",
+    "routing.usage-provenance",
+    "routing.report",
+    "routing.design-panel-auto",
 ]
 
 ROUTING_EVENT_KINDS = (
@@ -5793,6 +5848,14 @@ def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, requ
         policy, agents, stages=stages, assignments=assignments,
         orchestrator=orchestrator, assessment=assessment, strategy=strategy)
 
+    # A stage floor can put a task in a stricter band than the run's own, and the
+    # run's ceilings have to be able to pay for the work the run actually plans.
+    # Taking the budget from the assessment band alone produced a plan whose
+    # first estimate only just fitted and whose first retry could never fit,
+    # which is a ceiling that refuses the thing it was sized for.
+    limit_band = _max_band(effective_band, *[task["band"] for task in tasks])
+    limits = dict(policy["limits"][limit_band])
+
     reviewer, reviewer_warnings, reviewer_gaps = add_independent_review(
         policy, agents, tasks=tasks, stages=stages, assignments=assignments,
         orchestrator=orchestrator, assessment=assessment, strategy=strategy,
@@ -5818,11 +5881,12 @@ def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, requ
     cap = float(limits["maxCostUnits"])
     trimmed = []
 
+
     def total():
         return round(orchestrator_decision["expectedCostUnits"]
                      + sum(task["estimatedCostUnits"] for task in tasks), 2)
 
-    band_for_limits = effective_band
+    band_for_limits = limit_band
     while total() > cap:
         droppable = [task for task in tasks
                      if task["discretionary"] and task.get("independence") is None]
@@ -5868,7 +5932,7 @@ def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, requ
     if parallel > int(limits["maxParallel"]):
         warnings.append(
             f"the plan puts {parallel} method(s) on one stage and the "
-            f"'{effective_band}' band allows {limits['maxParallel']} in parallel; the "
+            f"'{limit_band}' band allows {limits['maxParallel']} in parallel; the "
             f"extra ones run in sequence")
 
     decision = {
@@ -5877,7 +5941,11 @@ def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, requ
         "mode": mode,
         "strategy": strategy,
         "assessment": assessment,
+        # The band the orchestrator's own ceiling came from...
         "effectiveBand": effective_band,
+        # ...and the band the run's ceilings came from, which is the strictest
+        # any of its tasks ended up in.
+        "limitBand": limit_band,
         "orchestrator": orchestrator_decision,
         "tasks": tasks,
         "limits": limits,
@@ -6123,6 +6191,7 @@ def refresh_routing_proposal(run: Run, agents=None, *, strategy=None, quiet=True
     merged["approvedWithPlanHash"] = None
     merged["planHash"] = routing_plan_hash(request["stages"], assignments)
     merged["overrides"] = list(doc.get("overrides") or [])
+    merged["supersededApprovals"] = list(doc.get("supersededApprovals") or [])
     save_routing(run, merged)
     sync_routed_session_config(run, merged)
     if doc.get("decisionHash") != merged["decisionHash"]:
@@ -6208,15 +6277,19 @@ def routing_status_summary(run: Run):
                 "independence": task.get("independence"),
                 "reason": _safe_line(task.get("specialistReason") or "",
                                      ROUTING_MAX_REASON_CHARS),
+                "progress": routing_task_progress(run, doc, task.get("taskId")),
             }
             for task in tasks[:ROUTING_MAX_STATUS_TASKS]
         ],
         "tasksTruncated": len(tasks) > ROUTING_MAX_STATUS_TASKS,
         "limits": doc.get("limits"),
         "estimatedCostUnits": doc.get("estimatedCostUnits"),
+        "spentCostUnits": routing_spent_cost_units(run),
         "costUnitsAreEstimates": True,
-        "usage": {"state": "unavailable", "reason":
-                  "no provider usage has been reported for this run yet"},
+        # Per-field provenance, not one flat number: a figure is reported by a
+        # provider, estimated by this engine, or unavailable, and the reader can
+        # tell which without asking.
+        "usage": routing_usage_rollup(run),
         "approved": approved,
         "approvedAt": doc.get("approvedAt"),
         "proposedAt": doc.get("proposedAt"),
@@ -6688,7 +6761,7 @@ def cmd_routing_override(args):
     if not available:
         warnings.append(f"{agent_label(agents, account)} was set by override but is not "
                         f"available on this machine: {detail}")
-    run_band = (doc.get("effectiveBand")
+    run_band = (doc.get("limitBand") or doc.get("effectiveBand")
                 or (doc.get("assessment") or {}).get("band") or "standard")
     cap = float(policy["limits"][run_band]["maxCostUnits"])
     if doc["estimatedCostUnits"] > cap:
@@ -6921,8 +6994,10 @@ def resolve_routed_task(run: Run, agents, *, task_id, agent_id, stage):
             f"'{stage}', which {agent_label(agents, agent_id)} does not hold in this run",
             exit_code=6)
     if not task.get("routable"):
-        return {"taskId": task_id, "model": None, "effort": None,
-                "specialist": task.get("specialist"), "task": task}
+        return {"taskId": task_id, "model": None, "effort": None, "tier": None,
+                "attempt": None, "mode": None, "attemptReason": None,
+                "specialist": task.get("specialist"), "task": task, "routing": doc,
+                "plan": None}
     model, effort = task.get("model"), task.get("effort")
     provider = routing_provider_for(agents, agent_id)
     policy = load_routing_policy()
@@ -6934,8 +7009,985 @@ def resolve_routed_task(run: Run, agents, *, task_id, agent_id, stage):
             "The policy changed after approval. Re-approve the route, or restore the "
             "policy revision it was approved under.",
             exit_code=5)
-    return {"taskId": task_id, "model": model, "effort": effort,
-            "specialist": task.get("specialist"), "task": task}
+    plan = plan_next_attempt(run, agents, doc, task)
+    return {"taskId": task_id, "model": plan["model"], "effort": plan["effort"],
+            "tier": plan["tier"], "attempt": plan["attempt"], "mode": plan["mode"],
+            "attemptReason": plan["reason"],
+            "estimatedCostUnits": plan.get("estimatedCostUnits"),
+            "approvedModel": model, "approvedEffort": effort,
+            "specialist": task.get("specialist"), "task": task, "routing": doc,
+            "plan": plan}
+
+
+
+# ---------------------------------------------- attempts, retry, escalation --
+
+# The only reasons a retry is permitted. "The answer was not what I wanted" is
+# deliberately not on this list: a disliked answer is a scoping problem or a
+# clarification, and spending the budget again on the same prompt is the most
+# expensive possible way of not fixing it.
+ROUTING_RETRY_CLASSIFICATIONS = {
+    "transient-provider": "the provider failed in a way a second attempt is expected to "
+                          "clear — a timeout, a rate limit, a 5xx, a dropped stream",
+    "invalid-contract": "the output did not satisfy the task's stated output contract",
+    "failed-validation": "a deterministic validation of the output failed",
+    "failed-checkpoint": "a checkpoint this stage requires did not pass",
+}
+
+ROUTING_ATTEMPT_MODES = ("initial", "retry", "escalation")
+ROUTING_ATTEMPT_OUTCOMES = ("pass", "fail", "unknown")
+
+# Fields cost telemetry may carry, and nothing else. A prompt, a credential or a
+# model's output has no business in a usage record, and an allowlist is the only
+# form of that rule that survives someone adding a field in a hurry.
+ROUTING_USAGE_FIELDS = ("inputTokens", "outputTokens", "cacheReadTokens",
+                        "cacheWriteTokens", "totalTokens", "durationMs",
+                        "monetaryCost", "currency")
+ROUTING_NUMERIC_USAGE_FIELDS = ("inputTokens", "outputTokens", "cacheReadTokens",
+                                "cacheWriteTokens", "totalTokens", "durationMs",
+                                "monetaryCost")
+ROUTING_USAGE_STATES = ("reported", "estimated", "unavailable")
+ROUTING_MAX_USAGE_BYTES = 64 * 1024
+
+
+def routing_attempts_path(run: Run) -> pathlib.Path:
+    return run.dir / "routing-attempts.jsonl"
+
+
+def routing_attempt_ledger(run: Run, task_id=None):
+    """Every line ever written, in order, exactly as written.
+
+    A failed attempt is evidence. It keeps its own artifact, its own usage
+    record and its own line here, because "we tried the cheap one and it did not
+    hold up" is the only thing that justifies the expensive one."""
+    records = [record for record in read_jsonl(routing_attempts_path(run))
+               if isinstance(record, dict)]
+    if task_id is None:
+        return records
+    return [record for record in records if record.get("taskId") == task_id]
+
+
+def routing_attempts(run: Run, task_id=None):
+    """The ledger replayed into one entry per attempt, latest judgement winning.
+
+    Recording an outcome appends a line rather than editing the attempt it
+    describes, so reading has to replay — the same discipline the approval
+    ledger uses. Without it a judgement would count as another attempt and the
+    retry ceiling would be spent by writing down what happened."""
+    effective = {}
+    for record in routing_attempt_ledger(run, task_id):
+        key = (record.get("taskId"), record.get("attempt"))
+        effective[key] = record
+    return [effective[key] for key in
+            sorted(effective, key=lambda pair: (str(pair[0]), int(pair[1] or 0)))]
+
+
+def usage_value(state, value=None, source=None):
+    """One telemetry figure, with where it came from attached.
+
+    Three states and no fourth. 'reported' means a provider returned this
+    number. 'estimated' means this engine computed it from policy weights.
+    'unavailable' means nobody knows — and it carries no value at all, because a
+    missing measurement written as 0 is a lie that reads like data."""
+    if state not in ROUTING_USAGE_STATES:
+        die(f"unknown usage state '{state}'", 2)
+    if state == "unavailable":
+        return {"state": "unavailable", "value": None,
+                "reason": source or "not reported by the provider"}
+    return {"state": state, "value": value, "source": source}
+
+
+def sanitize_reported_usage(raw):
+    """Take provider-reported numbers and nothing else.
+
+    Reads only the allowlisted keys, requires each to be a finite non-negative
+    number (or a short currency string), and drops everything else without
+    comment. Anything absent stays 'unavailable' rather than becoming zero."""
+    usage = {}
+    if not isinstance(raw, dict):
+        return usage, ["the reported usage was not a JSON object; it was ignored"]
+    notes = []
+    for field in ROUTING_USAGE_FIELDS:
+        if field not in raw:
+            continue
+        value = raw[field]
+        if field == "currency":
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z]{3}", value.strip()):
+                usage[field] = usage_value("reported", value.strip().upper(),
+                                           "provider report")
+            else:
+                notes.append("currency was not a three-letter code; it was ignored")
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            notes.append(f"{field} was not a number; it was ignored")
+            continue
+        if value < 0 or value != value or value in (float("inf"), float("-inf")):
+            notes.append(f"{field} was not a usable measurement; it was ignored")
+            continue
+        usage[field] = usage_value("reported", value, "provider report")
+    ignored = sorted(set(raw) - set(ROUTING_USAGE_FIELDS))
+    if ignored:
+        notes.append("fields outside the usage allowlist were not stored: "
+                     + ", ".join(ignored[:8]))
+    return usage, notes
+
+
+def blank_usage(reason="no provider usage was reported for this attempt"):
+    """Every figure unavailable, said once, honestly."""
+    usage = {field: usage_value("unavailable", source=reason)
+             for field in ROUTING_NUMERIC_USAGE_FIELDS}
+    usage["currency"] = usage_value("unavailable", source=reason)
+    return usage
+
+
+def routing_task_progress(run: Run, doc, task_id):
+    """What has already been spent on one task, and where it got to."""
+    policy_limits = doc.get("limits") or {}
+    attempts = routing_attempts(run, task_id)
+    task = next((entry for entry in doc.get("tasks") or []
+                 if entry.get("taskId") == task_id), None)
+    last = attempts[-1] if attempts else None
+    same_rung = 0
+    if last is not None:
+        for record in reversed(attempts):
+            if (record.get("model"), record.get("effort")) != (last.get("model"),
+                                                               last.get("effort")):
+                break
+            same_rung += 1
+    return {
+        "taskId": task_id,
+        "attempts": len(attempts),
+        "retries": max(0, len(attempts) - 1),
+        "escalations": sum(1 for record in attempts
+                           if record.get("mode") == "escalation"),
+        "attemptsAtCurrentRung": same_rung,
+        "lastOutcome": (last or {}).get("outcome"),
+        "lastClassification": (last or {}).get("classification"),
+        "lastModel": (last or {}).get("model") or (task or {}).get("model"),
+        "lastEffort": (last or {}).get("effort") or (task or {}).get("effort"),
+        "spentCostUnits": round(sum(float(record.get("estimatedCostUnits") or 0.0)
+                                    for record in attempts), 2),
+        "maxRetries": policy_limits.get("maxRetries"),
+    }
+
+
+def routing_spent_cost_units(run: Run):
+    """Estimated units consumed by every recorded attempt in this run."""
+    return round(sum(float(record.get("estimatedCostUnits") or 0.0)
+                     for record in routing_attempts(run)), 2)
+
+
+def _rung_of(policy, ladder, tier, effort):
+    here = (_tier_rank(policy, tier), _effort_rank(policy, effort))
+    for index, rung in enumerate(ladder):
+        if (_tier_rank(policy, rung["tier"]),
+                _effort_rank(policy, rung["effort"])) == here:
+            return index
+    return None
+
+
+def _model_at_rung(policy, provider, rung, *, floor):
+    """The cheapest concrete model at a ladder rung that still clears the floor."""
+    floor_spec = policy["floors"][floor]
+    if _tier_rank(policy, rung["tier"]) < _tier_rank(policy, floor_spec["minimumTier"]) \
+            or _effort_rank(policy, rung["effort"]) < _effort_rank(
+                policy, floor_spec["minimumEffort"]):
+        return None
+    candidates = []
+    for model in (policy["providers"].get(provider) or {}).get("models") or []:
+        if model["tier"] != rung["tier"] or rung["effort"] not in model["efforts"]:
+            continue
+        cost = round(float(model["costWeight"])
+                     * float(policy["effortCostMultiplier"][rung["effort"]]), 2)
+        candidates.append((cost, model["id"], model))
+    if not candidates:
+        return None
+    cost, model_id, model = min(candidates)
+    return {"model": model_id, "label": model.get("label") or model_id,
+            "tier": rung["tier"], "effort": rung["effort"], "costUnits": cost}
+
+
+def plan_next_attempt(run: Run, agents, doc, task):
+    """What the next attempt at this task may use, or a refusal that says why.
+
+    An attempt is not a free action. The first one uses the frozen route. A
+    second one at the same rung is permitted only when the last attempt was
+    recorded as failed AND classified as something a retry can actually fix.
+    Beyond that the only way forward is up the frozen ladder, one rung at a
+    time, and only while every approved ceiling still holds — retry count, model
+    tier, effort and cost units. When one of them does not, this pauses and says
+    so rather than continuing, because quietly spending past an approved ceiling
+    is the failure this whole mechanism exists to prevent."""
+    policy = load_routing_policy()
+    limits = doc.get("limits") or {}
+    task_id = task["taskId"]
+    progress = routing_task_progress(run, doc, task_id)
+    attempts = routing_attempts(run, task_id)
+
+    if not attempts:
+        return {
+            "attempt": 1,
+            "mode": "initial",
+            "model": task.get("model"),
+            "effort": task.get("effort"),
+            "tier": task.get("tier"),
+            "estimatedCostUnits": task.get("estimatedCostUnits"),
+            "reason": "the first attempt uses the approved route",
+        }
+
+    last = attempts[-1]
+    if last.get("outcome") == "pass":
+        raise RoutingError(
+            "routing-task-complete",
+            f"task '{task_id}' already has a passing attempt; running it again would "
+            f"spend the budget on work that succeeded",
+            "Record a new outcome only if that judgement was wrong, or move on to the "
+            "next task.",
+            exit_code=5)
+    if last.get("outcome") != "fail":
+        raise RoutingError(
+            "routing-attempt-unjudged",
+            f"attempt {last.get('attempt')} at task '{task_id}' has no recorded outcome, "
+            f"so there is nothing to retry",
+            f"Record what happened first: fde routing outcome {run.id} --task-id "
+            f"{task_id} --status pass|fail [--classification <reason>]",
+            exit_code=5)
+    classification = last.get("classification")
+    if classification not in ROUTING_RETRY_CLASSIFICATIONS:
+        raise RoutingError(
+            "routing-retry-unclassified",
+            f"attempt {last.get('attempt')} at task '{task_id}' failed without a "
+            f"classification, and a disliked answer is not a reason to spend the budget "
+            f"again",
+            "Classify it as one of: "
+            + ", ".join(ROUTING_RETRY_CLASSIFICATIONS)
+            + f". If the answer was simply not what you wanted, change the task or the "
+              f"plan instead of retrying it.",
+            exit_code=5)
+
+    max_retries = int(limits.get("maxRetries") or 0)
+    if progress["retries"] >= max_retries:
+        routing_event(run, "routing.budget_exhausted", taskId=task_id,
+                      limit="maxRetries", allowed=max_retries,
+                      used=progress["retries"])
+        raise RoutingError(
+            "routing-retry-ceiling",
+            f"task '{task_id}' has used its {max_retries} approved retry attempt(s)",
+            f"Nothing runs past an approved ceiling. Widen the plan, or approve a new "
+            f"route: fde approve-plan {run.id} --reapprove",
+            exit_code=9)
+
+    provider = routing_provider_for(agents, task["accountId"])
+    floor = task.get("qualityFloor") or "standard"
+    ladder = policy["escalation"]["ladder"]
+    ceiling = task.get("escalationCeiling") or {}
+    current_tier = last.get("tier") or task.get("tier")
+    current_effort = last.get("effort") or task.get("effort")
+
+    # A same-tier retry, once, for a failure a same-tier retry can fix.
+    if progress["attemptsAtCurrentRung"] < 2 and classification == "transient-provider":
+        choice = {"model": last.get("model"), "effort": current_effort,
+                  "tier": current_tier,
+                  "costUnits": last.get("estimatedCostUnits"),
+                  "label": last.get("model")}
+        mode, reason = "retry", (
+            f"one same-tier retry for a classified transient provider failure "
+            f"({ROUTING_RETRY_CLASSIFICATIONS[classification]})")
+    else:
+        # Everything else climbs, one rung, along the ladder that was frozen.
+        index = _rung_of(policy, ladder, current_tier, current_effort)
+        if index is None:
+            # The current rung is not on the ladder, so find the first rung above it.
+            here = (_tier_rank(policy, current_tier), _effort_rank(policy, current_effort))
+            index = next((i - 1 for i, rung in enumerate(ladder)
+                          if (_tier_rank(policy, rung["tier"]),
+                              _effort_rank(policy, rung["effort"])) > here), len(ladder) - 1)
+        choice = None
+        for rung in ladder[index + 1:]:
+            if _tier_rank(policy, rung["tier"]) > _tier_rank(policy, ceiling.get(
+                    "tier") or current_tier):
+                break
+            if _effort_rank(policy, rung["effort"]) > _effort_rank(policy, ceiling.get(
+                    "effort") or current_effort):
+                break
+            gate = policy["escalation"].get("requireRecordedFailureAbove")
+            if gate and (_tier_rank(policy, rung["tier"]),
+                         _effort_rank(policy, rung["effort"])) > (
+                    _tier_rank(policy, gate["tier"]), _effort_rank(policy, gate["effort"])):
+                failed_at_gate = any(
+                    record.get("outcome") == "fail"
+                    and record.get("tier") == gate["tier"]
+                    and record.get("effort") == gate["effort"]
+                    for record in attempts)
+                if not failed_at_gate:
+                    continue
+            candidate = _model_at_rung(policy, provider, rung, floor=floor)
+            if candidate is not None:
+                choice = candidate
+                break
+        if choice is None:
+            routing_event(run, "routing.budget_exhausted", taskId=task_id,
+                          limit="escalationCeiling",
+                          allowed=f"{ceiling.get('tier')}/{ceiling.get('effort')}",
+                          used=f"{current_tier}/{current_effort}")
+            raise RoutingError(
+                "routing-escalation-ceiling",
+                f"task '{task_id}' is already at the top of its approved escalation "
+                f"ladder ({current_tier} tier at '{current_effort}' effort), and the "
+                f"approved ceiling is {ceiling.get('tier')}/{ceiling.get('effort')}",
+                f"The approved ceiling is not enough for this task. Say what should "
+                f"change and approve it: fde routing override {run.id} --task-id "
+                f"{task_id} --reason '<why>', or fde approve-plan {run.id} --reapprove.",
+                exit_code=9)
+        mode, reason = "escalation", (
+            f"the lower-cost attempt at {current_tier}/{current_effort} was recorded as "
+            f"failed ({classification}), so this climbs one rung of the approved ladder")
+
+    projected_units = float(choice.get("costUnits") or 0.0)
+    cap = float(limits.get("maxCostUnits") or 0.0)
+    spent = routing_spent_cost_units(run)
+    if cap and spent + projected_units > cap:
+        routing_event(run, "routing.budget_exhausted", taskId=task_id,
+                      limit="maxCostUnits", allowed=cap,
+                      used=round(spent + projected_units, 2))
+        raise RoutingError(
+            "routing-budget-exhausted",
+            f"this attempt would take run {run.id} to about "
+            f"{round(spent + projected_units, 2):g} estimated cost units, and "
+            f"{cap:g} was approved",
+            f"Nothing runs past an approved budget. Approve a larger one deliberately "
+            f"(fde approve-plan {run.id} --reapprove), or narrow the plan.",
+            exit_code=9)
+
+    return {
+        "attempt": progress["attempts"] + 1,
+        "mode": mode,
+        "model": choice["model"],
+        "effort": choice["effort"],
+        "tier": choice["tier"],
+        "estimatedCostUnits": choice.get("costUnits"),
+        "reason": reason,
+        "classification": classification,
+        "previous": {"model": last.get("model"), "effort": last.get("effort"),
+                     "tier": last.get("tier"), "attempt": last.get("attempt")},
+    }
+
+
+def record_routing_attempt(run: Run, doc, task, plan, *, usage=None, outcome="unknown",
+                           artifact=None, exit_code=None, notes=()):
+    """Append one attempt. Never amend an earlier one."""
+    record = {
+        "at": iso(),
+        "runId": run.id,
+        "taskId": task["taskId"],
+        "attempt": plan["attempt"],
+        "mode": plan["mode"],
+        "stage": task.get("stage"),
+        "requiredRole": task.get("requiredRole"),
+        "specialist": task.get("specialist"),
+        "accountId": task.get("accountId"),
+        "provider": task.get("provider"),
+        "model": plan.get("model"),
+        "effort": plan.get("effort"),
+        "tier": plan.get("tier"),
+        "qualityFloor": task.get("qualityFloor"),
+        "estimatedCostUnits": plan.get("estimatedCostUnits"),
+        "decisionHash": doc.get("decisionHash"),
+        "policyRevision": doc.get("policyRevision"),
+        "reason": _safe_line(plan.get("reason") or "", ROUTING_MAX_REASON_CHARS),
+        "outcome": outcome if outcome in ROUTING_ATTEMPT_OUTCOMES else "unknown",
+        "classification": None,
+        "exit": exit_code,
+        "artifact": artifact,
+        "usage": usage or blank_usage(),
+        "notes": [_safe_line(note, 200) for note in notes],
+    }
+    append_jsonl(routing_attempts_path(run), record)
+    if plan["mode"] == "escalation":
+        routing_event(run, "routing.escalated", taskId=task["taskId"],
+                      **{"from": f"{(plan.get('previous') or {}).get('tier')}/"
+                                 f"{(plan.get('previous') or {}).get('effort')}",
+                         "to": f"{plan.get('tier')}/{plan.get('effort')}"})
+    return record
+
+
+@routing_command
+def cmd_routing_outcome(args):
+    """Record what an attempt actually produced.
+
+    This is where a retry is authorised or refused, so it asks for the one thing
+    that decides it: what kind of failure this was. A provider timeout is a
+    retry. An answer you did not like is not, and there is no classification for
+    it on purpose."""
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    attempts = routing_attempts(run, args.task_id)
+    if not attempts:
+        raise RoutingError(
+            "routing-no-attempt",
+            f"task '{_safe_line(str(args.task_id), 60)}' has no recorded attempt in run "
+            f"{run.id}",
+            "Attempts are recorded by `fde invoke --task-id <id>`.",
+            exit_code=4)
+    last = attempts[-1]
+    if args.status == "fail" and args.classification is None:
+        print("A failed attempt needs a classification before a retry is permitted:",
+              file=sys.stderr)
+        for name, meaning in ROUTING_RETRY_CLASSIFICATIONS.items():
+            print(f"  {name:<22} {meaning}", file=sys.stderr)
+        print("  (none of these)        record the failure without authorising a retry",
+              file=sys.stderr)
+    classification = args.classification
+    if classification is not None and classification not in ROUTING_RETRY_CLASSIFICATIONS:
+        raise RoutingError(
+            "routing-classification-unknown",
+            f"'{_safe_line(classification, 40)}' is not a retry classification",
+            "Known: " + ", ".join(ROUTING_RETRY_CLASSIFICATIONS))
+    if args.status == "pass" and classification is not None:
+        raise RoutingError("routing-classification-on-pass",
+                           "a passing attempt has no failure to classify")
+
+    usage = dict(last.get("usage") or blank_usage())
+    notes = list(last.get("notes") or [])
+    if args.usage_file:
+        path = pathlib.Path(args.usage_file)
+        if path.is_symlink() or not path.is_file():
+            raise RoutingError("routing-usage-unreadable",
+                               f"cannot read reported usage from {args.usage_file}")
+        if path.stat().st_size > ROUTING_MAX_USAGE_BYTES:
+            raise RoutingError("routing-usage-too-large",
+                               f"reported usage is larger than "
+                               f"{ROUTING_MAX_USAGE_BYTES} bytes")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RoutingError("routing-usage-unreadable",
+                               f"reported usage is not valid JSON ({exc})")
+        reported, reported_notes = sanitize_reported_usage(raw)
+        usage.update(reported)
+        notes.extend(reported_notes)
+
+    # Append, never amend: the earlier record of this attempt stays exactly as
+    # it was written, and the judgement is a new line beside it.
+    record = dict(last)
+    record["at"] = iso()
+    record["outcome"] = args.status
+    record["classification"] = classification
+    record["usage"] = usage
+    record["notes"] = [_safe_line(note, 200) for note in notes]
+    record["supersedes"] = {"attempt": last.get("attempt"), "at": last.get("at")}
+    record["evidence"] = [_safe_line(item, 200) for item in (args.evidence or [])][:12]
+    record["recordedBy"] = _routing_operator()
+    append_jsonl(routing_attempts_path(run), record)
+
+    progress = routing_task_progress(run, doc, args.task_id)
+    payload = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "runId": run.id,
+        "taskId": args.task_id,
+        "attempt": last.get("attempt"),
+        "outcome": args.status,
+        "classification": classification,
+        "usage": usage,
+        "progress": progress,
+        "notes": record["notes"],
+    }
+    if args.status == "fail":
+        try:
+            payload["nextAttempt"] = plan_next_attempt(
+                run, load_agents(), doc,
+                next(task for task in doc["tasks"]
+                     if task["taskId"] == args.task_id))
+            payload["retryPermitted"] = True
+        except RoutingError as exc:
+            payload["retryPermitted"] = False
+            payload["retryRefusal"] = {"code": exc.code, "message": exc.message,
+                                       "hint": exc.hint or None}
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"\nrecorded  attempt {last.get('attempt')} at {args.task_id}: {args.status}"
+          + (f" ({classification})" if classification else ""))
+    print(f"attempts  {progress['attempts']} "
+          f"({progress['retries']} retry, {progress['escalations']} escalation), "
+          f"~{progress['spentCostUnits']:g} units spent on this task")
+    reported = [field for field, value in usage.items()
+                if isinstance(value, dict) and value.get("state") == "reported"]
+    if reported:
+        print(f"usage     reported: {', '.join(reported)}")
+    else:
+        print("usage     nothing reported by the provider — recorded as unavailable, "
+              "not as zero")
+    if args.status == "fail":
+        if payload.get("retryPermitted"):
+            nxt = payload["nextAttempt"]
+            print(f"next      attempt {nxt['attempt']} may run as {nxt['mode']}: "
+                  f"{nxt['model']}/{nxt['effort']} — {nxt['reason']}")
+        else:
+            print(f"next      no retry: {payload['retryRefusal']['message']}")
+            if payload["retryRefusal"]["hint"]:
+                print(f"          {payload['retryRefusal']['hint']}")
+    for note in record["notes"]:
+        print(f"note      {note}")
+    print()
+    return 0
+
+
+@routing_command
+def cmd_routing_attempts(args):
+    """Every attempt at this run's routed tasks, and what each one cost."""
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    task_id = getattr(args, "task_id", None)
+    records = routing_attempts(run, task_id)
+    ledger = routing_attempt_ledger(run, task_id)
+    progress = [routing_task_progress(run, doc, task["taskId"])
+                for task in doc.get("tasks") or []
+                if task_id is None or task["taskId"] == task_id]
+    payload = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "runId": run.id,
+        "attempts": records,
+        "ledger": ledger,
+        "progress": progress,
+        "spentCostUnits": routing_spent_cost_units(run),
+        "approvedCostUnits": (doc.get("limits") or {}).get("maxCostUnits"),
+        "costUnitsAreEstimates": True,
+        "usage": routing_usage_rollup(run),
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"\nrun     {run.id}")
+    print(f"spent   ~{payload['spentCostUnits']:g} of "
+          f"{payload['approvedCostUnits']:g} approved cost units (estimates)")
+    if not records:
+        print("\nno attempt has been recorded yet\n")
+        return 0
+    print(f"\n  {'task':<18}{'#':>3} {'mode':<11}{'model/effort':<20}"
+          f"{'outcome':<9}{'classification':<22}{'units':>7}")
+    for record in records:
+        choice = f"{record.get('model')}/{record.get('effort')}"
+        print(f"  {record.get('taskId',''):<18}{record.get('attempt',0):>3} "
+              f"{record.get('mode',''):<11}{choice:<20}"
+              f"{record.get('outcome',''):<9}{record.get('classification') or '-':<22}"
+              f"{float(record.get('estimatedCostUnits') or 0):>7.1f}")
+    print("\nusage")
+    for field, value in (payload["usage"] or {}).items():
+        if not isinstance(value, dict):
+            continue
+        if value.get("state") == "unavailable":
+            print(f"  {field:<20} unavailable — {value.get('reason')}")
+        else:
+            print(f"  {field:<20} {value.get('value')} ({value.get('state')})")
+    print()
+    return 0
+
+
+def routing_usage_rollup(run: Run):
+    """Add up what providers actually reported, and say what they did not.
+
+    A field is summed only where every attempt reported it. One missing
+    measurement makes the total unknown, and an unknown total is reported as
+    unavailable rather than as the sum of the parts that happened to arrive."""
+    latest = {(record.get("taskId"), record.get("attempt")): record
+              for record in routing_attempts(run)}
+    rollup = {}
+    for field in ROUTING_NUMERIC_USAGE_FIELDS:
+        values, missing = [], 0
+        for record in latest.values():
+            entry = (record.get("usage") or {}).get(field)
+            if isinstance(entry, dict) and entry.get("state") == "reported" \
+                    and isinstance(entry.get("value"), (int, float)):
+                values.append(float(entry["value"]))
+            else:
+                missing += 1
+        if values and not missing:
+            rollup[field] = usage_value("reported", round(sum(values), 4),
+                                        f"summed over {len(values)} attempt(s)")
+        elif values:
+            rollup[field] = usage_value(
+                "unavailable",
+                source=f"{missing} of {len(values) + missing} attempt(s) reported no "
+                       f"{field}, so a total would be a guess")
+        else:
+            rollup[field] = usage_value(
+                "unavailable", source="no provider reported this figure")
+    rollup["estimatedCostUnits"] = usage_value(
+        "estimated", routing_spent_cost_units(run),
+        "policy cost weights; relative units, not money")
+    rollup["attempts"] = usage_value("reported", len(latest), "controller record")
+    rollup["retries"] = usage_value(
+        "reported", sum(1 for record in latest.values()
+                        if record.get("mode") == "retry"), "controller record")
+    rollup["escalations"] = usage_value(
+        "reported", sum(1 for record in latest.values()
+                        if record.get("mode") == "escalation"), "controller record")
+    return rollup
+
+
+
+# ----------------------------------------------------------- calibration --
+
+# How much evidence a recommendation needs before it is worth reading. Below
+# this a pattern is a coincidence, and a policy nudged by three runs is worse
+# than one nobody touched.
+ROUTING_MIN_CALIBRATION_SAMPLE = 5
+ROUTING_MAX_RECOMMENDATIONS = 12
+ROUTING_MAX_REPORT_RUNS = 500
+
+# Which part of the policy an operator would actually edit when a ceiling keeps
+# stopping work. "limits.*.escalationCeiling" is not a field anybody can change,
+# and pointing at one that does not exist is worse than pointing at nothing.
+ROUTING_CEILING_POLICY_PATHS = {
+    "maxRetries": "limits.*.maxRetries",
+    "maxCostUnits": "limits.*.maxCostUnits",
+    "escalationCeiling": "limits.*.maxAutomaticTier and maxAutomaticEffort, and "
+                         "escalation.ladder",
+}
+
+
+def _report_run_records(project_id=None, since=None):
+    """Every run's durable routing record, read and nothing more.
+
+    Read-only by construction: this opens routing.json, routing-events.jsonl and
+    routing-attempts.jsonl and writes nothing anywhere. A run whose files are
+    missing or unreadable is counted as skipped rather than guessed at."""
+    rows, skipped = [], []
+    for directory in run_dirs()[:ROUTING_MAX_REPORT_RUNS]:
+        doc = read_json(directory / "routing.json")
+        if not isinstance(doc, dict) or doc.get("schemaVersion") != ROUTING_SCHEMA_VERSION:
+            if (directory / "routing.json").exists():
+                skipped.append({"runId": directory.name,
+                                "reason": "routing record is not schema "
+                                          f"{ROUTING_SCHEMA_VERSION}"})
+            continue
+        manifest = read_json(directory / "manifest.json", {}) or {}
+        if project_id and manifest.get("projectId") != project_id:
+            continue
+        approved = doc.get("approvedAt")
+        if since and (approved or doc.get("proposedAt") or "") < since:
+            continue
+        attempts = {}
+        for record in read_jsonl(directory / "routing-attempts.jsonl"):
+            if isinstance(record, dict):
+                attempts[(record.get("taskId"), record.get("attempt"))] = record
+        rows.append({
+            "runId": directory.name,
+            "projectId": manifest.get("projectId"),
+            "state": manifest.get("state"),
+            "routing": doc,
+            "attempts": [attempts[key] for key in
+                         sorted(attempts, key=lambda p: (str(p[0]), int(p[1] or 0)))],
+            "events": [record for record in
+                       read_jsonl(directory / "routing-events.jsonl")
+                       if isinstance(record, dict)],
+        })
+    return rows, skipped
+
+
+def _recommendation(rec_id, *, observation, recommendation, sample, evidence,
+                    applies_to, confidence="low"):
+    return {
+        "id": rec_id,
+        "observation": observation,
+        "recommendation": recommendation,
+        "sampleSize": sample,
+        "confidence": confidence,
+        "appliesTo": applies_to,
+        "evidence": evidence[:6],
+        # Said on every single one, because the moment this is not true the
+        # engine has started tuning itself out of anyone's sight.
+        "applied": False,
+        "note": "for human review only; this report changes no policy",
+    }
+
+
+def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMPLE):
+    """What the record suggests, and what it does not have the evidence to suggest.
+
+    Every output here is a recommendation for a person to read. Nothing in this
+    function writes policy, and nothing anywhere reads its output back as
+    configuration: a system that re-weights its own costs from a handful of runs
+    would drift somewhere nobody chose, and the drift would look like data."""
+    tiers = policy["tiers"]
+    by_band = {}
+    classifications = collections.Counter()
+    overrides_up, override_targets = 0, collections.Counter()
+    exhausted = collections.Counter()
+
+    for row in rows:
+        doc = row["routing"]
+        band = (doc.get("assessment") or {}).get("band")
+        bucket = by_band.setdefault(band, {
+            "runs": 0, "tasks": 0, "firstAttemptPasses": 0, "retries": 0,
+            "escalations": 0, "belowRecommendedPasses": 0, "atOrAbovePasses": 0,
+            "evidence": [],
+        })
+        bucket["runs"] += 1
+        recommended = tiers.get((policy["bands"].get(band) or {}).get(
+            "recommendedTier", "standard"), 1)
+        first_pass = {}
+        for record in row["attempts"]:
+            task_id = record.get("taskId")
+            if record.get("mode") == "retry":
+                bucket["retries"] += 1
+            if record.get("mode") == "escalation":
+                bucket["escalations"] += 1
+            if record.get("classification"):
+                classifications[record["classification"]] += 1
+            if record.get("outcome") == "pass" and int(record.get("attempt") or 0) == 1:
+                first_pass[task_id] = record
+        bucket["tasks"] += len({record.get("taskId") for record in row["attempts"]})
+        bucket["firstAttemptPasses"] += len(first_pass)
+        for task_id, record in first_pass.items():
+            rank = tiers.get(record.get("tier"), recommended)
+            if rank < recommended:
+                bucket["belowRecommendedPasses"] += 1
+                bucket["evidence"].append(
+                    f"{row['runId']} {task_id}: passed first time at "
+                    f"{record.get('tier')}/{record.get('effort')}, below the "
+                    f"'{band}' recommendation")
+            else:
+                bucket["atOrAbovePasses"] += 1
+        for entry in doc.get("overrides") or []:
+            if entry.get("escalation"):
+                overrides_up += 1
+                override_targets[entry.get("target")] += 1
+        for event in row["events"]:
+            if event.get("event") == "routing.budget_exhausted":
+                exhausted[event.get("limit") or "unknown"] += 1
+
+    recommendations, insufficient = [], []
+
+    for band, bucket in sorted(by_band.items(), key=lambda pair: str(pair[0])):
+        spec = policy["bands"].get(band) or {}
+        if bucket["firstAttemptPasses"] < min_sample:
+            insufficient.append({
+                "band": band,
+                "reason": f"{bucket['firstAttemptPasses']} first-attempt pass(es) "
+                          f"recorded for '{band}'; {min_sample} are needed before a "
+                          f"tier recommendation means anything"})
+            continue
+        if bucket["belowRecommendedPasses"] >= min_sample \
+                and bucket["belowRecommendedPasses"] > bucket["atOrAbovePasses"]:
+            recommendations.append(_recommendation(
+                f"lower-recommended-tier-{band}",
+                observation=f"{bucket['belowRecommendedPasses']} of "
+                            f"{bucket['firstAttemptPasses']} first-attempt passes in the "
+                            f"'{band}' band came from a tier below "
+                            f"'{spec.get('recommendedTier')}'",
+                recommendation=f"consider lowering bands.{band}.recommendedTier; the "
+                               f"expected-retry weighting is currently pricing these "
+                               f"choices as riskier than the record shows",
+                sample=bucket["firstAttemptPasses"],
+                evidence=bucket["evidence"],
+                applies_to=f"bands.{band}.recommendedTier",
+                confidence="medium" if bucket["belowRecommendedPasses"] >= 2 * min_sample
+                           else "low"))
+        if bucket["escalations"] >= min_sample and bucket["escalations"] > bucket[
+                "firstAttemptPasses"]:
+            recommendations.append(_recommendation(
+                f"raise-recommended-tier-{band}",
+                observation=f"'{band}' work escalated {bucket['escalations']} time(s) "
+                            f"against {bucket['firstAttemptPasses']} first-attempt "
+                            f"pass(es)",
+                recommendation=f"consider raising bands.{band}.recommendedTier or "
+                               f"floors used by this band; paying twice is more "
+                               f"expensive than starting higher",
+                sample=bucket["escalations"],
+                evidence=bucket["evidence"],
+                applies_to=f"bands.{band}.recommendedTier"))
+
+    dominant = classifications.most_common(1)
+    if dominant and dominant[0][1] >= min_sample:
+        name, count = dominant[0]
+        if name in ("invalid-contract", "failed-validation"):
+            recommendations.append(_recommendation(
+                f"tighten-output-contracts-{name}",
+                observation=f"{count} retries were classified '{name}'",
+                recommendation="the commonest reason for spending the budget twice is "
+                               "an output that did not meet its contract. Tightening the "
+                               "task's stated output contract is cheaper than raising a "
+                               "tier",
+                sample=count,
+                evidence=[f"classification '{name}' recorded {count} time(s)"],
+                applies_to="task output contracts, not this policy"))
+        else:
+            recommendations.append(_recommendation(
+                f"retry-classification-{name}",
+                observation=f"{count} retries were classified '{name}'",
+                recommendation="review whether this failure mode is being handled where "
+                               "it happens rather than by re-running the task",
+                sample=count,
+                evidence=[f"classification '{name}' recorded {count} time(s)"],
+                applies_to="operational practice, not this policy"))
+
+    if overrides_up >= min_sample:
+        recommendations.append(_recommendation(
+            "recurring-upward-overrides",
+            observation=f"operators raised a tier, effort or account {overrides_up} "
+                        f"time(s) by override",
+            recommendation="a decision overridden upward this often is a floor that is "
+                           "set too low. Review the relevant taskFloors and riskFloors "
+                           "rather than leaving operators to correct each run by hand",
+            sample=overrides_up,
+            evidence=[f"{target}: {count} upward override(s)"
+                      for target, count in override_targets.most_common(4)],
+            applies_to="taskFloors / riskFloors"))
+
+    for limit, count in exhausted.most_common(4):
+        if count < min_sample:
+            insufficient.append({
+                "limit": limit,
+                "reason": f"the '{limit}' ceiling was reached {count} time(s); "
+                          f"{min_sample} are needed before that is a pattern"})
+            continue
+        path = ROUTING_CEILING_POLICY_PATHS.get(limit, f"limits.*.{limit}")
+        recommendations.append(_recommendation(
+            f"ceiling-reached-{limit}",
+            observation=f"the '{limit}' ceiling stopped work {count} time(s)",
+            recommendation=f"either the plans reaching it are too wide, or {path} is "
+                           f"set below what this work costs. Both are decisions for a "
+                           f"person; nothing was widened automatically",
+            sample=count,
+            evidence=[f"routing.budget_exhausted recorded {count} time(s) for {limit}"],
+            applies_to=path))
+
+    return {
+        "minSample": min_sample,
+        "recommendations": recommendations[:ROUTING_MAX_RECOMMENDATIONS],
+        "insufficientEvidence": insufficient[:ROUTING_MAX_RECOMMENDATIONS],
+        "policyChanged": False,
+        "note": "Recommendations are for human review. This controller does not update "
+                "its own routing policy, and no part of it reads this report back as "
+                "configuration.",
+    }
+
+
+@routing_command
+def cmd_routing_report(args):
+    """Read-only aggregate reporting over the durable routing record.
+
+    Nothing here is a decision. It counts what the ledgers say, compares it with
+    what the policy assumed, and writes the difference down for a person to act
+    on — or to ignore, which is also a valid answer and the reason this does not
+    apply anything itself."""
+    policy = load_routing_policy()
+    rows, skipped = _report_run_records(
+        project_id=getattr(args, "project", None), since=getattr(args, "since", None))
+    min_sample = max(1, int(getattr(args, "min_sample", None)
+                            or ROUTING_MIN_CALIBRATION_SAMPLE))
+
+    modes = collections.Counter()
+    strategies = collections.Counter()
+    bands = collections.Counter()
+    confidences = collections.Counter()
+    floors = collections.Counter()
+    total_estimated = 0.0
+    total_spent = 0.0
+    approved_runs = 0
+    attempts = retries = escalations = 0
+    reported_fields = collections.Counter()
+    for row in rows:
+        doc = row["routing"]
+        assessment = doc.get("assessment") or {}
+        modes[doc.get("mode")] += 1
+        strategies[doc.get("strategy")] += 1
+        bands[assessment.get("band")] += 1
+        confidences[assessment.get("confidence")] += 1
+        floors[assessment.get("qualityFloor")] += 1
+        total_estimated += float(doc.get("estimatedCostUnits") or 0.0)
+        if doc.get("approvedAt"):
+            approved_runs += 1
+        for record in row["attempts"]:
+            attempts += 1
+            total_spent += float(record.get("estimatedCostUnits") or 0.0)
+            if record.get("mode") == "retry":
+                retries += 1
+            if record.get("mode") == "escalation":
+                escalations += 1
+            for field, value in (record.get("usage") or {}).items():
+                if isinstance(value, dict) and value.get("state") == "reported":
+                    reported_fields[field] += 1
+
+    payload = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "generatedAt": iso(),
+        "policyRevision": policy["policyRevision"],
+        "scope": {
+            "projectId": getattr(args, "project", None),
+            "since": getattr(args, "since", None),
+            "runsRead": len(rows),
+            "runsSkipped": skipped[:12],
+        },
+        "runs": {
+            "total": len(rows),
+            "approved": approved_runs,
+            "byMode": dict(modes.most_common()),
+            "byStrategy": dict(strategies.most_common()),
+            "byBand": dict(bands.most_common()),
+            "byConfidence": dict(confidences.most_common()),
+            "byQualityFloor": dict(floors.most_common()),
+        },
+        "attempts": {
+            "total": attempts,
+            "retries": retries,
+            "escalations": escalations,
+            "firstAttemptOnly": attempts - retries - escalations,
+        },
+        "cost": {
+            "estimatedAtApproval": {"state": "estimated", "value": round(total_estimated, 2),
+                                    "source": "policy cost weights at proposal time"},
+            "estimatedConsumed": {"state": "estimated", "value": round(total_spent, 2),
+                                  "source": "policy cost weights per recorded attempt"},
+            "reportedMonetary": (
+                usage_value("unavailable",
+                            source="no provider reported a monetary cost in this scope")
+                if not reported_fields.get("monetaryCost") else
+                usage_value("reported", None,
+                            f"{reported_fields['monetaryCost']} attempt(s) reported a "
+                            f"monetary cost; see fde routing attempts for the figures")),
+            "costUnitsAreEstimates": True,
+            "reportedUsageFields": dict(reported_fields.most_common()),
+        },
+        "calibration": routing_calibration(policy, rows, min_sample=min_sample),
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+
+    print(f"\nrouting report  {payload['generatedAt']}")
+    print(f"policy          {payload['policyRevision']}")
+    print(f"scope           {len(rows)} run(s) with a routing record"
+          + (f", project {args.project}" if getattr(args, "project", None) else "")
+          + (f", since {args.since}" if getattr(args, "since", None) else ""))
+    if not rows:
+        print("\nnothing to report yet: no run in scope has a routing record.\n")
+        return 0
+    print(f"approved        {approved_runs} of {len(rows)}")
+    print(f"bands           " + ", ".join(f"{band}: {count}" for band, count
+                                          in bands.most_common()))
+    print(f"strategies      " + ", ".join(f"{name}: {count}" for name, count
+                                          in strategies.most_common()))
+    print(f"attempts        {attempts} ({retries} retry, {escalations} escalation)")
+    print(f"cost            ~{round(total_spent, 2):g} consumed of "
+          f"~{round(total_estimated, 2):g} estimated at approval (relative units)")
+    monetary = payload["cost"]["reportedMonetary"]
+    print(f"money           {monetary['state']} — "
+          f"{monetary.get('reason') or monetary.get('source')}")
+    calibration = payload["calibration"]
+    print(f"\ncalibration     {len(calibration['recommendations'])} recommendation(s), "
+          f"minimum sample {calibration['minSample']}")
+    for entry in calibration["recommendations"]:
+        print(f"\n  {entry['id']}  (n={entry['sampleSize']}, "
+              f"confidence {entry['confidence']})")
+        print(f"    seen:    {entry['observation']}")
+        print(f"    suggest: {entry['recommendation']}")
+        print(f"    affects: {entry['appliesTo']}")
+        for item in entry["evidence"]:
+            print(f"      - {item}")
+    for entry in calibration["insufficientEvidence"]:
+        print(f"\n  not enough evidence: {entry['reason']}")
+    print(f"\n{calibration['note']}\n")
+    return 0
 
 
 # -------------------------------------------------------------- design panel --
@@ -8137,6 +9189,8 @@ def _parse_participant(agents, spec, index):
     if len(fields) < 2:
         die(f"--participant expects <agent>:<lens>[:<effort>[:<model>]], got '{_safe_line(spec, 80)}'", 2)
     agent_token, lens_id = fields[0].strip(), fields[1].strip()
+    effort_given = len(fields) > 2 and fields[2].strip() not in ("", "auto")
+    model_given = len(fields) > 3 and fields[3].strip() not in ("", "auto", "default")
     effort = (fields[2].strip() if len(fields) > 2 and fields[2].strip() else "auto")
     model = (fields[3].strip() if len(fields) > 3 and fields[3].strip() else "default")
     agent_id = resolve_agent(agents, agent_token)
@@ -8171,6 +9225,16 @@ def _parse_participant(agents, spec, index):
         "order": index,
         "model": model,
         "effort": effort,
+        # Whether these were the operator's choice or left for the router. An
+        # explicit choice is never overwritten; 'auto' or an omitted field is an
+        # invitation, not a value.
+        "modelGiven": bool(model_given),
+        "effortGiven": bool(effort_given),
+        "routingSource": "operator",
+        "routingReason": None,
+        "tier": None,
+        "qualityFloor": None,
+        "estimatedCostUnits": None,
         "lensId": lens_id,
         "lensLabel": label,
         "lens": text,
@@ -8188,6 +9252,117 @@ def _parse_participant(agents, spec, index):
         "handoffSha256": None,
         "error": None,
     }
+
+
+def panel_routing_band(policy, run: Run, brief):
+    """The band and floor a design panel's concept work sits in.
+
+    A panel works the solutioning stage, so it inherits that stage's floor —
+    which is the point of having the floors in policy rather than in each
+    feature that needs one. The assessment reads the brief the operator already
+    saved and nothing else."""
+    request = routing_request_for(run)
+    request["requirement"] = (brief or request.get("requirement") or "")[
+        :ROUTING_MAX_REQUIREMENT_BYTES]
+    request["stages"] = [PANEL_CONCEPT_STAGE]
+    assessment = assess_run_request(policy, request)
+    floor = _max_floor(policy, policy["taskFloors"][PANEL_CONCEPT_STAGE],
+                       assessment["qualityFloor"])
+    band = _max_band(assessment["band"], ROUTING_FLOOR_BAND[floor])
+    return assessment, band, floor
+
+
+def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
+    """Fill in the model and effort a panel was not given, and nothing else.
+
+    A design panel is several separately authenticated accounts reading one
+    sealed context. Which accounts those are is the operator's decision and the
+    whole basis of the panel's independence, so routing here is strictly about
+    model and effort: it never adds, removes, reorders or substitutes a
+    participant, and it refuses to continue if it finds it has. An explicitly
+    chosen model or effort is left exactly as the operator set it."""
+    if mode != "auto":
+        return None, []
+    policy = load_routing_policy()
+    assessment, band, floor = panel_routing_band(policy, run, brief)
+    limits = policy["limits"][band]
+    identities_before = [(participant["participantId"], participant["agentId"],
+                          participant.get("profile"))
+                         for participant in panel["participants"]]
+    notes, estimated = [], 0.0
+    for participant in panel["participants"]:
+        if participant.get("modelGiven") and participant.get("effortGiven"):
+            notes.append(f"{participant['label']}: model and effort were chosen by the "
+                         f"operator and were left alone")
+            continue
+        decision = select_model(
+            policy, agents, agent_id=participant["agentId"], band=band, floor=floor,
+            strategy=strategy, limits=limits,
+            purpose=f"the {participant['lensLabel']} lens in this design panel")
+        if not decision["routable"]:
+            notes.append(f"{participant['label']}: {decision['reason']}")
+            continue
+        if not participant.get("modelGiven"):
+            participant["model"] = decision["model"]
+        if not participant.get("effortGiven"):
+            participant["effort"] = decision["effort"]
+        if participant["effort"] not in PANEL_EFFORTS:
+            die(f"routing selected an effort a panel cannot use: "
+                f"{participant['effort']}", 2)
+        participant["routingSource"] = "auto"
+        participant["routingReason"] = _safe_line(decision["reason"],
+                                                  ROUTING_MAX_REASON_CHARS)
+        participant["tier"] = decision["tier"]
+        participant["qualityFloor"] = floor
+        participant["estimatedCostUnits"] = decision["expectedCostUnits"]
+        estimated += float(decision["expectedCostUnits"] or 0.0)
+    identities_after = [(participant["participantId"], participant["agentId"],
+                         participant.get("profile"))
+                        for participant in panel["participants"]]
+    if identities_after != identities_before:
+        die("refusing to continue: automatic routing changed a design panel's "
+            "participants. Routing selects a model and an effort; who is in the panel "
+            "is the operator's decision and the reason its independence means "
+            "anything.", 8)
+    routing = {
+        "mode": "auto",
+        "strategy": strategy,
+        "policyRevision": policy["policyRevision"],
+        "band": band,
+        "qualityFloor": floor,
+        "assessmentScore": assessment["score"],
+        "confidence": assessment["confidence"],
+        "estimatedCostUnits": round(estimated, 2),
+        "costUnitsAreEstimates": True,
+        "notes": [_safe_line(note, ROUTING_MAX_REASON_CHARS) for note in notes],
+    }
+    return routing, notes
+
+
+def panel_reconciler_route(run: Run):
+    """The reconciler's model and effort, from the strongest source available.
+
+    Reconciliation is a stage like any other, so an approved route for it is the
+    authority. Failing that, the orchestrator's own approved route. Failing
+    that, the session config, which is what this command used before routing
+    existed."""
+    try:
+        doc = load_routing(run)
+    except RoutingError:
+        return None
+    if doc is None or doc.get("mode") != "auto" or not doc.get("approvedAt"):
+        return None
+    orchestrator = run.orchestrator()
+    for task in doc.get("tasks") or []:
+        if task.get("stage") == PANEL_RECONCILE_STAGE \
+                and task.get("accountId") == orchestrator and task.get("routable"):
+            return {"model": task["model"], "effort": task["effort"],
+                    "source": f"approved routing task {task['taskId']}"}
+    decision = doc.get("orchestrator") or {}
+    if decision.get("routable") and decision.get("accountId") == orchestrator:
+        return {"model": decision["model"], "effort": decision["effort"],
+                "source": "the approved orchestrator route"}
+    return None
 
 
 def _parse_packs(specs, acknowledge_conflict):
@@ -8379,6 +9554,9 @@ def design_panel_summary(run: Run):
         "lensId": participant.get("lensId"),
         "model": participant.get("model"),
         "effort": participant.get("effort"),
+        "tier": participant.get("tier"),
+        "routingSource": participant.get("routingSource") or "operator",
+        "estimatedCostUnits": participant.get("estimatedCostUnits"),
         "state": participant.get("state"),
         "order": participant.get("order"),
         "handoffFrom": list(participant.get("handoffFrom") or []),
@@ -8400,7 +9578,13 @@ def design_panel_summary(run: Run):
         "degradedApprovedAt": panel.get("degradedApprovedAt"),
         "participants": participants,
         "succeededCount": sum(1 for item in participants if item["state"] == "succeeded"),
-        "reconciliation": {"state": (panel.get("reconciliation") or {}).get("state")},
+        "routing": panel.get("routing"),
+        "reconciliation": {
+            "state": (panel.get("reconciliation") or {}).get("state"),
+            "model": (panel.get("reconciliation") or {}).get("model"),
+            "effort": (panel.get("reconciliation") or {}).get("effort"),
+            "modelSource": (panel.get("reconciliation") or {}).get("modelSource"),
+        },
     }
 
 
@@ -8473,6 +9657,28 @@ def cmd_design_panel_create(args):
     packs = _parse_packs(args.pack, args.acknowledge_pack_conflict)
     if args.media_support not in ("none", "file"):
         die("--media-support must be 'none' or 'file'", 2)
+    panel_routing_mode = getattr(args, "routing", None) or "manual"
+    if panel_routing_mode not in ROUTING_MODES:
+        die(f"--routing takes {' or '.join(ROUTING_MODES)}", 2)
+    panel_strategy = getattr(args, "strategy", None)
+    if panel_routing_mode == "manual":
+        if panel_strategy:
+            die("--strategy applies to --routing auto", 2)
+    elif not panel_strategy:
+        # Follow the run's own strategy where it has one: a panel inside an
+        # automatically routed run should not quietly optimise for something
+        # else than the run it belongs to.
+        try:
+            run_routing = load_routing(run)
+        except RoutingError:
+            run_routing = None
+        panel_strategy = ((run_routing or {}).get("strategy")
+                          if (run_routing or {}).get("mode") == "auto" else None)
+        if panel_strategy not in AUTO_STRATEGIES:
+            panel_strategy = load_routing_policy()["defaultStrategy"]
+    panel_routing, panel_routing_notes = route_panel_participants(
+        run, agents, {"participants": participants}, mode=panel_routing_mode,
+        strategy=panel_strategy, brief=brief)
 
     with panel_lock(run):
         existing = load_panel(run, required=False)
@@ -8501,6 +9707,9 @@ def cmd_design_panel_create(args):
             "mediaSupport": args.media_support,
             "packs": packs,
             "packConflictAcknowledged": bool(args.acknowledge_pack_conflict),
+            # Additive: a panel created without routing simply has null here and
+            # keeps the model and effort the operator gave it.
+            "routing": panel_routing,
             "references": references,
             "barrierOpenedAt": None,
             "degradedApprovedAt": None,
@@ -8987,12 +10196,21 @@ def cmd_design_panel_reconcile(args):
                       proposals=[p["participantId"] for p in succeeded])
         prompt_bytes, common_sha, prompt_sha = reconciliation_prompt(run, panel, succeeded)
         session = (run.manifest().get("sessionConfig") or {})
+        reconciler_model = session.get("model") or "default"
+        reconciler_effort = session.get("effort") or "auto"
+        reconciler_source = "the run's session configuration"
+        routed = panel_reconciler_route(run)
+        if routed is not None:
+            reconciler_model = routed["model"]
+            reconciler_effort = routed["effort"]
+            reconciler_source = routed["source"]
         panel["reconciliation"] = {
             "state": "running",
             "agentId": orchestrator,
             "profile": agent.get("profile"),
-            "model": session.get("model") or "default",
-            "effort": session.get("effort") or "auto",
+            "model": reconciler_model,
+            "effort": reconciler_effort,
+            "modelSource": reconciler_source,
             "startedAt": iso(),
             "endedAt": None,
             "promptSha256": prompt_sha,
@@ -9425,6 +10643,41 @@ def main(argv=None):
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_routing_explain)
 
+    c = rt.add_parser("attempts",
+                      help="every attempt at this run's routed tasks, and what each cost")
+    c.add_argument("run_id")
+    c.add_argument("--task-id", dest="task_id", metavar="TASK-ID")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_attempts)
+
+    c = rt.add_parser("outcome",
+                      help="record what an attempt produced; a failure needs a "
+                           "classification before a retry is permitted")
+    c.add_argument("run_id")
+    c.add_argument("--task-id", dest="task_id", required=True, metavar="TASK-ID")
+    c.add_argument("--status", required=True, choices=("pass", "fail"))
+    c.add_argument("--classification", choices=list(ROUTING_RETRY_CLASSIFICATIONS),
+                   help="why it failed, in the only terms a retry can act on")
+    c.add_argument("--evidence", action="append",
+                   help="what shows this outcome; repeatable")
+    c.add_argument("--usage-file", dest="usage_file", metavar="FILE",
+                   help="provider-reported usage as JSON; only allowlisted numeric "
+                        "fields are stored, and nothing is inferred from a missing one")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_outcome)
+
+    c = rt.add_parser("report",
+                      help="read-only aggregate over the routing record, with "
+                           "calibration recommendations for human review")
+    c.add_argument("--project", metavar="PROJECT-ID")
+    c.add_argument("--since", metavar="ISO-TIMESTAMP",
+                   help="only runs approved or proposed at or after this timestamp")
+    c.add_argument("--min-sample", dest="min_sample", type=int, metavar="N",
+                   help=f"evidence needed before a recommendation is offered "
+                        f"(default {ROUTING_MIN_CALIBRATION_SAMPLE})")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_report)
+
     c = rt.add_parser("override",
                       help="change one routed decision, on the record, with a reason")
     c.add_argument("run_id")
@@ -9560,6 +10813,12 @@ def main(argv=None):
     c.add_argument("--media-support", dest="media_support", default="none",
                    choices=["none", "file"],
                    help="what the installed CLI can accept for image inputs")
+    c.add_argument("--routing", choices=list(ROUTING_MODES), default="manual",
+                   help="auto: fill in each participant's model and effort from the "
+                        "shared routing policy. Who is in the panel is never routed")
+    c.add_argument("--strategy", choices=list(AUTO_STRATEGIES),
+                   help="how automatic routing trades quality against cost; defaults to "
+                        "the run's own strategy")
     c.add_argument("--propose-plan", dest="propose_plan", action="store_true",
                    help="propose the design-panel shape and select roles; approves nothing")
     c.add_argument("--replace", action="store_true",

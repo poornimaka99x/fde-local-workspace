@@ -40,7 +40,7 @@ const flagValue = (name) => {
 }
 const key = positional.join('-').replace(/[^A-Za-z0-9._-]/g, '_')
 
-if (args.includes('--stdin') || args.includes('--brief-stdin')) {
+if (args.includes('--stdin') || args.includes('--brief-stdin') || args.includes('--requirement-stdin')) {
   const received = fs.readFileSync(0)
   fs.writeFileSync(path.join(dir, 'stdin-' + key + '.bin'), received)
 }

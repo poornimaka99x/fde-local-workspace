@@ -2,33 +2,72 @@ import { useState, type FormEvent } from 'react'
 import { ApiError, apiSend } from '../../lib/api'
 import { announceChange } from '../../lib/changes'
 import { useApi } from '../../lib/useApi'
-import type { ProjectListResponse, RunSummary } from '../../lib/types'
+import type {
+  ClaudeAccountsResponse,
+  ProjectListResponse,
+  RoutingPolicyResponse,
+  RunSummary,
+} from '../../lib/types'
 import { ErrorState } from '../../components/States'
 import { ClaudeSettings } from '../../components/ClaudeSettings'
 import type { ClaudeEffort } from '../../lib/types'
+import { RoutingPreview } from './RoutingPreview'
+
+const STRATEGY_LABELS: Record<string, string> = {
+  balanced: 'Balanced',
+  quality_first: 'Quality first',
+  cost_first: 'Cost first',
+}
+
+const STRATEGY_HELP: Record<string, string> = {
+  balanced: 'The cheapest choice that also carries the effort this policy prefers for work '
+    + 'of this complexity.',
+  quality_first: 'The highest tier and effort inside the approved ceiling.',
+  cost_first: 'The lowest expected cost that still clears the quality floor — never one '
+    + 'below it.',
+}
 
 /**
  * The new-run flow collects only launch choices and the ask. Scoping the plan
  * and assigning roles happen in the conversation with the orchestrator — this
  * form does not pre-empt either, and it approves nothing.
+ *
+ * Automatic model and effort selection is the recommended mode and the default.
+ * Manual is kept exactly as it was, and choosing the account stays explicit in
+ * both: authentication, organisational access and provider choice are operator
+ * decisions, not routed ones.
  */
 export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
   const projects = useApi<ProjectListResponse>('/api/projects')
+  const accounts = useApi<ClaudeAccountsResponse>('/api/claude/accounts')
+  const routingPolicy = useApi<RoutingPolicyResponse>('/api/routing/policy')
   const [project, setProject] = useState(projectId ?? '')
   const [requirement, setRequirement] = useState('')
   const [orchestrator, setOrchestrator] = useState('work')
   const [model, setModel] = useState('default')
   const [effort, setEffort] = useState<ClaudeEffort>('auto')
   const [shape, setShape] = useState('')
+  const [routingMode, setRoutingMode] = useState<'auto' | 'manual'>('auto')
+  const [strategy, setStrategy] = useState('balanced')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
+
+  const policy = routingPolicy.data?.policy ?? null
+  const routingAvailable = policy?.state === 'available'
+  const auto = routingMode === 'auto' && routingAvailable
+  const strategies = routingPolicy.data?.strategies ?? ['balanced', 'quality_first', 'cost_first']
+  const minChars = routingPolicy.data?.previewMinRequirementChars ?? 24
+  const selectedAccount = (accounts.data?.accounts ?? [])
+    .find((candidate) => candidate.id === orchestrator) ?? null
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
     setSaving(true)
     setError(null)
     try {
-      const body: Record<string, unknown> = { orchestrator, model, effort }
+      const body: Record<string, unknown> = auto
+        ? { orchestrator, routing: 'auto', strategy }
+        : { orchestrator, model, effort, routing: 'manual' }
       if (project !== '') body.projectId = project
       if (requirement.trim() !== '') body.requirement = requirement.trim()
       if (shape.trim() !== '') body.shape = shape.trim()
@@ -90,6 +129,70 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
             />
           </label>
         </p>
+        <fieldset style={{ border: 'none', padding: 0, margin: '0 0 1rem' }}>
+          <legend><strong>Model and effort</strong></legend>
+          <p>
+            <label>
+              <input
+                type="radio"
+                name="routing-mode"
+                value="auto"
+                checked={routingMode === 'auto'}
+                disabled={!routingAvailable}
+                onChange={() => setRoutingMode('auto')}
+              />{' '}
+              Automatic model and effort <span className="muted">(recommended)</span>
+              <br />
+              <span className="muted">
+                The controller selects a concrete model and effort for the account you choose,
+                and proposes the specialist tasks. You still approve everything.
+              </span>
+            </label>
+          </p>
+          <p>
+            <label>
+              <input
+                type="radio"
+                name="routing-mode"
+                value="manual"
+                checked={routingMode === 'manual' || !routingAvailable}
+                onChange={() => setRoutingMode('manual')}
+              />{' '}
+              Manual
+              <br />
+              <span className="muted">Choose the model and the effort yourself.</span>
+            </label>
+          </p>
+          {!routingAvailable && routingPolicy.data !== null ? (
+            <p className="banner warn" role="status">
+              <strong>Automatic routing is unavailable: </strong>
+              {policy?.message ?? 'this controller does not offer a routing policy.'}{' '}
+              Manual selection still works.
+            </p>
+          ) : null}
+        </fieldset>
+
+        {auto ? (
+          <p>
+            <label>
+              <strong>Strategy</strong>
+              <br />
+              <select
+                value={strategy}
+                onChange={(event) => setStrategy(event.target.value)}
+              >
+                {strategies.map((option) => (
+                  <option key={option} value={option}>
+                    {STRATEGY_LABELS[option] ?? option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <br />
+            <span className="muted">{STRATEGY_HELP[strategy] ?? ''}</span>
+          </p>
+        ) : null}
+
         <ClaudeSettings
           accountId={orchestrator}
           model={model}
@@ -98,6 +201,19 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
           onModel={setModel}
           onEffort={setEffort}
           includeCodex
+          lockModelAndEffort={auto}
+          lockedNote="Chosen by the controller for this account. Switch to Manual to pick them yourself."
+        />
+
+        <RoutingPreview
+          enabled={auto}
+          orchestrator={orchestrator}
+          strategy={strategy}
+          requirement={requirement}
+          shape={shape}
+          projectId={project}
+          minChars={minChars}
+          account={selectedAccount}
         />
         {orchestrator === 'codex' ? (
           <p className="banner warn">

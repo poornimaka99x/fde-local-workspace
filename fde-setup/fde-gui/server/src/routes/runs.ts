@@ -22,6 +22,7 @@ import {
 import { block, describeZod, line } from '../schemas/input'
 import type { Services } from '../services/types'
 import { EFFORTS, MODEL_PATTERN } from '../services/accounts'
+import { STRATEGIES as ROUTING_STRATEGIES } from '../schemas/routing'
 import {
   FilePathError,
   listRunFiles,
@@ -58,20 +59,38 @@ function matchesQuery(run: RunSummary, needle: string): boolean {
 
 /**
  * Creating a run collects only what the brief allows: a project, the ask, an
- * orchestrator and an optional named shape. No specialist roles, no plan
- * approval — those stay in the conversation the run is about to have.
+ * orchestrator, how the model is chosen, and an optional named shape. No
+ * specialist roles, no plan approval — those stay in the conversation the run is
+ * about to have.
+ *
+ * `routing: 'auto'` hands the model and effort to the controller and refuses to
+ * carry a model or an effort alongside it, because two answers to the same
+ * question is how one of them ends up ignored. `manual` is the default and
+ * behaves exactly as it did before routing existed, so an existing client that
+ * sends `model` and `effort` and nothing else keeps working unchanged.
  */
-const createRunBody = z.object({
-  projectId: z.string().regex(PROJECT_ID_PATTERN, 'not a valid project id').optional(),
-  requirement: block(4000).optional(),
-  orchestrator: z.enum(['work', 'msc', 'alt', 'bedrock', 'codex']),
-  model: z.string().regex(MODEL_PATTERN).default('default'),
-  effort: z.enum(EFFORTS).default('auto'),
-  shape: z
-    .string()
-    .regex(/^[a-z][a-z-]{0,40}(\+[a-z][a-z-]{0,40}){0,4}$/, 'not a named shape')
-    .optional(),
-})
+const createRunBody = z
+  .object({
+    projectId: z.string().regex(PROJECT_ID_PATTERN, 'not a valid project id').optional(),
+    requirement: block(4000).optional(),
+    orchestrator: z.enum(['work', 'msc', 'alt', 'bedrock', 'codex']),
+    model: z.string().regex(MODEL_PATTERN).optional(),
+    effort: z.enum(EFFORTS).optional(),
+    routing: z.enum(['auto', 'manual']).default('manual'),
+    strategy: z.enum(ROUTING_STRATEGIES).optional(),
+    shape: z
+      .string()
+      .regex(/^[a-z][a-z-]{0,40}(\+[a-z][a-z-]{0,40}){0,4}$/, 'not a named shape')
+      .optional(),
+  })
+  .refine(
+    (body) => body.routing !== 'auto' || (body.model === undefined && body.effort === undefined),
+    'automatic routing selects the model and effort; do not send them as well',
+  )
+  .refine(
+    (body) => body.routing === 'auto' || body.strategy === undefined,
+    'a strategy applies to automatic routing',
+  )
 
 const uploadQuery = z.object({
   name: line(255).pipe(z.string().min(1, 'an original filename is required')),
@@ -230,12 +249,19 @@ export function registerRunRoutes(
       return problem(reply, 400, 'invalid-body', 'That run cannot be created as described.',
         describeZod(parsed.error))
     }
+    // In automatic mode there is nothing to validate here: the controller has
+    // not chosen yet, and it only ever chooses from what this same catalogue
+    // offers. In manual mode the browser may pick only from what this server
+    // showed it, exactly as before.
+    const manualModel = parsed.data.model ?? 'default'
+    const manualEffort = parsed.data.effort ?? 'auto'
     if (
+      parsed.data.routing === 'manual' &&
       parsed.data.orchestrator !== 'codex' &&
       !services.accounts.validateSelection(
         parsed.data.orchestrator,
-        parsed.data.model,
-        parsed.data.effort,
+        manualModel,
+        manualEffort,
       )
     ) {
       return problem(
@@ -270,8 +296,10 @@ export function registerRunRoutes(
     }
     try {
       const args = ['start', '--json', '--orchestrator', parsed.data.orchestrator]
-      if (parsed.data.orchestrator !== 'codex') {
-        args.push('--model', parsed.data.model, '--effort', parsed.data.effort)
+      if (parsed.data.routing === 'auto') {
+        args.push('--routing', 'auto', '--strategy', parsed.data.strategy ?? 'balanced')
+      } else if (parsed.data.orchestrator !== 'codex') {
+        args.push('--model', manualModel, '--effort', manualEffort)
       }
       if (parsed.data.projectId !== undefined) args.push('--project', parsed.data.projectId)
       if (parsed.data.shape !== undefined) args.push('--shape', parsed.data.shape)

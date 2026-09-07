@@ -16,6 +16,8 @@ import json
 import os
 import pathlib
 import re
+import subprocess
+import sys
 import unittest
 
 from test_fde import FDETest, REPO, SRC_SHARED
@@ -726,9 +728,15 @@ class TestDurableRouting(RoutingTest):
                                         "review": "claude_alt"})
         self.approve(run_id)
         usage = json.loads(self.sb.fde("status", run_id, "--json").stdout)["routing"]["usage"]
-        self.assertEqual(usage["state"], "unavailable")
-        self.assertNotIn("tokens", usage)
-        self.assertNotIn(0, usage.values())
+        for field in ("inputTokens", "outputTokens", "cacheReadTokens",
+                      "cacheWriteTokens", "totalTokens", "monetaryCost", "durationMs"):
+            self.assertEqual(usage[field]["state"], "unavailable", field)
+            self.assertIsNone(usage[field]["value"], field)
+            self.assertTrue(usage[field]["reason"], field)
+        # The one figure this engine can honestly produce is labelled as its own.
+        self.assertEqual(usage["estimatedCostUnits"]["state"], "estimated")
+        self.assertIn("not money", usage["estimatedCostUnits"]["source"])
+        self.assertEqual(usage["attempts"]["value"], 0)
 
 
 # -- 6. overrides ----------------------------------------------------------
@@ -1331,10 +1339,13 @@ class TestIndependentReviewConsistency(RoutingTest):
 
 
 class TestReapproval(RoutingTest):
-    """A plan that moves after approval must have an explicit way back.
+    """A plan or assignment that moves after approval must have a way back.
 
     Without one the frozen route refuses every invocation for the rest of the
-    run's life, which is a worse failure than the one it is protecting against.
+    run's life, which is a worse failure than the one it protects against. The
+    two cases differ: amending the plan un-approves it, so it reaches the normal
+    combined gate; reassigning a role does not, so it needs an explicit
+    re-approval.
     """
 
     def approved_run(self):
@@ -1344,81 +1355,78 @@ class TestReapproval(RoutingTest):
         (self.sb.shared / "runs" / run_id / "tasks").mkdir(exist_ok=True)
         return run_id
 
-    def widen(self, run_id):
-        widened = self.sb.fde("plan", run_id, "--add", "presentation")
-        self.assertEqual(widened.returncode, 0, widened.stderr)
-        self.assertIn("--reapprove", widened.stdout)
-        assigned = self.sb.fde("roles", run_id, "--set", "presentation=claude_alt")
-        self.assertEqual(assigned.returncode, 0, assigned.stderr)
+    def reassign(self, run_id, **roles):
+        args = []
+        for role, identity in roles.items():
+            args += ["--set", f"{role}={identity}"]
+        result = self.sb.fde("roles", run_id, "--reassign", *args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    # -- a role reassignment leaves the plan approved and the route stale ----
 
     def test_a_stale_route_refuses_invocation_and_names_the_way_out(self):
         run_id = self.approved_run()
-        self.widen(run_id)
+        self.reassign(run_id, review="claude_bedrock")
         (self.sb.shared / "runs" / run_id / "tasks" / "s.md").write_text("go")
         result = self.sb.fde("invoke", run_id, "claude_msc", "tasks/s.md",
                              "--stage", "solutioning", "--task-id", "solutioning-1",
                              "--dry-run")
-        self.assertEqual(result.returncode, 7)
+        self.assertEqual(result.returncode, 7, result.stderr)
         self.assertIn("--reapprove", result.stderr)
         status = json.loads(self.sb.fde("status", run_id, "--json").stdout)
         self.assertFalse(status["routing"]["planHashMatches"])
         self.assertIn("--reapprove", status["nextAction"])
+        self.assertTrue(any("--reapprove" in warning for warning in status["warnings"]))
 
-    def test_reapproval_is_required_and_not_implicit(self):
+    def test_a_stale_route_is_not_reapproved_implicitly(self):
         run_id = self.approved_run()
-        self.widen(run_id)
+        self.reassign(run_id, review="claude_bedrock")
         plain = self.sb.fde("approve-plan", run_id, stdin=f"APPROVE PLAN {run_id}\n")
-        self.assertEqual(plain.returncode, 5)
+        self.assertEqual(plain.returncode, 5, plain.stdout)
         self.assertIn("--reapprove", plain.stderr)
-        self.assertIsNone(self.routing_doc(run_id)["approvedWithPlanHash"] and None)
+        self.assertEqual(
+            next(task["accountId"] for task in self.routing_doc(run_id)["tasks"]
+                 if task["taskId"] == "review-1"), "claude_alt",
+            "nothing was re-frozen without the explicit flag")
 
     def test_reapproval_supersedes_the_old_route_without_losing_it(self):
         run_id = self.approved_run()
-        first_hash = self.routing_doc(run_id)["decisionHash"]
-        first_plan_hash = self.routing_doc(run_id)["approvedWithPlanHash"]
-        self.widen(run_id)
+        first = self.routing_doc(run_id)
+        self.reassign(run_id, review="claude_bedrock")
         result = self.sb.fde("approve-plan", run_id, "--reapprove",
                              stdin=f"APPROVE PLAN {run_id}\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("superseded", result.stdout)
         doc = self.routing_doc(run_id)
         self.assertTrue(doc["approvedAt"])
-        self.assertNotEqual(doc["approvedWithPlanHash"], first_plan_hash)
-        self.assertEqual(len(doc["supersededApprovals"]), 1)
-        superseded = doc["supersededApprovals"][0]
-        self.assertEqual(superseded["decisionHash"], first_hash)
-        self.assertEqual(superseded["approvedWithPlanHash"], first_plan_hash)
-        self.assertTrue(superseded["supersededAt"])
-        self.assertIn("presentation", [task["stage"] for task in doc["tasks"]])
-
-    def test_the_new_route_is_invocable_and_the_old_task_ids_still_are(self):
-        run_id = self.approved_run()
-        self.widen(run_id)
-        self.sb.fde("approve-plan", run_id, "--reapprove",
-                    stdin=f"APPROVE PLAN {run_id}\n")
-        (self.sb.shared / "runs" / run_id / "tasks" / "p.md").write_text("build it")
-        added = self.sb.fde("invoke", run_id, "claude_alt", "tasks/p.md",
-                            "--stage", "presentation", "--task-id", "presentation-1",
-                            "--dry-run")
-        self.assertEqual(added.returncode, 0, added.stderr)
-        kept = self.sb.fde("invoke", run_id, "claude_msc", "tasks/p.md",
-                           "--stage", "solutioning", "--task-id", "solutioning-1",
-                           "--dry-run")
-        self.assertEqual(kept.returncode, 0, kept.stderr)
-
-    def test_a_role_reassignment_alone_can_also_be_reapproved(self):
-        """The plan hash covers the assignment, so this is the same dead end."""
-        run_id = self.approved_run()
-        reassigned = self.sb.fde("roles", run_id, "--reassign",
-                                 "--set", "review=claude_bedrock")
-        self.assertEqual(reassigned.returncode, 0, reassigned.stderr)
-        result = self.sb.fde("approve-plan", run_id, "--reapprove",
-                             stdin=f"APPROVE PLAN {run_id}\n")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        doc = self.routing_doc(run_id)
+        self.assertNotEqual(doc["approvedWithPlanHash"], first["approvedWithPlanHash"])
         self.assertEqual(
             next(task["accountId"] for task in doc["tasks"]
                  if task["taskId"] == "review-1"), "claude_bedrock")
+        # The superseded approval is still on the record, and so is why.
+        self.assertEqual(len(doc["supersededApprovals"]), 1)
+        superseded = doc["supersededApprovals"][0]
+        self.assertEqual(superseded["decisionHash"], first["decisionHash"])
+        self.assertEqual(superseded["approvedWithPlanHash"],
+                         first["approvedWithPlanHash"])
+        self.assertEqual(superseded["approvedAt"], first["approvedAt"])
+        self.assertTrue(superseded["supersededAt"])
+        self.assertIn("changed after its route was approved", superseded["reason"])
+
+    def test_the_reapproved_route_is_the_one_that_gets_invoked(self):
+        run_id = self.approved_run()
+        self.reassign(run_id, review="claude_bedrock")
+        self.sb.fde("approve-plan", run_id, "--reapprove",
+                    stdin=f"APPROVE PLAN {run_id}\n")
+        (self.sb.shared / "runs" / run_id / "tasks" / "r.md").write_text("review it")
+        stale_identity = self.sb.fde("invoke", run_id, "claude_alt", "tasks/r.md",
+                                     "--stage", "review", "--task-id", "review-1",
+                                     "--dry-run")
+        self.assertEqual(stale_identity.returncode, 6)
+        current = self.sb.fde("invoke", run_id, "claude_bedrock", "tasks/r.md",
+                              "--stage", "review", "--task-id", "review-1",
+                              "--dry-run")
+        self.assertEqual(current.returncode, 0, current.stderr)
 
     def test_reapproving_an_unchanged_route_is_refused(self):
         run_id = self.approved_run()
@@ -1426,6 +1434,36 @@ class TestReapproval(RoutingTest):
                              stdin=f"APPROVE PLAN {run_id}\n")
         self.assertEqual(result.returncode, 5)
         self.assertIn("nothing to re-approve", result.stderr)
+
+    # -- amending the plan un-approves it, so the normal gate covers it ------
+
+    def test_amending_the_plan_returns_the_run_to_the_normal_gate(self):
+        run_id = self.approved_run()
+        first = self.routing_doc(run_id)
+        widened = self.sb.fde("plan", run_id, "--add", "presentation")
+        self.assertEqual(widened.returncode, 0, widened.stderr)
+        plan = json.loads((self.sb.shared / "runs" / run_id / "plan.json").read_text())
+        self.assertIsNone(plan.get("executionApprovedAt"))
+        assigned = self.sb.fde("roles", run_id, "--set", "presentation=claude_alt")
+        self.assertEqual(assigned.returncode, 0, assigned.stderr)
+        result = self.sb.fde("approve-plan", run_id, stdin=f"APPROVE PLAN {run_id}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        doc = self.routing_doc(run_id)
+        self.assertTrue(doc["approvedAt"])
+        self.assertIn("presentation", [task["stage"] for task in doc["tasks"]])
+        self.assertEqual(len(doc["supersededApprovals"]), 1)
+        self.assertEqual(doc["supersededApprovals"][0]["decisionHash"],
+                         first["decisionHash"])
+        (self.sb.shared / "runs" / run_id / "tasks" / "p.md").write_text("build it")
+        added = self.sb.fde("invoke", run_id, "claude_alt", "tasks/p.md",
+                            "--stage", "presentation", "--task-id", "presentation-1",
+                            "--dry-run")
+        self.assertEqual(added.returncode, 0, added.stderr)
+
+    def test_amending_the_plan_says_the_route_needs_reapproving(self):
+        run_id = self.approved_run()
+        widened = self.sb.fde("plan", run_id, "--add", "presentation")
+        self.assertIn("--reapprove", widened.stdout)
 
 
 class TestDecisionHashBinding(unittest.TestCase):
@@ -1485,6 +1523,695 @@ class TestEscalationCeilingCounting(unittest.TestCase):
             policy, tier="standard", effort="high",
             limits=policy["limits"]["standard"])
         self.assertEqual(at_the_top["rungsAbove"], 0)
+
+
+# -- 11. attempts, retries and escalation ----------------------------------
+
+class AttemptTest(RoutingTest):
+    """Shared setup for the attempt ledger. No tests of its own."""
+
+    # A `claude` that fails on demand, so the ladder is exercised without a
+    # provider and without a network.
+    STUB_CLAUDE = (
+        "#!/usr/bin/env bash\n"
+        "echo 'stub claude' >&2\n"
+        "exit ${CLAUDE_STUB_EXIT:-1}\n")
+
+    def setUp(self):
+        super().setUp()
+        stub = self.sb.bindir / "claude"
+        stub.write_text(self.STUB_CLAUDE)
+        stub.chmod(0o755)
+
+    def approved(self, requirement=CRITICAL_REQUEST,
+                 stages=("intake", "solutioning", "review"),
+                 roles=None, **envkw):
+        roles = roles if roles is not None else {"solutioning": "claude_msc",
+                                                 "review": "claude_alt"}
+        run_id = self.routed_run(requirement=requirement, stages=stages, roles=roles)
+        self.approve(run_id)
+        (self.sb.shared / "runs" / run_id / "tasks").mkdir(exist_ok=True)
+        (self.sb.shared / "runs" / run_id / "tasks" / "s.md").write_text("do the thing")
+        return run_id
+
+    def attempt(self, run_id, task_id="solutioning-1", account="claude_msc",
+                stage="solutioning", **envkw):
+        return self.sb.fde("invoke", run_id, account, "tasks/s.md", "--stage", stage,
+                           "--task-id", task_id, **envkw)
+
+    def outcome(self, run_id, task_id="solutioning-1", status="fail",
+                classification=None, extra=()):
+        args = ["routing", "outcome", run_id, "--task-id", task_id,
+                "--status", status, "--json", *extra]
+        if classification:
+            args += ["--classification", classification]
+        return self.sb.fde(*args)
+
+    def ledger(self, run_id):
+        path = self.sb.shared / "runs" / run_id / "routing-attempts.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+    # -- what counts as a reason to spend the budget again ------------------
+
+
+class TestAttempts(AttemptTest):
+    """Retries are bounded and evidence-driven, or they do not happen."""
+
+    def test_a_disliked_answer_is_not_a_reason_to_retry(self):
+        """14. The classification list has no entry for 'not what I wanted'."""
+        run_id = self.approved()
+        self.assertEqual(self.attempt(run_id).returncode, 1)
+        blocked = self.attempt(run_id)
+        self.assertEqual(blocked.returncode, 5)
+        self.assertIn("a disliked answer is not a reason", blocked.stderr)
+        self.assertIn("change the task or the plan", blocked.stderr)
+        for permitted in ("transient-provider", "invalid-contract",
+                          "failed-validation", "failed-checkpoint"):
+            self.assertIn(permitted, blocked.stderr)
+
+    def test_an_unrecognised_classification_is_refused(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        result = self.sb.fde("routing", "outcome", run_id, "--task-id", "solutioning-1",
+                             "--status", "fail", "--classification", "i-disliked-it",
+                             "--json")
+        self.assertEqual(result.returncode, 2)
+
+    def test_a_passing_attempt_is_not_run_again(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.assertEqual(self.outcome(run_id, status="pass").returncode, 0)
+        again = self.attempt(run_id)
+        self.assertEqual(again.returncode, 5)
+        self.assertIn("already has a passing attempt", again.stderr)
+
+    def test_an_unjudged_attempt_cannot_be_retried(self):
+        run_id = self.approved()
+        self.attempt(run_id, task_id="review-1", account="claude_alt", stage="review",
+                     CLAUDE_STUB_EXIT="0")
+        blocked = self.attempt(run_id, task_id="review-1", account="claude_alt",
+                               stage="review", CLAUDE_STUB_EXIT="0")
+        self.assertEqual(blocked.returncode, 5)
+        self.assertIn("no recorded outcome", blocked.stderr)
+
+    # -- the ladder ---------------------------------------------------------
+
+    def test_one_same_tier_retry_for_a_transient_provider_failure(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        first = json.loads(self.outcome(
+            run_id, classification="transient-provider").stdout)
+        self.assertTrue(first["retryPermitted"])
+        self.assertEqual(first["nextAttempt"]["mode"], "retry")
+        self.assertEqual(first["nextAttempt"]["model"],
+                         first["nextAttempt"]["previous"]["model"])
+        self.assertEqual(self.attempt(run_id).returncode, 1)
+        attempts = [a for a in self.ledger(run_id) if a["taskId"] == "solutioning-1"]
+        self.assertEqual([a["attempt"] for a in attempts if "supersedes" not in a],
+                         [1, 2])
+        self.assertEqual({a["model"] for a in attempts}, {"big"})
+
+    def test_a_contract_failure_escalates_one_rung_of_the_frozen_ladder(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        answer = json.loads(self.outcome(
+            run_id, classification="invalid-contract").stdout)
+        self.assertTrue(answer["retryPermitted"])
+        nxt = answer["nextAttempt"]
+        self.assertEqual(nxt["mode"], "escalation")
+        self.assertGreater(
+            FAKE_POLICY["efforts"].index(nxt["effort"]),
+            FAKE_POLICY["efforts"].index(nxt["previous"]["effort"]))
+        self.assertIn("recorded as failed", nxt["reason"])
+        self.attempt(run_id)
+        escalated = [a for a in self.ledger(run_id)
+                     if a["taskId"] == "solutioning-1" and a["attempt"] == 2]
+        self.assertEqual(escalated[0]["mode"], "escalation")
+        events = [json.loads(line) for line in
+                  (self.sb.shared / "runs" / run_id / "routing-events.jsonl")
+                  .read_text().splitlines() if line]
+        climbed = [e for e in events if e["event"] == "routing.escalated"]
+        self.assertEqual(len(climbed), 1)
+        self.assertEqual(climbed[0]["to"], f"{nxt['tier']}/{nxt['effort']}")
+
+    def test_escalation_stops_at_the_approved_ceiling(self):
+        """14. The ceiling is a bound, not a suggestion."""
+        run_id = self.approved()
+        ceiling = next(task["escalationCeiling"] for task in
+                       self.routing_doc(run_id)["tasks"]
+                       if task["taskId"] == "solutioning-1")
+        for _ in range(6):
+            if self.attempt(run_id).returncode not in (0, 1):
+                break
+            answer = json.loads(self.outcome(
+                run_id, classification="invalid-contract").stdout)
+            if not answer.get("retryPermitted"):
+                break
+        refusal = self.attempt(run_id)
+        self.assertIn(refusal.returncode, (5, 9))
+        self.assertTrue(refusal.stderr.strip())
+        used = [a for a in self.ledger(run_id)
+                if a["taskId"] == "solutioning-1" and "supersedes" not in a]
+        for record in used:
+            self.assertLessEqual(
+                FAKE_POLICY["tiers"][record["tier"]],
+                FAKE_POLICY["tiers"][ceiling["tier"]])
+            self.assertLessEqual(
+                FAKE_POLICY["efforts"].index(record["effort"]),
+                FAKE_POLICY["efforts"].index(ceiling["effort"]))
+        self.assertLessEqual(len(used), 1 + ceiling["maxRetries"])
+
+    def test_the_retry_count_ceiling_holds(self):
+        run_id = self.approved(requirement=STANDARD_REQUEST,
+                               stages=("intake", "solutioning"),
+                               roles={"solutioning": "claude_msc"})
+        allowed = self.routing_doc(run_id)["limits"]["maxRetries"]
+        attempts = 0
+        while True:
+            result = self.attempt(run_id)
+            if result.returncode not in (0, 1):
+                self.assertEqual(result.returncode, 9, result.stderr)
+                self.assertIn("approved retry attempt", result.stderr)
+                break
+            attempts += 1
+            self.assertLessEqual(attempts, allowed + 1)
+            self.outcome(run_id, classification="transient-provider")
+        self.assertEqual(attempts, allowed + 1)
+        events = [json.loads(line) for line in
+                  (self.sb.shared / "runs" / run_id / "routing-events.jsonl")
+                  .read_text().splitlines() if line]
+        exhausted = [e for e in events if e["event"] == "routing.budget_exhausted"]
+        self.assertTrue(exhausted)
+        self.assertEqual(exhausted[-1]["limit"], "maxRetries")
+
+    def test_the_cost_ceiling_pauses_instead_of_continuing(self):
+        tight = json.loads(json.dumps(FAKE_POLICY))
+        for band in tight["limits"].values():
+            band["maxCostUnits"] = 25
+            band["maxRetries"] = 5
+        self.install_policy(tight)
+        run_id = self.approved(requirement=STANDARD_REQUEST,
+                               stages=("intake", "solutioning"),
+                               roles={"solutioning": "claude_msc"})
+        cap = self.routing_doc(run_id)["limits"]["maxCostUnits"]
+        while True:
+            result = self.attempt(run_id)
+            if result.returncode not in (0, 1):
+                break
+            self.outcome(run_id, classification="transient-provider")
+        self.assertEqual(result.returncode, 9, result.stderr)
+        self.assertIn("approved", result.stderr)
+        spent = json.loads(self.sb.fde("routing", "attempts", run_id, "--json").stdout)
+        self.assertLessEqual(spent["spentCostUnits"], cap)
+        events = [json.loads(line) for line in
+                  (self.sb.shared / "runs" / run_id / "routing-events.jsonl")
+                  .read_text().splitlines() if line]
+        self.assertTrue(any(e["event"] == "routing.budget_exhausted"
+                            and e.get("limit") == "maxCostUnits" for e in events))
+
+    def test_a_dry_run_reserves_nothing(self):
+        run_id = self.approved()
+        path = self.sb.shared / "runs" / run_id / "routing-attempts.jsonl"
+        self.assertFalse(path.exists())
+        dry = self.sb.fde("invoke", run_id, "claude_msc", "tasks/s.md",
+                          "--stage", "solutioning", "--task-id", "solutioning-1",
+                          "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertEqual(json.loads(dry.stdout)["route"]["attempt"], 1)
+        self.assertFalse(path.exists(),
+                         "answering 'what would this do' must not spend an attempt")
+
+    # -- every failed attempt survives -------------------------------------
+
+    def test_every_attempt_keeps_its_own_artifact_and_ledger_line(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="invalid-contract")
+        self.attempt(run_id)
+        artifacts = sorted(
+            path.name for path in
+            (self.sb.shared / "runs" / run_id / "artifacts" / "architecture").iterdir()
+            if path.is_file())
+        self.assertEqual(len(artifacts), 2, artifacts)
+        self.assertTrue(any("-a1-" in name for name in artifacts))
+        self.assertTrue(any("-a2-" in name for name in artifacts))
+        lines = self.ledger(run_id)
+        self.assertGreaterEqual(len(lines), 3)
+        # Recording an outcome appends; it never edits the line it describes.
+        first_written = [line for line in lines
+                         if line["attempt"] == 1 and "supersedes" not in line]
+        self.assertEqual(len(first_written), 1)
+        self.assertIsNone(first_written[0]["classification"])
+        judged = [line for line in lines if line.get("supersedes")]
+        self.assertEqual(judged[0]["supersedes"]["attempt"], 1)
+        self.assertEqual(judged[0]["classification"], "invalid-contract")
+
+    def test_recording_an_outcome_does_not_consume_a_retry(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        for _ in range(3):
+            self.outcome(run_id, classification="transient-provider")
+        progress = json.loads(self.sb.fde(
+            "routing", "attempts", run_id, "--task-id", "solutioning-1",
+            "--json").stdout)["progress"][0]
+        self.assertEqual(progress["attempts"], 1)
+        self.assertEqual(progress["retries"], 0)
+
+
+# -- 12. usage telemetry ---------------------------------------------------
+
+class TestUsageTelemetry(AttemptTest):
+    def test_duration_is_reported_and_tokens_are_unavailable(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        record = [line for line in self.ledger(run_id)
+                  if line["attempt"] == 1 and "supersedes" not in line][0]
+        usage = record["usage"]
+        self.assertEqual(usage["durationMs"]["state"], "reported")
+        self.assertIsInstance(usage["durationMs"]["value"], int)
+        for field in ("inputTokens", "outputTokens", "totalTokens", "monetaryCost"):
+            self.assertEqual(usage[field]["state"], "unavailable", field)
+            self.assertIsNone(usage[field]["value"], field)
+            self.assertTrue(usage[field]["reason"], field)
+
+    def test_reported_usage_is_taken_from_a_provider_and_only_the_allowed_fields(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        report = self.sb.tmp / "usage.json"
+        report.write_text(json.dumps({
+            "inputTokens": 1200, "outputTokens": 340, "totalTokens": 1540,
+            "monetaryCost": 0.0412, "currency": "usd",
+            # None of the following may ever be stored.
+            "prompt": "the entire task text",
+            "apiKey": "sk-should-never-be-stored",
+            "completion": "the model's answer",
+        }))
+        answer = json.loads(self.outcome(
+            run_id, status="pass", extra=("--usage-file", str(report))).stdout)
+        usage = answer["usage"]
+        self.assertEqual(usage["inputTokens"], {"state": "reported", "value": 1200,
+                                                "source": "provider report"})
+        self.assertEqual(usage["monetaryCost"]["state"], "reported")
+        self.assertEqual(usage["currency"]["value"], "USD")
+        blob = json.dumps(self.ledger(run_id))
+        # The values never land anywhere. The rejected field NAMES are named in a
+        # diagnostic note on purpose, so an integration sending them can be
+        # fixed rather than silently ignored.
+        for secret in ("the entire task text", "sk-should-never-be-stored",
+                       "the model's answer"):
+            self.assertNotIn(secret, blob)
+        self.assertTrue(any("outside the usage allowlist" in note
+                            for note in answer["notes"]))
+
+    def test_a_fabricated_or_unusable_measurement_is_ignored_not_stored(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        report = self.sb.tmp / "usage.json"
+        report.write_text(json.dumps({"inputTokens": -5, "outputTokens": "many",
+                                      "totalTokens": True, "currency": "dollars"}))
+        answer = json.loads(self.outcome(
+            run_id, status="pass", extra=("--usage-file", str(report))).stdout)
+        for field in ("inputTokens", "outputTokens", "totalTokens", "currency"):
+            self.assertEqual(answer["usage"][field]["state"], "unavailable", field)
+        self.assertGreaterEqual(len(answer["notes"]), 3)
+
+    def test_a_total_is_only_reported_when_every_attempt_reported_it(self):
+        """One missing measurement makes the total unknown, and it says so."""
+        run_id = self.approved()
+        self.attempt(run_id)
+        report = self.sb.tmp / "usage.json"
+        report.write_text(json.dumps({"inputTokens": 100}))
+        self.outcome(run_id, classification="invalid-contract",
+                     extra=("--usage-file", str(report)))
+        self.attempt(run_id)          # second attempt reports nothing
+        rollup = json.loads(self.sb.fde(
+            "routing", "attempts", run_id, "--json").stdout)["usage"]
+        self.assertEqual(rollup["inputTokens"]["state"], "unavailable")
+        self.assertIn("would be a guess", rollup["inputTokens"]["reason"])
+        self.assertEqual(rollup["attempts"]["value"], 2)
+        self.assertEqual(rollup["escalations"]["value"], 1)
+        self.assertEqual(rollup["estimatedCostUnits"]["state"], "estimated")
+
+    def test_a_total_is_reported_when_all_of_them_did(self):
+        run_id = self.approved()
+        report = self.sb.tmp / "usage.json"
+        for classification in ("invalid-contract", None):
+            self.attempt(run_id)
+            report.write_text(json.dumps({"inputTokens": 100, "durationMs": 2000}))
+            if classification:
+                self.outcome(run_id, classification=classification,
+                             extra=("--usage-file", str(report)))
+            else:
+                self.outcome(run_id, status="pass",
+                             extra=("--usage-file", str(report)))
+        rollup = json.loads(self.sb.fde(
+            "routing", "attempts", run_id, "--json").stdout)["usage"]
+        self.assertEqual(rollup["inputTokens"]["state"], "reported")
+        self.assertEqual(rollup["inputTokens"]["value"], 200)
+
+    def test_status_carries_spend_and_per_field_provenance(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="transient-provider")
+        status = json.loads(self.sb.fde("status", run_id, "--json").stdout)["routing"]
+        self.assertGreater(status["spentCostUnits"], 0)
+        self.assertLessEqual(status["spentCostUnits"],
+                             status["limits"]["maxCostUnits"])
+        self.assertEqual(status["usage"]["attempts"]["value"], 1)
+        self.assertEqual(status["usage"]["inputTokens"]["state"], "unavailable")
+        task = next(entry for entry in status["tasks"]
+                    if entry["taskId"] == "solutioning-1")
+        self.assertEqual(task["progress"]["attempts"], 1)
+        self.assertEqual(task["progress"]["lastClassification"], "transient-provider")
+        blob = json.dumps(status)
+        self.assertNotIn("do the thing", blob, "no prompt text in a status summary")
+
+
+# -- 13. design panels keep their guarantees ------------------------------
+
+class TestDesignPanelRouting(RoutingTest):
+    """20. Auto routing may set a model and an effort. Nothing else."""
+
+    BRIEF = ("Redesign the returns self-service flow so a customer can start, track and "
+             "cancel a return without calling support. It must work at 360px and meet "
+             "WCAG AA.")
+
+    def panel_run(self):
+        run_id = self.routed_run(
+            requirement=self.BRIEF,
+            stages=("intake", "solutioning", "review", "reconciliation",
+                    "presentation"),
+            roles={"uiUxDesign": "claude_work,claude_msc,claude_alt",
+                   "solutioning": "claude_msc", "review": "claude_alt",
+                   "presentation": "claude_work"})
+        self.approve(run_id)
+        return run_id
+
+    def create(self, run_id, *extra, expect=0):
+        result = self.sb.fde(
+            "design-panel", "create", run_id, "--replace", "--brief", self.BRIEF,
+            "--participant", "claude_work:flow", "--participant", "claude_msc:visual",
+            "--participant", "claude_alt:system", *extra, "--json")
+        self.assertEqual(result.returncode, expect,
+                         f"stdout={result.stdout}\\nstderr={result.stderr}")
+        return result
+
+    def panel(self, run_id):
+        status = json.loads(self.sb.fde("status", run_id, "--json").stdout)
+        return status["designPanel"]
+
+    def test_manual_panels_are_unchanged(self):
+        run_id = self.panel_run()
+        self.create(run_id)
+        panel = self.panel(run_id)
+        self.assertIsNone(panel["routing"])
+        for participant in panel["participants"]:
+            self.assertEqual(participant["model"], "default")
+            self.assertEqual(participant["effort"], "auto")
+            self.assertEqual(participant["routingSource"], "operator")
+
+    def test_auto_fills_in_a_concrete_model_and_effort_for_each_lens(self):
+        run_id = self.panel_run()
+        self.create(run_id, "--routing", "auto")
+        panel = self.panel(run_id)
+        self.assertEqual(panel["routing"]["mode"], "auto")
+        self.assertEqual(panel["routing"]["policyRevision"], "test-fixture-1")
+        # A panel works the solutioning stage, so it inherits that floor.
+        self.assertEqual(panel["routing"]["qualityFloor"], "high")
+        self.assertIn(panel["routing"]["band"], ("complex", "critical"))
+        self.assertTrue(panel["routing"]["costUnitsAreEstimates"])
+        offered = {model["id"]: model["efforts"] for model in
+                   FAKE_POLICY["providers"]["anthropic"]["models"]}
+        for participant in panel["participants"]:
+            self.assertEqual(participant["routingSource"], "auto")
+            self.assertNotEqual(participant["model"], "default")
+            self.assertIn(participant["model"], offered)
+            self.assertIn(participant["effort"], offered[participant["model"]])
+            self.assertIn(participant["effort"], FDE.PANEL_EFFORTS)
+            self.assertGreater(participant["estimatedCostUnits"], 0)
+
+    def test_an_explicit_choice_is_never_overwritten(self):
+        run_id = self.panel_run()
+        result = self.sb.fde(
+            "design-panel", "create", run_id, "--replace", "--routing", "auto",
+            "--brief", self.BRIEF,
+            "--participant", "claude_work:flow",
+            "--participant", "claude_msc:visual",
+            "--participant", "claude_alt:system:max:big", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        panel = self.panel(run_id)
+        chosen = next(p for p in panel["participants"]
+                      if p["participantId"] == "claude_alt")
+        self.assertEqual((chosen["model"], chosen["effort"]), ("big", "max"))
+        self.assertEqual(chosen["routingSource"], "operator")
+        self.assertTrue(any("chosen by the operator" in note
+                            for note in self.panel(run_id)["routing"]["notes"]))
+        routed = [p for p in panel["participants"] if p["routingSource"] == "auto"]
+        self.assertEqual(len(routed), 2)
+
+    def test_auto_routing_does_not_touch_who_is_in_the_panel(self):
+        """The panel's independence is its accounts, and those are not routed."""
+        run_id = self.panel_run()
+        self.create(run_id)
+        before = [(p["participantId"], p["lensId"], p["order"])
+                  for p in self.panel(run_id)["participants"]]
+        self.create(run_id, "--routing", "auto")
+        after = [(p["participantId"], p["lensId"], p["order"])
+                 for p in self.panel(run_id)["participants"]]
+        self.assertEqual(before, after)
+        self.assertEqual(len({p[0] for p in after}), 3)
+
+    def test_the_same_account_twice_is_still_refused_under_auto(self):
+        run_id = self.panel_run()
+        result = self.sb.fde(
+            "design-panel", "create", run_id, "--replace", "--routing", "auto",
+            "--brief", self.BRIEF,
+            "--participant", "claude_work:flow",
+            "--participant", "claude_work:visual", "--json")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("one opinion", result.stderr)
+
+    def test_distinct_lenses_are_still_required_under_auto(self):
+        run_id = self.panel_run()
+        result = self.sb.fde(
+            "design-panel", "create", run_id, "--replace", "--routing", "auto",
+            "--brief", self.BRIEF,
+            "--participant", "claude_work:flow",
+            "--participant", "claude_msc:flow", "--json")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("distinct design lens", result.stderr)
+
+    def context_text(self, run_id):
+        panel = self.panel(run_id)
+        path = (self.sb.shared / "runs" / run_id / "artifacts" / "design-panel"
+                / "common-context.md")
+        # The panel id is fresh on every create and is embedded in the context,
+        # so it is normalised out; everything else must be byte-identical.
+        return path.read_text(encoding="utf-8").replace(panel["panelId"], "<panel-id>")
+
+    def test_the_sealed_context_does_not_depend_on_which_models_were_chosen(self):
+        """20. Routing sets a model. The sealed context is not about models."""
+        run_id = self.panel_run()
+        self.create(run_id)
+        manual = self.context_text(run_id)
+        self.create(run_id, "--routing", "auto")
+        routed = self.context_text(run_id)
+        self.assertEqual(manual, routed,
+                         "the bytes every participant receives changed because the "
+                         "models did")
+        panel = self.panel(run_id)
+        for participant in panel["participants"]:
+            self.assertNotIn(participant["model"], routed)
+            self.assertNotIn(f"effort {participant['effort']}", routed)
+        self.assertTrue(panel["contextSha256"])
+        self.assertEqual(panel["contextSha256"],
+                         self.panel(run_id)["contextSha256"])
+
+    def test_a_panel_follows_its_run_strategy_unless_told_otherwise(self):
+        run_id = self.routed_run(
+            requirement=self.BRIEF, strategy="quality_first",
+            stages=("intake", "solutioning", "review", "reconciliation"),
+            roles={"uiUxDesign": "claude_work,claude_msc", "solutioning": "claude_msc",
+                   "review": "claude_alt"})
+        self.approve(run_id)
+        result = self.sb.fde(
+            "design-panel", "create", run_id, "--routing", "auto", "--brief", self.BRIEF,
+            "--participant", "claude_work:flow", "--participant", "claude_msc:visual",
+            "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.panel(run_id)["routing"]["strategy"], "quality_first")
+        override = self.sb.fde(
+            "design-panel", "create", run_id, "--replace", "--routing", "auto",
+            "--strategy", "cost_first", "--brief", self.BRIEF,
+            "--participant", "claude_work:flow", "--participant", "claude_msc:visual",
+            "--json")
+        self.assertEqual(override.returncode, 0, override.stderr)
+        self.assertEqual(self.panel(run_id)["routing"]["strategy"], "cost_first")
+
+    def test_strategy_without_auto_is_refused(self):
+        run_id = self.panel_run()
+        result = self.sb.fde(
+            "design-panel", "create", run_id, "--replace", "--strategy", "cost_first",
+            "--brief", self.BRIEF, "--participant", "claude_work:flow",
+            "--participant", "claude_msc:visual", "--json")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--strategy applies to --routing auto", result.stderr)
+
+    def reconciler_route(self, run_id):
+        """Ask the controller itself, in the sandbox, which route the reconciler gets."""
+        script = (
+            "import importlib.machinery, importlib.util, json, sys\n"
+            "loader = importlib.machinery.SourceFileLoader('fde_mod', sys.argv[1])\n"
+            "spec = importlib.util.spec_from_loader(loader.name, loader)\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "loader.exec_module(mod)\n"
+            "print(json.dumps(mod.panel_reconciler_route(mod.Run(sys.argv[2]))))\n")
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(self.sb.shared / "bin" / "fde"), run_id],
+            capture_output=True, text=True, env=self.sb.env(), cwd=str(self.sb.tmp))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_the_reconciler_takes_the_approved_route_when_there_is_one(self):
+        run_id = self.panel_run()
+        doc = self.routing_doc(run_id)
+        reconciliation = next(task for task in doc["tasks"]
+                              if task["stage"] == "reconciliation")
+        self.assertEqual(reconciliation["accountId"], doc["orchestrator"]["accountId"])
+        route = self.reconciler_route(run_id)
+        self.assertIsNotNone(route)
+        self.assertEqual(route["model"], reconciliation["model"])
+        self.assertEqual(route["effort"], reconciliation["effort"])
+        self.assertIn(reconciliation["taskId"], route["source"])
+
+    def test_the_reconciler_falls_back_to_the_session_config_on_a_manual_run(self):
+        run_id = self.sb.start(self.BRIEF, shape="design-panel")
+        assigned = self.sb.fde(
+            "roles", run_id, "--set", "uiUxDesign=claude_work,claude_msc",
+            "--set", "solutioning=claude_msc", "--set", "review=claude_alt",
+            "--set", "presentation=claude_work", "--set", "designSystem=none",
+            "--set", "prReview=none", "--set", "standardsReview=none",
+            "--set", "securityReview=none", "--set", "productManagement=none",
+            "--set", "microsoftContext=none")
+        self.assertEqual(assigned.returncode, 0, assigned.stderr)
+        self.assertIsNone(self.reconciler_route(run_id))
+
+
+# -- 14. calibration reporting is read-only ------------------------------
+
+class TestCalibrationReport(AttemptTest):
+    def test_an_empty_store_reports_nothing_rather_than_guessing(self):
+        report = json.loads(self.sb.fde("routing", "report", "--json").stdout)
+        self.assertEqual(report["runs"]["total"], 0)
+        self.assertEqual(report["calibration"]["recommendations"], [])
+        self.assertFalse(report["calibration"]["policyChanged"])
+
+    def test_the_report_writes_nothing(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="transient-provider")
+        root = self.sb.shared
+        before = {path: path.stat().st_mtime_ns for path in root.rglob("*")
+                  if path.is_file()}
+        result = self.sb.fde("routing", "report", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = {path: path.stat().st_mtime_ns for path in root.rglob("*")
+                 if path.is_file()}
+        self.assertEqual(before, after, "a report must not change the record it reads")
+
+    def test_it_counts_what_the_ledgers_say(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="invalid-contract")
+        self.attempt(run_id)
+        report = json.loads(self.sb.fde("routing", "report", "--json").stdout)
+        self.assertEqual(report["runs"]["total"], 1)
+        self.assertEqual(report["runs"]["approved"], 1)
+        self.assertEqual(report["runs"]["byMode"], {"auto": 1})
+        self.assertEqual(report["attempts"]["total"], 2)
+        self.assertEqual(report["attempts"]["escalations"], 1)
+        self.assertGreater(report["cost"]["estimatedConsumed"]["value"], 0)
+        self.assertEqual(report["cost"]["estimatedConsumed"]["state"], "estimated")
+        self.assertTrue(report["cost"]["costUnitsAreEstimates"])
+
+    def test_money_is_unavailable_until_a_provider_reports_it(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        report = json.loads(self.sb.fde("routing", "report", "--json").stdout)
+        self.assertEqual(report["cost"]["reportedMonetary"]["state"], "unavailable")
+        self.assertIsNone(report["cost"]["reportedMonetary"]["value"])
+
+    def test_a_handful_of_runs_never_produces_a_recommendation(self):
+        """The system must not re-weight itself from three runs."""
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="transient-provider")
+        report = json.loads(self.sb.fde("routing", "report", "--json").stdout)
+        self.assertEqual(report["calibration"]["minSample"], 5)
+        self.assertEqual(report["calibration"]["recommendations"], [])
+        self.assertTrue(report["calibration"]["insufficientEvidence"])
+        reasons = " ".join(entry["reason"] for entry
+                           in report["calibration"]["insufficientEvidence"])
+        self.assertIn("are needed before", reasons)
+
+    def test_a_recommendation_is_a_recommendation_and_says_so(self):
+        run_id = self.approved()
+        for _ in range(2):
+            self.attempt(run_id)
+            self.outcome(run_id, classification="invalid-contract")
+        report = json.loads(self.sb.fde(
+            "routing", "report", "--min-sample", "1", "--json").stdout)
+        calibration = report["calibration"]
+        self.assertTrue(calibration["recommendations"])
+        self.assertFalse(calibration["policyChanged"])
+        self.assertIn("does not update its own routing policy", calibration["note"])
+        for entry in calibration["recommendations"]:
+            self.assertFalse(entry["applied"])
+            self.assertIn("human review only", entry["note"])
+            self.assertTrue(entry["appliesTo"])
+            self.assertTrue(entry["evidence"])
+            self.assertGreaterEqual(entry["sampleSize"], 1)
+        self.assertTrue(any("output contract" in entry["recommendation"]
+                            for entry in calibration["recommendations"]))
+
+    def test_a_ceiling_recommendation_names_a_field_that_exists(self):
+        run_id = self.approved(requirement=STANDARD_REQUEST,
+                               stages=("intake", "solutioning"),
+                               roles={"solutioning": "claude_msc"})
+        while True:
+            result = self.attempt(run_id)
+            if result.returncode not in (0, 1):
+                break
+            self.outcome(run_id, classification="transient-provider")
+        report = json.loads(self.sb.fde(
+            "routing", "report", "--min-sample", "1", "--json").stdout)
+        ceilings = [entry for entry in report["calibration"]["recommendations"]
+                    if entry["id"].startswith("ceiling-reached-")]
+        self.assertTrue(ceilings)
+        for entry in ceilings:
+            for path in entry["appliesTo"].replace(" and ", ", ").split(","):
+                leaf = path.strip().split(".")[-1].strip()
+                if not leaf or leaf in ("ladder",):
+                    continue
+                self.assertTrue(
+                    any(leaf in spec for spec in FAKE_POLICY["limits"].values())
+                    or leaf in FAKE_POLICY.get("escalation", {}),
+                    f"'{leaf}' is not a field of this policy")
+
+    def test_the_report_can_be_scoped_and_says_what_it_read(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        scoped = json.loads(self.sb.fde(
+            "routing", "report", "--project", "no-such-project", "--json").stdout)
+        self.assertEqual(scoped["scope"]["projectId"], "no-such-project")
+        self.assertEqual(scoped["runs"]["total"], 0)
+        future = json.loads(self.sb.fde(
+            "routing", "report", "--since", "2099-01-01T00:00:00+00:00",
+            "--json").stdout)
+        self.assertEqual(future["runs"]["total"], 0)
+        everything = json.loads(self.sb.fde("routing", "report", "--json").stdout)
+        self.assertEqual(everything["runs"]["total"], 1)
+        self.assertEqual(everything["policyRevision"], "test-fixture-1")
 
 
 if __name__ == "__main__":

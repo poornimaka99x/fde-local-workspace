@@ -37,6 +37,7 @@ fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>]
           [--routing manual|auto] [--strategy balanced|quality_first|cost_first]
           [-- <requirement>]
 
+fde approve-plan <run-id> [--reapprove]
 fde routing preview --orchestrator <who> [--strategy <s>] [--shape <name>]
           [--stages a,b,c] [--project <project-id>]
           (--requirement-stdin | --requirement -- <text>) --json
@@ -692,9 +693,23 @@ and prints the revised proposal instead of approving something nobody saw.
 
 The freeze records `approvedAt`, `approvedBy` and `approvedWithPlanHash` — a
 hash of the exact stage slice and role assignment. If either changes afterwards,
-`status --json` reports `routing.planHashMatches: false` with a warning, and
-every invocation is refused with `routing-plan-changed` until the combined plan
-is approved again.
+`status --json` reports `routing.planHashMatches: false` with a warning,
+`nextAction` names the fix, and every invocation is refused with
+`routing-plan-changed`.
+
+There are two ways back, because the two changes differ. **Amending the plan**
+(`fde plan <run-id> --add <stage>`) rewrites `plan.json` without
+`executionApprovedAt`, so the run returns to the ordinary combined gate and
+plain `fde approve-plan <run-id>` covers the recomputed route. **Reassigning a
+role** leaves the plan approved, so it needs `fde approve-plan <run-id>
+--reapprove`, which is refused when there is in fact nothing to re-approve.
+
+Either way the previous freeze is superseded rather than discarded: the old
+`approvedAt`, `approvedBy`, `approvedWithPlanHash`, `decisionHash` and the reason
+it stopped applying are appended to `supersededApprovals`, and a
+`routing.proposed` event records the supersession before the recomputation. The
+new route still has to be read and approved with the typed phrase; nothing is
+re-frozen silently.
 
 ### `invoke --task-id`
 

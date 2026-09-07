@@ -13,6 +13,8 @@ export function ClaudeSettings({
   onModel,
   onEffort,
   includeCodex = false,
+  lockModelAndEffort = false,
+  lockedNote,
 }: {
   accountId: string
   model: string
@@ -21,6 +23,13 @@ export function ClaudeSettings({
   onModel: (value: string) => void
   onEffort: (value: ClaudeEffort) => void
   includeCodex?: boolean
+  /**
+   * The model and the effort are being decided elsewhere — by the controller's
+   * router. The account stays fully selectable, because who holds the work is
+   * an operator decision either way.
+   */
+  lockModelAndEffort?: boolean
+  lockedNote?: string
 }): JSX.Element {
   const accounts = useApi<ClaudeAccountsResponse>('/api/claude/accounts')
   const [showLogin, setShowLogin] = useState(false)
@@ -29,6 +38,7 @@ export function ClaudeSettings({
   const models = selected?.models ?? []
   const selectedModel = models.find((option) => option.id === model) ?? models[0] ?? null
   const managedCodex = includeCodex && accountId === 'codex'
+  const managed = managedCodex || lockModelAndEffort
 
   useEffect(() => {
     if ((includeCodex && accountId === 'codex') || selected !== null || !availableAccounts[0]) return
@@ -64,11 +74,16 @@ export function ClaudeSettings({
         <label>
           <strong>Model</strong>
           <select
-            value={managedCodex ? 'default' : model}
-            disabled={managedCodex || selected === null}
+            value={managed ? 'default' : model}
+            disabled={managed || selected === null}
             onChange={(event) => onModel(event.target.value)}
           >
-            {(managedCodex ? [{ id: 'default', label: 'Managed in Codex' }] : models).map((option) => (
+            {(managedCodex
+              ? [{ id: 'default', label: 'Managed in Codex' }]
+              : lockModelAndEffort
+                ? [{ id: 'default', label: 'Chosen by the controller' }]
+                : models
+            ).map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
           </select>
@@ -76,16 +91,23 @@ export function ClaudeSettings({
         <label>
           <strong>Effort</strong>
           <select
-            value={managedCodex ? 'auto' : effort}
-            disabled={managedCodex || selectedModel === null}
+            value={managed ? 'auto' : effort}
+            disabled={managed || selectedModel === null}
             onChange={(event) => onEffort(event.target.value as ClaudeEffort)}
           >
-            {(managedCodex ? ['auto'] : selectedModel?.efforts ?? ['auto']).map((option) => (
-              <option key={option} value={option}>{option === 'auto' ? 'Default' : option}</option>
+            {(managed ? ['auto'] : selectedModel?.efforts ?? ['auto']).map((option) => (
+              <option key={option} value={option}>
+                {option === 'auto'
+                  ? lockModelAndEffort ? 'Chosen by the controller' : 'Default'
+                  : option}
+              </option>
             ))}
           </select>
         </label>
       </div>
+      {lockModelAndEffort && lockedNote !== undefined ? (
+        <p className="muted">{lockedNote}</p>
+      ) : null}
       {selected ? (
         <div className="stack account-status">
           <span className={`badge ${selected.authState === 'authenticated' || selected.authState === 'external' ? 'ok' : 'warn'}`}>
