@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
 export function useRoute(): { path: string; navigate: (to: string) => void } {
-  const [path, setPath] = useState(() => window.location.pathname || '/')
+  const currentLocation = (): string => `${window.location.pathname || '/'}${window.location.search}`
+  const [location, setLocation] = useState(currentLocation)
 
   useEffect(() => {
-    const onPop = (): void => setPath(window.location.pathname || '/')
+    const onPop = (): void => setLocation(currentLocation())
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
   const navigate = useCallback((to: string) => {
-    if (to === window.location.pathname) return
+    if (to === currentLocation()) return
     window.history.pushState(null, '', to)
-    setPath(to)
+    setLocation(to)
   }, [])
 
-  return { path, navigate }
+  return { path: location.split('?')[0] || '/', navigate }
 }
 
 export function Link({

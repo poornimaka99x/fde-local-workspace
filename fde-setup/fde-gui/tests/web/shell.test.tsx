@@ -67,6 +67,16 @@ describe('the navigation rail', () => {
           projects: [{ projectId: 'returns-a1b2', name: 'Returns modernisation', description: null, repoPaths: [], runCount: 2 }],
         })
       }
+      if (url === '/api/sessions') {
+        return jsonResponse({
+          available: true,
+          sessions: [{
+            runId: '20260906-returns-aaaa', status: 'running', pid: 42,
+            startedAt: '2026-09-06T12:00:00+00:00', exitedAt: null, exitCode: null,
+            cwd: '/tmp', command: [], envKeys: [], stopRequestedAt: null, attachedClients: 0,
+          }],
+        })
+      }
       return jsonResponse({}, 404)
     })
   }
@@ -90,6 +100,15 @@ describe('the navigation rail', () => {
     expect(labels[2]).toContain('An older run')
     expect(within(recents).getByRole('link', { name: /Bedrock pricing/ }))
       .toHaveAttribute('href', '/chats/chat-20260906-aa11')
+  })
+
+  it('keeps every running session one click away from its live console', async () => {
+    seed()
+    render(<AppSidebar path="/runs" />)
+    const running = await screen.findByRole('list', { name: 'Running' })
+    expect(within(running).getByRole('link', { name: /Rework the returns screen/ }))
+      .toHaveAttribute('href', '/runs/20260906-returns-aaaa?tab=session')
+    expect(within(running).getByText('live')).toBeInTheDocument()
   })
 
   it('lists projects and marks the page you are on', async () => {

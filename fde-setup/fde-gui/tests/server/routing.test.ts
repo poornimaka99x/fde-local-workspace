@@ -498,6 +498,64 @@ describe('the routing API', () => {
     expect(readdirSync(harness.runsRoot)).toEqual([])
   })
 
+  // -- run creation ------------------------------------------------------
+
+  it('forwards the routing mode and strategy to the controller', async () => {
+    harness.fixture('start', {
+      schemaVersion: 1,
+      run: { runId: RUN, session: { resumable: true } },
+      nextAction: 'fde plan',
+    })
+    const response = await post('/api/runs', {
+      orchestrator: 'work', routing: 'auto', strategy: 'quality_first',
+      requirement: 'MAX-142 add a paginated orders endpoint',
+    })
+    expect(response.statusCode).toBe(201)
+    const call = harness.calls().find((args) => args[0] === 'start')
+    expect(call).toContain('--routing')
+    expect(call).toContain('auto')
+    expect(call).toContain('--strategy')
+    expect(call).toContain('quality_first')
+    // In automatic mode the controller chooses; sending a model as well would be
+    // two answers to the same question.
+    expect(call).not.toContain('--model')
+    expect(call).not.toContain('--effort')
+  })
+
+  it('keeps manual creation exactly as it was', async () => {
+    harness.fixture('start', {
+      schemaVersion: 1, run: { runId: RUN, session: { resumable: true } },
+    })
+    const response = await post('/api/runs', {
+      orchestrator: 'work', model: 'sonnet', effort: 'high',
+      requirement: 'MAX-142 add a paginated orders endpoint',
+    })
+    expect(response.statusCode).toBe(201)
+    const call = harness.calls().find((args) => args[0] === 'start')
+    expect(call).toContain('--model')
+    expect(call).toContain('sonnet')
+    expect(call).toContain('--effort')
+    expect(call).toContain('high')
+    expect(call).not.toContain('--routing')
+  })
+
+  it('refuses a model alongside automatic routing', async () => {
+    const response = await post('/api/runs', {
+      orchestrator: 'work', routing: 'auto', model: 'sonnet',
+      requirement: 'MAX-142 add a paginated orders endpoint',
+    })
+    expect(response.statusCode).toBe(400)
+    expect(harness.calls().some((args) => args[0] === 'start')).toBe(false)
+  })
+
+  it('refuses a strategy without automatic routing', async () => {
+    const response = await post('/api/runs', {
+      orchestrator: 'work', strategy: 'cost_first',
+      requirement: 'MAX-142 add a paginated orders endpoint',
+    })
+    expect(response.statusCode).toBe(400)
+  })
+
   it('rejects a shape that is not a named shape', async () => {
     const response = await post('/api/routing/preview', {
       orchestrator: 'work', requirement: 'Add a paginated orders endpoint to the API.',

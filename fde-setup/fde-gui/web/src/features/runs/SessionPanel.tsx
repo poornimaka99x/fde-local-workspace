@@ -42,7 +42,7 @@ export function SessionPanel({
 
   const socket = useRef<WebSocket | null>(null)
   const terminal = useRef<TerminalHandle>(null)
-  const autoStartConsumed = useRef(false)
+  const automaticConnectionConsumed = useRef(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -123,14 +123,23 @@ export function SessionPanel({
   }, [attach, run.runId])
 
   useEffect(() => {
-    if (!autoStart || autoStartConsumed.current || state === null || state.available === false) return
-    autoStartConsumed.current = true
-    // The query flag is an edge trigger. Removing it prevents a reload from
-    // launching a completed session again; the running-session path below can
-    // still issue a fresh ticket and attach on demand.
-    const location = new URL(window.location.href)
-    location.searchParams.delete('startSession')
-    window.history.replaceState(window.history.state, '', `${location.pathname}${location.search}${location.hash}`)
+    if (automaticConnectionConsumed.current || state === null || state.available === false) return
+
+    // A newly-created run starts once. An already-running run only asks the
+    // server for a fresh, single-use viewer ticket; the server returns the
+    // existing PTY rather than spawning another process. This makes moving
+    // between runs restore their live consoles without an extra Attach click.
+    const shouldConnect = autoStart || state.session?.status === 'running'
+    if (!shouldConnect) return
+    automaticConnectionConsumed.current = true
+
+    if (autoStart) {
+      // The query flag is an edge trigger. Removing it prevents a reload from
+      // launching a completed session again.
+      const location = new URL(window.location.href)
+      location.searchParams.delete('startSession')
+      window.history.replaceState(window.history.state, '', `${location.pathname}${location.search}${location.hash}`)
+    }
     void resume()
   }, [autoStart, resume, state])
 
@@ -269,8 +278,9 @@ export function SessionPanel({
           />
           <p className="muted">
             This terminal is the <code>fde-start --resume</code> process for this run — not a shell.
-            Closing the tab detaches; it does not stop the session. The transcript is kept in memory
-            only, for as long as this server runs.
+            Leaving this run detaches only its viewer; it does not stop the session. Returning to the
+            Session tab reconnects automatically and replays the in-memory transcript. Other runs
+            continue in parallel for as long as this server runs.
           </p>
         </>
       ) : null}

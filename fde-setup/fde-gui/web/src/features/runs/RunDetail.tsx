@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from '../../lib/router'
 import { formatBytes, formatTime, shortHash, stateTone } from '../../lib/format'
 import { useApi } from '../../lib/useApi'
@@ -17,11 +17,20 @@ type TabId = (typeof TAB_IDS)[number]
 
 export function RunDetail({ runId }: { runId: string }): JSX.Element {
   const autoStart = new URLSearchParams(window.location.search).get('startSession') === '1'
-  const [tab, setTab] = useState<TabId>(autoStart ? 'session' : 'overview')
+  const requestedTab = new URLSearchParams(window.location.search).get('tab')
+  const initialTab: TabId = autoStart
+    ? 'session'
+    : TAB_IDS.includes(requestedTab as TabId) ? requestedTab as TabId : 'overview'
+  const [tab, setTab] = useState<TabId>(initialTab)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<ApiError | null>(null)
   const status = useApi<RunStatus>(`/api/runs/${encodeURIComponent(runId)}`, 20000)
   const files = useApi<FileListResponse>(`/api/runs/${encodeURIComponent(runId)}/files`)
+
+  // RunDetail stays mounted when the lightweight router moves directly from
+  // one run to another, so honor the destination link's requested tab rather
+  // than carrying the previous run's local tab state across.
+  useEffect(() => setTab(initialTab), [runId, requestedTab, autoStart])
 
   if (status.error) return <ErrorState error={status.error} onRetry={status.reload} />
   if (status.data === null) return <Loading label="Loading run…" />

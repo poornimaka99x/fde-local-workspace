@@ -8,6 +8,7 @@ import type {
   ProjectListResponse,
   RunListResponse,
   RunSummary,
+  SessionListResponse,
 } from '../lib/types'
 
 /**
@@ -78,6 +79,7 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
   const runs = useApi<RunListResponse>('/api/runs', 60000)
   const chats = useApi<{ chats: ChatSummary[] }>('/api/chats', 60000)
   const projects = useApi<ProjectListResponse>('/api/projects', 60000)
+  const sessions = useApi<SessionListResponse>('/api/sessions', 5000)
 
   const recents: RecentItem[] = [
     ...(runs.data?.runs ?? []).map((run) => ({
@@ -102,6 +104,8 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
 
   const narrow = useNarrow()
   const projectRows = (projects.data?.projects ?? []).slice(0, PROJECT_LIMIT)
+  const runningSessions = (sessions.data?.sessions ?? [])
+    .filter((session) => session.status === 'running' && !session.runId.startsWith('login:'))
   const loading = runs.data === null && chats.data === null && projects.data === null
 
   return (
@@ -126,6 +130,31 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
       </div>
 
       <RailSections narrow={narrow}>
+      {runningSessions.length > 0 ? (
+        <div className="rail-section">
+          <h2 className="rail-heading" id="rail-running">Running</h2>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }} aria-labelledby="rail-running">
+            {runningSessions.map((session) => {
+              const run = (runs.data?.runs ?? []).find((candidate) => candidate.runId === session.runId)
+              const label = run === undefined ? session.runId : runLabel(run)
+              return (
+                <li key={session.runId}>
+                  <Link
+                    to={`/runs/${session.runId}?tab=session`}
+                    className="rail-item"
+                    current={path === `/runs/${session.runId}`}
+                  >
+                    <Icon name="terminal" className="rail-icon" />
+                    <span className="rail-label" title={label}>{label}</span>
+                    <span className="badge ok">live</span>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="rail-section">
         <h2 className="rail-heading" id="rail-recents">Recents</h2>
         <ul style={{ listStyle: 'none', margin: 0, padding: 0 }} aria-labelledby="rail-recents">

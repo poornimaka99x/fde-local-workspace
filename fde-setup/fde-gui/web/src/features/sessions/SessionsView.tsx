@@ -78,7 +78,7 @@ export function SessionsView(): JSX.Element {
                     {session.runId.startsWith('login:') ? (
                       <span className="mono">{session.runId}</span>
                     ) : (
-                      <Link to={`/runs/${session.runId}`}>{session.runId}</Link>
+                      <Link to={`/runs/${session.runId}?tab=session`}>{session.runId}</Link>
                     )}
                   </td>
                   <td>

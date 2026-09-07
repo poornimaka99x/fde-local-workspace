@@ -215,12 +215,11 @@ describe('the session panel', () => {
     stubFetch({ available: true, session: running }, () => ({
       status: 'existing', ticket: 'fresh-ticket', session: running,
     }))
-    const user = userEvent.setup()
     render(<SessionPanel run={runFixture()} />)
 
-    await user.click(await screen.findByRole('button', { name: 'Attach' }))
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
     expect(FakeSocket.instances[0]?.url).toContain('ticket=fresh-ticket')
+    expect(posted.filter((call) => call.url.includes('/session/resume'))).toHaveLength(1)
   })
 
   it('interrupts first, and only force-stops behind a confirmation', async () => {
@@ -238,10 +237,14 @@ describe('the session panel', () => {
         stopRequestedAt: null,
         attachedClients: 1,
       }
-      stubFetch({ available: true, session: running }, () => running)
+      stubFetch({ available: true, session: running }, (url) =>
+        url.includes('/session/resume')
+          ? { status: 'existing', ticket: 'stop-test-ticket', session: running }
+          : running)
       const user = userEvent.setup()
       render(<SessionPanel run={runFixture()} forceStopDelayMs={10} />)
 
+      await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
       await user.click(await screen.findByRole('button', { name: 'Stop' }))
       expect(posted.at(-1)).toMatchObject({ body: { force: false } })
       const force = await screen.findByRole('button', { name: 'Force stop' })

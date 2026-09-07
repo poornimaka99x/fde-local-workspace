@@ -4009,7 +4009,10 @@ def cmd_invoke(args):
     # refused rather than reconciled.
     route = resolve_routed_task(
         run, agents, task_id=getattr(args, "task_id", None), agent_id=agent_id,
-        stage=stage)
+        stage=stage,
+        # A dry run answers "what would this do". Recording a ceiling event for
+        # a question is how a read starts looking like evidence.
+        probe=bool(args.dry_run))
     if route is None and getattr(args, "task_id", None):
         raise RoutingError(
             "routing-absent",
@@ -6057,12 +6060,16 @@ def routing_request_for(run: Run):
 
 
 def sync_routed_session_config(run: Run, decision):
-    """Keep the orchestrator session's model and effort in step with the route.
+    """Put the APPROVED orchestrator route where `fde-start` already looks.
 
-    `fde-start` already reads sessionConfig on every resume, so an automatically
-    routed run reaches its own conversation through the path that was there
-    before routing existed. The launcher needs no knowledge of any of this, which
-    is the point: one place decides the model, and it is the controller."""
+    `fde-start` reads sessionConfig on every resume, so an automatically routed
+    run reaches its own conversation through the path that was there before
+    routing existed. The launcher needs no knowledge of any of this, which is the
+    point: one place decides the model, and it is the controller.
+
+    Called only once a route is approved. A proposal authorises nothing, and
+    writing one here would have quietly moved the orchestrator's own session
+    onto a model nobody had agreed to yet."""
     orchestrator = decision.get("orchestrator") or {}
     if not orchestrator.get("routable"):
         return
@@ -6132,7 +6139,6 @@ def initialise_routing(run: Run, agents=None, *, quiet=True):
     decision["planHash"] = routing_plan_hash(request["stages"], assignments)
     decision["overrides"] = []
     save_routing(run, decision)
-    sync_routed_session_config(run, decision)
     assessment = decision["assessment"]
     routing_event(run, "routing.assessed", mode="auto", strategy=decision["strategy"],
                   band=assessment["band"], score=assessment["score"],
@@ -6193,7 +6199,6 @@ def refresh_routing_proposal(run: Run, agents=None, *, strategy=None, quiet=True
     merged["overrides"] = list(doc.get("overrides") or [])
     merged["supersededApprovals"] = list(doc.get("supersededApprovals") or [])
     save_routing(run, merged)
-    sync_routed_session_config(run, merged)
     if doc.get("decisionHash") != merged["decisionHash"]:
         routing_event(run, "routing.proposed", mode="auto",
                       strategy=merged["strategy"], band=merged["assessment"]["band"],
@@ -6923,13 +6928,15 @@ def confirm_routing_freeze(run: Run, plan_stages, assignments):
     return doc
 
 
-def resolve_routed_task(run: Run, agents, *, task_id, agent_id, stage):
+def resolve_routed_task(run: Run, agents, *, task_id, agent_id, stage, probe=False):
     """The frozen route for one invocation, or a refusal that says why.
 
-    Nothing here trusts the caller's idea of the model or effort. The approved
-    decision is the authority; the invocation is checked against it on stage,
-    role, identity, model and effort, and a mismatch is refused rather than
-    reconciled."""
+    The caller has no say in the model or the effort: `fde invoke` takes neither,
+    so there is nothing to reconcile. What is checked is that the task the caller
+    named belongs to this stage, that its role is one this identity holds in this
+    run, that the identity is the one the decision assigned, and that the frozen
+    model and effort are still something the policy offers. Any of those failing
+    is a refusal, never a substitution."""
     doc = load_routing(run)
     if doc is None or doc.get("mode") != "auto":
         return None
@@ -7009,7 +7016,7 @@ def resolve_routed_task(run: Run, agents, *, task_id, agent_id, stage):
             "The policy changed after approval. Re-approve the route, or restore the "
             "policy revision it was approved under.",
             exit_code=5)
-    plan = plan_next_attempt(run, agents, doc, task)
+    plan = plan_next_attempt(run, agents, doc, task, probe=probe)
     return {"taskId": task_id, "model": plan["model"], "effort": plan["effort"],
             "tier": plan["tier"], "attempt": plan["attempt"], "mode": plan["mode"],
             "attemptReason": plan["reason"],
@@ -7207,7 +7214,7 @@ def _model_at_rung(policy, provider, rung, *, floor):
             "tier": rung["tier"], "effort": rung["effort"], "costUnits": cost}
 
 
-def plan_next_attempt(run: Run, agents, doc, task):
+def plan_next_attempt(run: Run, agents, doc, task, *, probe=False):
     """What the next attempt at this task may use, or a refusal that says why.
 
     An attempt is not a free action. The first one uses the frozen route. A
@@ -7217,15 +7224,49 @@ def plan_next_attempt(run: Run, agents, doc, task):
     time, and only while every approved ceiling still holds — retry count, model
     tier, effort and cost units. When one of them does not, this pauses and says
     so rather than continuing, because quietly spending past an approved ceiling
-    is the failure this whole mechanism exists to prevent."""
+    is the failure this whole mechanism exists to prevent.
+
+    `probe=True` answers the same question without recording anything. Asking
+    what would happen next is not the same as doing it, and a read that appended
+    a ceiling event would inflate the very evidence the calibration report reads
+    back."""
     policy = load_routing_policy()
     limits = doc.get("limits") or {}
     task_id = task["taskId"]
     progress = routing_task_progress(run, doc, task_id)
     attempts = routing_attempts(run, task_id)
 
+    def _exhausted(**fields):
+        if not probe:
+            routing_event(run, "routing.budget_exhausted", taskId=task_id, **fields)
+
+    def _within_budget(units, plan):
+        """The run's approved cost ceiling, applied to every attempt.
+
+        Including the first one. A later task's opening attempt spends from the
+        same approved budget an earlier task's retries have already drawn on, so
+        checking this on retries alone let a run walk past its ceiling one first
+        attempt at a time."""
+        cap = float(limits.get("maxCostUnits") or 0.0)
+        if not cap:
+            return plan
+        spent = routing_spent_cost_units(run)
+        projected = float(units or 0.0)
+        if spent + projected <= cap:
+            return plan
+        _exhausted(limit="maxCostUnits", allowed=cap,
+                   used=round(spent + projected, 2))
+        raise RoutingError(
+            "routing-budget-exhausted",
+            f"this attempt would take run {run.id} to about "
+            f"{round(spent + projected, 2):g} estimated cost units, and "
+            f"{cap:g} was approved",
+            f"Nothing runs past an approved budget. Approve a larger one deliberately "
+            f"(fde approve-plan {run.id} --reapprove), or narrow the plan.",
+            exit_code=9)
+
     if not attempts:
-        return {
+        return _within_budget(task.get("estimatedCostUnits"), {
             "attempt": 1,
             "mode": "initial",
             "model": task.get("model"),
@@ -7233,7 +7274,7 @@ def plan_next_attempt(run: Run, agents, doc, task):
             "tier": task.get("tier"),
             "estimatedCostUnits": task.get("estimatedCostUnits"),
             "reason": "the first attempt uses the approved route",
-        }
+        })
 
     last = attempts[-1]
     if last.get("outcome") == "pass":
@@ -7267,9 +7308,7 @@ def plan_next_attempt(run: Run, agents, doc, task):
 
     max_retries = int(limits.get("maxRetries") or 0)
     if progress["retries"] >= max_retries:
-        routing_event(run, "routing.budget_exhausted", taskId=task_id,
-                      limit="maxRetries", allowed=max_retries,
-                      used=progress["retries"])
+        _exhausted(limit="maxRetries", allowed=max_retries, used=progress["retries"])
         raise RoutingError(
             "routing-retry-ceiling",
             f"task '{task_id}' has used its {max_retries} approved retry attempt(s)",
@@ -7326,10 +7365,9 @@ def plan_next_attempt(run: Run, agents, doc, task):
                 choice = candidate
                 break
         if choice is None:
-            routing_event(run, "routing.budget_exhausted", taskId=task_id,
-                          limit="escalationCeiling",
-                          allowed=f"{ceiling.get('tier')}/{ceiling.get('effort')}",
-                          used=f"{current_tier}/{current_effort}")
+            _exhausted(limit="escalationCeiling",
+                       allowed=f"{ceiling.get('tier')}/{ceiling.get('effort')}",
+                       used=f"{current_tier}/{current_effort}")
             raise RoutingError(
                 "routing-escalation-ceiling",
                 f"task '{task_id}' is already at the top of its approved escalation "
@@ -7343,23 +7381,7 @@ def plan_next_attempt(run: Run, agents, doc, task):
             f"the lower-cost attempt at {current_tier}/{current_effort} was recorded as "
             f"failed ({classification}), so this climbs one rung of the approved ladder")
 
-    projected_units = float(choice.get("costUnits") or 0.0)
-    cap = float(limits.get("maxCostUnits") or 0.0)
-    spent = routing_spent_cost_units(run)
-    if cap and spent + projected_units > cap:
-        routing_event(run, "routing.budget_exhausted", taskId=task_id,
-                      limit="maxCostUnits", allowed=cap,
-                      used=round(spent + projected_units, 2))
-        raise RoutingError(
-            "routing-budget-exhausted",
-            f"this attempt would take run {run.id} to about "
-            f"{round(spent + projected_units, 2):g} estimated cost units, and "
-            f"{cap:g} was approved",
-            f"Nothing runs past an approved budget. Approve a larger one deliberately "
-            f"(fde approve-plan {run.id} --reapprove), or narrow the plan.",
-            exit_code=9)
-
-    return {
+    return _within_budget(choice.get("costUnits"), {
         "attempt": progress["attempts"] + 1,
         "mode": mode,
         "model": choice["model"],
@@ -7370,7 +7392,7 @@ def plan_next_attempt(run: Run, agents, doc, task):
         "classification": classification,
         "previous": {"model": last.get("model"), "effort": last.get("effort"),
                      "tier": last.get("tier"), "attempt": last.get("attempt")},
-    }
+    })
 
 
 def record_routing_attempt(run: Run, doc, task, plan, *, usage=None, outcome="unknown",
@@ -7421,6 +7443,27 @@ def cmd_routing_outcome(args):
     it on purpose."""
     run = Run(args.run_id)
     doc = load_routing(run, required=True)
+    if not ROUTING_TASK_ID_RE.match(str(args.task_id or "")):
+        raise RoutingError(
+            "routing-task-id-invalid",
+            f"'{_safe_line(str(args.task_id), 60)}' is not a usable task id",
+            exit_code=2)
+    tasks = doc.get("tasks") or []
+    routed_task = next((entry for entry in tasks
+                        if entry.get("taskId") == args.task_id), None)
+    if routed_task is None:
+        # The plan can move under an attempt: a task recorded before a
+        # re-approval may no longer be in the decision. That is worth saying
+        # plainly rather than discovering halfway through writing the record.
+        raise RoutingError(
+            "routing-task-unknown",
+            f"run {run.id}'s current routing decision has no task "
+            f"'{_safe_line(str(args.task_id), 60)}'",
+            "Approved tasks: " + (", ".join(entry.get("taskId") or "?"
+                                            for entry in tasks) or "none")
+            + ". If the plan changed after this attempt ran, its record is still in "
+              "routing-attempts.jsonl.",
+            exit_code=4)
     attempts = routing_attempts(run, args.task_id)
     if not attempts:
         raise RoutingError(
@@ -7495,9 +7538,7 @@ def cmd_routing_outcome(args):
     if args.status == "fail":
         try:
             payload["nextAttempt"] = plan_next_attempt(
-                run, load_agents(), doc,
-                next(task for task in doc["tasks"]
-                     if task["taskId"] == args.task_id))
+                run, load_agents(), doc, routed_task, probe=True)
             payload["retryPermitted"] = True
         except RoutingError as exc:
             payload["retryPermitted"] = False
@@ -7557,8 +7598,10 @@ def cmd_routing_attempts(args):
     if getattr(args, "json", False):
         return emit_json(payload)
     print(f"\nrun     {run.id}")
+    approved = payload["approvedCostUnits"]
     print(f"spent   ~{payload['spentCostUnits']:g} of "
-          f"{payload['approvedCostUnits']:g} approved cost units (estimates)")
+          + (f"{approved:g} approved cost units (estimates)" if approved
+             else "an unrecorded ceiling (estimates)"))
     if not records:
         print("\nno attempt has been recorded yet\n")
         return 0
@@ -7652,7 +7695,13 @@ def _report_run_records(project_id=None, since=None):
     routing-attempts.jsonl and writes nothing anywhere. A run whose files are
     missing or unreadable is counted as skipped rather than guessed at."""
     rows, skipped = [], []
-    for directory in run_dirs()[:ROUTING_MAX_REPORT_RUNS]:
+    # Newest first, and the cap applies to what is KEPT. Run ids begin with a
+    # date, so ascending order is oldest-first: slicing the front of the list
+    # discarded exactly the runs a report is about, and filtering after the
+    # slice let `--since` return nothing while recent runs existed.
+    for directory in reversed(run_dirs()):
+        if len(rows) >= ROUTING_MAX_REPORT_RUNS:
+            break
         doc = read_json(directory / "routing.json")
         if not isinstance(doc, dict) or doc.get("schemaVersion") != ROUTING_SCHEMA_VERSION:
             if (directory / "routing.json").exists():
@@ -7682,6 +7731,44 @@ def _report_run_records(project_id=None, since=None):
                        if isinstance(record, dict)],
         })
     return rows, skipped
+
+
+def _reported_monetary(rows):
+    """The money providers actually reported, or nothing.
+
+    Summed only when every recorded attempt in scope reported a cost. A partial
+    sum looks like a total and is not one, so a partial answer is reported as
+    unavailable with the arithmetic said out loud."""
+    values, missing = [], 0
+    for row in rows:
+        for record in row["attempts"]:
+            entry = (record.get("usage") or {}).get("monetaryCost")
+            if isinstance(entry, dict) and entry.get("state") == "reported" \
+                    and isinstance(entry.get("value"), (int, float)):
+                values.append(float(entry["value"]))
+            else:
+                missing += 1
+    if not values:
+        return usage_value(
+            "unavailable", source="no provider reported a monetary cost in this scope")
+    if missing:
+        return usage_value(
+            "unavailable",
+            source=f"{missing} of {len(values) + missing} recorded attempt(s) reported no "
+                   f"monetary cost, so a total would be a guess")
+    currencies = sorted({
+        (record.get("usage") or {}).get("currency", {}).get("value")
+        for row in rows for record in row["attempts"]
+        if isinstance((record.get("usage") or {}).get("currency"), dict)
+    } - {None})
+    if len(currencies) > 1:
+        return usage_value(
+            "unavailable",
+            source=f"attempts reported costs in {', '.join(currencies)}; this report does "
+                   f"not convert between currencies")
+    return usage_value("reported", round(sum(values), 6),
+                       f"summed over {len(values)} attempt(s)"
+                       + (f" in {currencies[0]}" if currencies else ""))
 
 
 def _recommendation(rec_id, *, observation, recommendation, sample, evidence,
@@ -7720,7 +7807,11 @@ def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMP
         bucket = by_band.setdefault(band, {
             "runs": 0, "tasks": 0, "firstAttemptPasses": 0, "retries": 0,
             "escalations": 0, "belowRecommendedPasses": 0, "atOrAbovePasses": 0,
-            "evidence": [],
+            # Two separate piles, because they argue for opposite things: a
+            # first-attempt pass below the recommended tier is a case for
+            # lowering it, and an escalation is a case for raising it. Sharing
+            # one list shipped a recommendation with the evidence against it.
+            "lowerEvidence": [], "raiseEvidence": [],
         })
         bucket["runs"] += 1
         recommended = tiers.get((policy["bands"].get(band) or {}).get(
@@ -7732,6 +7823,10 @@ def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMP
                 bucket["retries"] += 1
             if record.get("mode") == "escalation":
                 bucket["escalations"] += 1
+                bucket["raiseEvidence"].append(
+                    f"{row['runId']} {task_id}: escalated to "
+                    f"{record.get('tier')}/{record.get('effort')} after a recorded "
+                    f"failure")
             if record.get("classification"):
                 classifications[record["classification"]] += 1
             if record.get("outcome") == "pass" and int(record.get("attempt") or 0) == 1:
@@ -7742,7 +7837,7 @@ def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMP
             rank = tiers.get(record.get("tier"), recommended)
             if rank < recommended:
                 bucket["belowRecommendedPasses"] += 1
-                bucket["evidence"].append(
+                bucket["lowerEvidence"].append(
                     f"{row['runId']} {task_id}: passed first time at "
                     f"{record.get('tier')}/{record.get('effort')}, below the "
                     f"'{band}' recommendation")
@@ -7760,6 +7855,28 @@ def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMP
 
     for band, bucket in sorted(by_band.items(), key=lambda pair: str(pair[0])):
         spec = policy["bands"].get(band) or {}
+        # Repeated escalation is its own evidence and is judged on its own. It
+        # used to sit behind the first-attempt-pass gate below, which made it
+        # unreachable in exactly the case it describes: a band that keeps
+        # escalating is a band that rarely passes first time.
+        if bucket["escalations"] >= min_sample \
+                and bucket["escalations"] > bucket["firstAttemptPasses"]:
+            recommendations.append(_recommendation(
+                f"raise-recommended-tier-{band}",
+                observation=f"'{band}' work escalated {bucket['escalations']} time(s) "
+                            f"against {bucket['firstAttemptPasses']} first-attempt "
+                            f"pass(es)",
+                recommendation=f"consider raising bands.{band}.recommendedTier or the "
+                               f"floors this band uses; paying twice is more expensive "
+                               f"than starting higher",
+                sample=bucket["escalations"],
+                evidence=bucket["raiseEvidence"],
+                applies_to=f"bands.{band}.recommendedTier"))
+        elif bucket["escalations"] > 0 and bucket["escalations"] < min_sample:
+            insufficient.append({
+                "band": band,
+                "reason": f"'{band}' work escalated {bucket['escalations']} time(s); "
+                          f"{min_sample} are needed before that is a pattern"})
         if bucket["firstAttemptPasses"] < min_sample:
             insufficient.append({
                 "band": band,
@@ -7779,23 +7896,10 @@ def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMP
                                f"expected-retry weighting is currently pricing these "
                                f"choices as riskier than the record shows",
                 sample=bucket["firstAttemptPasses"],
-                evidence=bucket["evidence"],
+                evidence=bucket["lowerEvidence"],
                 applies_to=f"bands.{band}.recommendedTier",
                 confidence="medium" if bucket["belowRecommendedPasses"] >= 2 * min_sample
                            else "low"))
-        if bucket["escalations"] >= min_sample and bucket["escalations"] > bucket[
-                "firstAttemptPasses"]:
-            recommendations.append(_recommendation(
-                f"raise-recommended-tier-{band}",
-                observation=f"'{band}' work escalated {bucket['escalations']} time(s) "
-                            f"against {bucket['firstAttemptPasses']} first-attempt "
-                            f"pass(es)",
-                recommendation=f"consider raising bands.{band}.recommendedTier or "
-                               f"floors used by this band; paying twice is more "
-                               f"expensive than starting higher",
-                sample=bucket["escalations"],
-                evidence=bucket["evidence"],
-                applies_to=f"bands.{band}.recommendedTier"))
 
     dominant = classifications.most_common(1)
     if dominant and dominant[0][1] >= min_sample:
@@ -7854,6 +7958,13 @@ def routing_calibration(policy, rows, *, min_sample=ROUTING_MIN_CALIBRATION_SAMP
 
     return {
         "minSample": min_sample,
+        # The counts the recommendations were derived from, so a reader can
+        # check the arithmetic instead of taking it on trust.
+        "bands": {
+            band: {key: value for key, value in bucket.items()
+                   if not key.endswith("Evidence")}
+            for band, bucket in sorted(by_band.items(), key=lambda pair: str(pair[0]))
+        },
         "recommendations": recommendations[:ROUTING_MAX_RECOMMENDATIONS],
         "insufficientEvidence": insufficient[:ROUTING_MAX_RECOMMENDATIONS],
         "policyChanged": False,
@@ -7939,13 +8050,7 @@ def cmd_routing_report(args):
                                     "source": "policy cost weights at proposal time"},
             "estimatedConsumed": {"state": "estimated", "value": round(total_spent, 2),
                                   "source": "policy cost weights per recorded attempt"},
-            "reportedMonetary": (
-                usage_value("unavailable",
-                            source="no provider reported a monetary cost in this scope")
-                if not reported_fields.get("monetaryCost") else
-                usage_value("reported", None,
-                            f"{reported_fields['monetaryCost']} attempt(s) reported a "
-                            f"monetary cost; see fde routing attempts for the figures")),
+            "reportedMonetary": _reported_monetary(rows),
             "costUnitsAreEstimates": True,
             "reportedUsageFields": dict(reported_fields.most_common()),
         },
@@ -9272,6 +9377,44 @@ def panel_routing_band(policy, run: Run, brief):
     return assessment, band, floor
 
 
+def _panel_choice(policy, agents, participant, *, band, floor, strategy, limits):
+    """The cheapest qualifying choice that respects whatever the operator pinned.
+
+    Filtering the candidate set is the whole trick. A pinned model narrows it to
+    that model; a pinned effort narrows it to that effort; pinning both leaves
+    nothing to decide. Whatever survives is priced and tiered as itself, which is
+    the part that matters: taking the tier and the cost from a model the
+    participant will not run produces a figure the policy never quoted and a
+    reason naming the wrong model."""
+    provider = routing_provider_for(agents, participant["agentId"])
+    if provider is None:
+        kind = (agents.get("agents", {}).get(participant["agentId"]) or {}).get("kind")
+        return None, (policy.get("unroutableKinds", {}).get(kind)
+                      or f"a '{kind}' identity exposes no model or effort to select")
+    accepted, _rejected = model_candidates(
+        policy, provider, band=band, floor=floor, limits=limits)
+    if participant.get("modelGiven"):
+        accepted = [c for c in accepted if c["model"] == participant["model"]]
+        if not accepted:
+            return None, (
+                f"'{participant['model']}' is not a model this policy offers a "
+                f"{provider} account at the '{floor}' quality floor, so its effort was "
+                f"left as the operator set it and no cost was estimated for it")
+    if participant.get("effortGiven"):
+        accepted = [c for c in accepted if c["effort"] == participant["effort"]]
+        if not accepted:
+            return None, (
+                f"no model this policy offers meets the '{floor}' quality floor at "
+                f"'{participant['effort']}' effort, so the operator's choice was left "
+                f"exactly as it was")
+    if not accepted:
+        return None, (f"no model and effort this account offers meets the '{floor}' "
+                      f"quality floor for a design panel")
+    ordered, rule = _strategy_pool(policy, accepted, strategy, band)
+    chosen = ordered[0]
+    return chosen, rule
+
+
 def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
     """Fill in the model and effort a panel was not given, and nothing else.
 
@@ -9282,7 +9425,7 @@ def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
     participant, and it refuses to continue if it finds it has. An explicitly
     chosen model or effort is left exactly as the operator set it."""
     if mode != "auto":
-        return None, []
+        return None
     policy = load_routing_policy()
     assessment, band, floor = panel_routing_band(policy, run, brief)
     limits = policy["limits"][band]
@@ -9295,27 +9438,25 @@ def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
             notes.append(f"{participant['label']}: model and effort were chosen by the "
                          f"operator and were left alone")
             continue
-        decision = select_model(
-            policy, agents, agent_id=participant["agentId"], band=band, floor=floor,
-            strategy=strategy, limits=limits,
-            purpose=f"the {participant['lensLabel']} lens in this design panel")
-        if not decision["routable"]:
-            notes.append(f"{participant['label']}: {decision['reason']}")
+        chosen, detail = _panel_choice(
+            policy, agents, participant, band=band, floor=floor, strategy=strategy,
+            limits=limits)
+        if chosen is None:
+            notes.append(f"{participant['label']}: {detail}")
             continue
-        if not participant.get("modelGiven"):
-            participant["model"] = decision["model"]
-        if not participant.get("effortGiven"):
-            participant["effort"] = decision["effort"]
+        participant["model"] = chosen["model"]
+        participant["effort"] = chosen["effort"]
         if participant["effort"] not in PANEL_EFFORTS:
             die(f"routing selected an effort a panel cannot use: "
                 f"{participant['effort']}", 2)
         participant["routingSource"] = "auto"
-        participant["routingReason"] = _safe_line(decision["reason"],
-                                                  ROUTING_MAX_REASON_CHARS)
-        participant["tier"] = decision["tier"]
+        participant["routingReason"] = _safe_line(
+            f"{chosen['label']} at '{chosen['effort']}' effort is the {detail}",
+            ROUTING_MAX_REASON_CHARS)
+        participant["tier"] = chosen["tier"]
         participant["qualityFloor"] = floor
-        participant["estimatedCostUnits"] = decision["expectedCostUnits"]
-        estimated += float(decision["expectedCostUnits"] or 0.0)
+        participant["estimatedCostUnits"] = chosen["expectedCostUnits"]
+        estimated += float(chosen["expectedCostUnits"] or 0.0)
     identities_after = [(participant["participantId"], participant["agentId"],
                          participant.get("profile"))
                         for participant in panel["participants"]]
@@ -9324,6 +9465,10 @@ def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
             "participants. Routing selects a model and an effort; who is in the panel "
             "is the operator's decision and the reason its independence means "
             "anything.", 8)
+    if len({participant["participantId"] for participant in panel["participants"]}) \
+            != len(panel["participants"]):
+        die("refusing to continue: automatic routing left a design panel with the same "
+            "account twice, which is one opinion, not a panel.", 8)
     routing = {
         "mode": "auto",
         "strategy": strategy,
@@ -9336,7 +9481,7 @@ def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
         "costUnitsAreEstimates": True,
         "notes": [_safe_line(note, ROUTING_MAX_REASON_CHARS) for note in notes],
     }
-    return routing, notes
+    return routing
 
 
 def panel_reconciler_route(run: Run):
@@ -9676,7 +9821,7 @@ def cmd_design_panel_create(args):
                           if (run_routing or {}).get("mode") == "auto" else None)
         if panel_strategy not in AUTO_STRATEGIES:
             panel_strategy = load_routing_policy()["defaultStrategy"]
-    panel_routing, panel_routing_notes = route_panel_participants(
+    panel_routing = route_panel_participants(
         run, agents, {"participants": participants}, mode=panel_routing_mode,
         strategy=panel_strategy, brief=brief)
 
