@@ -150,6 +150,69 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("Do not ask me to repeat or re-record the request", log)
         self.assertNotIn("Hold an interactive scoping conversation. Ask for my request", log)
 
+    def test_resume_replaces_a_session_id_claude_never_persisted(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+        })
+        created = subprocess.run(
+            [str(FDE), "start", "design a prototype", "--orchestrator", "work",
+             "--shape", "design-panel", "--json"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        roles = [
+            str(FDE), "roles", run_id,
+            "--set", "productManagement=none",
+            "--set", "solutioning=work",
+            "--set", "uiUxDesign=work",
+            "--set", "designSystem=none",
+            "--set", "review=work",
+            "--set", "prReview=none",
+            "--set", "standardsReview=none",
+            "--set", "securityReview=none",
+            "--set", "presentation=work",
+            "--set", "microsoftContext=none",
+        ]
+        subprocess.run(roles, text=True, capture_output=True, env=env, check=True)
+
+        stale = "11111111-2222-4333-8444-555555555555"
+        run_dir = self.shared / "runs" / run_id
+        (run_dir / "orchestrator-session-id").write_text(stale + "\n")
+        (self.profiles / "work" / "projects").mkdir()
+        # This run is already scoped, so the Claude stub only needs to accept
+        # the fresh execution session; it must not rewrite the run.
+        self.stub.write_text(textwrap.dedent("""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'ARG=%s\n' "$@" >> "$FDE_TEST_LOG"
+        """))
+        self.stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        new_id = (run_dir / "orchestrator-session-id").read_text().strip()
+        self.assertNotEqual(new_id, stale)
+        self.assertIn("was not persisted; starting a fresh session", result.stdout)
+        log = self.log.read_text()
+        self.assertIn("ARG=--session-id", log)
+        self.assertIn(f"ARG={new_id}", log)
+        self.assertNotIn("ARG=--resume", log)
+
 
 if __name__ == "__main__":
     unittest.main()

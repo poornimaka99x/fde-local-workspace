@@ -79,7 +79,16 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
   const runs = useApi<RunListResponse>('/api/runs', 60000)
   const chats = useApi<{ chats: ChatSummary[] }>('/api/chats', 60000)
   const projects = useApi<ProjectListResponse>('/api/projects', 60000)
-  const sessions = useApi<SessionListResponse>('/api/sessions', 5000)
+  // Sessions are the only thing in this rail that changes second to second, and
+  // Active sessions is the only page where reading them that often is the
+  // point. Everywhere else the rail needs the list to be *right*, not fresh: one
+  // fetch on mount, then whatever the shared change counter announces. Starting
+  // or stopping a session from a run's Session tab announces immediately, so the
+  // one case that matters is never stale — and this stops a 5-second poll from
+  // running on every other screen in the console.
+  const onSessionsPage = path.startsWith('/sessions')
+  const sessions = useApi<SessionListResponse>(
+    '/api/sessions', onSessionsPage ? 5000 : 0)
 
   const recents: RecentItem[] = [
     ...(runs.data?.runs ?? []).map((run) => ({

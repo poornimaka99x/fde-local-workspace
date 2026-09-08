@@ -146,6 +146,9 @@ describe('the design-panel form', () => {
     await user.click(screen.getByRole('button', { name: 'Create the run' }))
 
     await waitFor(() => expect(sent).toHaveLength(1))
+    expect(window.location.pathname).toBe('/design-panel/new')
+    expect(new URLSearchParams(window.location.search).get('runId'))
+      .toBe('20260906-returns-aaaa')
     expect(sent[0]).toMatchObject({
       url: '/api/runs',
       method: 'POST',
@@ -164,6 +167,61 @@ describe('the design-panel form', () => {
     expect(payload.participants.map((participant) => participant.accountId)).toEqual(['work', 'msc', 'alt'])
     expect(new Set(payload.participants.map((participant) => participant.lensId)).size).toBe(3)
     expect(payload.mode).toBe('independent')
+  })
+
+  it('restores the brief and project when an unfinished panel setup is resumed', async () => {
+    window.history.pushState(null, '', '/design-panel/new?runId=20260906-returns-aaaa')
+    stubFetch((url) => {
+      const catalog = catalogHandler(url)
+      if (catalog !== null) return catalog
+      if (url === '/api/runs/20260906-returns-aaaa') {
+        return jsonResponse({
+          runId: '20260906-returns-aaaa',
+          projectId: 'returns-a1b2',
+          requirement: { summary: 'Rework the returns screen.' },
+        })
+      }
+      if (url.endsWith('/attachments')) {
+        return jsonResponse({ schemaVersion: 1, attachments: [] })
+      }
+      return jsonResponse({}, 404)
+    })
+
+    render(<DesignPanelForm />)
+
+    expect(await screen.findByDisplayValue('Rework the returns screen.')).toBeInTheDocument()
+    expect(screen.getByText(/context is sealed when you create the panel/i)).toBeInTheDocument()
+  })
+
+  it('explains that an oversized archive must be extracted before panel selection', async () => {
+    window.history.pushState(null, '', '/design-panel/new?runId=20260906-returns-aaaa')
+    stubFetch((url) => {
+      const catalog = catalogHandler(url)
+      if (catalog !== null) return catalog
+      if (url.endsWith('/attachments')) {
+        return jsonResponse({
+          schemaVersion: 1,
+          attachments: [{
+            attachmentId: 'prototype-zip',
+            originalName: 'Design-prototype-V5.zip',
+            storedName: 'Design-prototype-V5-abcd.zip',
+            relativePath: 'inputs/files/Design-prototype-V5-abcd.zip',
+            mediaType: 'application/zip',
+            size: 2_631_753,
+            sha256: 'a'.repeat(64),
+            attachedAt: '2026-09-08T07:30:00+05:30',
+          }],
+        })
+      }
+      return jsonResponse({})
+    })
+
+    render(<DesignPanelForm />)
+
+    const archive = await screen.findByRole('checkbox', { name: /Design-prototype-V5\.zip/ })
+    expect(archive).toBeDisabled()
+    expect(screen.getByText(/archive exceeds the 256 KiB per-file context limit/))
+      .toBeInTheDocument()
   })
 
   it('offers only identities the registry says may design', async () => {
@@ -188,6 +246,36 @@ describe('the design-panel form', () => {
     expect(screen.queryByRole('option', { name: 'Claude: plain' })).toBeNull()
     await user.selectOptions(screen.getAllByLabelText('Account')[1]!, 'work')
     expect(await screen.findByText(/Each account may take part once/)).toBeInTheDocument()
+  })
+
+  it('does not automatically select a logged-out identity and explains one chosen manually', async () => {
+    const loggedOut = {
+      ...accounts,
+      accounts: accounts.accounts.map((account) => account.id === 'alt'
+        ? { ...account, authState: 'login_required', authMethod: null }
+        : account),
+    }
+    stubFetch((url) => {
+      if (url === '/api/claude/accounts') return jsonResponse(loggedOut)
+      const catalog = catalogHandler(url)
+      if (catalog !== null) return catalog
+      if (url.endsWith('/attachments')) {
+        return jsonResponse({ schemaVersion: 1, attachments: [] })
+      }
+      return jsonResponse({})
+    })
+    window.history.pushState(null, '', '/design-panel/new?runId=20260906-returns-aaaa')
+    const user = userEvent.setup()
+    render(<DesignPanelForm />)
+
+    const selectors = await screen.findAllByLabelText('Account')
+    expect(selectors.map((selector) => (selector as HTMLSelectElement).value))
+      .toEqual(['work', 'msc'])
+    await user.selectOptions(selectors[1]!, 'alt')
+    expect(await screen.findByText(/Claude: alt cannot join this panel/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Seal context/ })).toBeDisabled()
+    expect(screen.getAllByRole('option', { name: /Claude: alt — sign-in required/ }))
+      .toHaveLength(2)
   })
 
   it('shows a pack conflict and refuses to submit until the operator chooses', async () => {

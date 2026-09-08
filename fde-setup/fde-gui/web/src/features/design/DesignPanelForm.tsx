@@ -15,6 +15,7 @@ import type {
   DesignReferenceCatalog,
   GuidancePackList,
   ProjectListResponse,
+  RunStatus,
   RunSummary,
 } from '../../lib/types'
 
@@ -32,6 +33,23 @@ interface ParticipantDraft {
   effort: ClaudeEffort
   lensId: string
   lens: string
+}
+
+const PANEL_CONTEXT_MAX_ATTACHMENT_BYTES = 256 * 1024
+
+function attachmentProblem(attachment: AttachmentRecord): string | null {
+  const archive = attachment.mediaType === 'application/zip'
+    || attachment.mediaType === 'application/x-zip-compressed'
+    || attachment.originalName.toLowerCase().endsWith('.zip')
+  if (archive) {
+    return attachment.size > PANEL_CONTEXT_MAX_ATTACHMENT_BYTES
+      ? 'Not selectable: this archive exceeds the 256 KiB per-file context limit. Extract it and attach the relevant text source files.'
+      : 'Not selectable: archives are binary. Extract it and attach the relevant text source files.'
+  }
+  if (attachment.size > PANEL_CONTEXT_MAX_ATTACHMENT_BYTES) {
+    return 'Not selectable: this file exceeds the 256 KiB per-file context limit.'
+  }
+  return null
 }
 
 const OUTPUT_TARGETS = [
@@ -82,6 +100,9 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
   const lenses = useApi<DesignLensList>('/api/design-panel/lenses')
   const references = useApi<DesignReferenceCatalog>('/api/design-panel/references')
   const packs = useApi<GuidancePackList>('/api/design-panel/packs')
+  const existingRun = useApi<RunStatus>(
+    runId === null ? null : `/api/runs/${encodeURIComponent(runId)}`,
+  )
   const attachments = useApi<{ attachments: AttachmentRecord[] }>(
     runId === null ? null : `/api/runs/${encodeURIComponent(runId)}/attachments`,
   )
@@ -89,6 +110,11 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
   const eligible = useMemo(
     () => (accounts.data?.accounts ?? []).filter((account) => account.designPanelEligible),
     [accounts.data],
+  )
+  const ready = useMemo(
+    () => eligible.filter((account) =>
+      account.authState === 'authenticated' || account.authState === 'external'),
+    [eligible],
   )
   const lensOptions = lenses.data?.lenses ?? []
 
@@ -102,13 +128,28 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
   const [secondaryReference, setSecondaryReference] = useState('')
   const [enabledPacks, setEnabledPacks] = useState<Record<string, Record<string, number>>>({})
   const [acknowledgeConflict, setAcknowledgeConflict] = useState(false)
+  const [hydratedRunId, setHydratedRunId] = useState<string | null>(null)
 
-  // Three eligible accounts and three lenses is the shape this is for; anything
-  // less still works, and the operator can remove a row.
+  // A run may arrive here from the general new-run form, a recovery link on
+  // its detail page, or a browser refresh. Restore the first-step values so
+  // continuing setup does not require retyping the brief or project.
   useEffect(() => {
-    if (participants.length > 0 || eligible.length === 0 || lensOptions.length === 0) return
+    if (
+      runId === null || hydratedRunId === runId || existingRun.data === null
+      || existingRun.data.runId !== runId
+    ) return
+    setBrief((current) => current === '' ? existingRun.data?.requirement?.summary ?? '' : current)
+    setProject((current) => current === '' ? existingRun.data?.projectId ?? '' : current)
+    setHydratedRunId(runId)
+  }, [existingRun.data, hydratedRunId, runId])
+
+  // Prefer accounts that can actually start now. Keep the other eligible
+  // identities in the selector so their sign-in state remains visible, but do
+  // not strand a panel on a logged-out account by selecting it automatically.
+  useEffect(() => {
+    if (participants.length > 0 || ready.length === 0 || lensOptions.length === 0) return
     setParticipants(
-      eligible.slice(0, Math.min(3, Math.max(2, eligible.length))).map((account, index) => ({
+      ready.slice(0, Math.min(3, Math.max(2, ready.length))).map((account, index) => ({
         accountId: account.id,
         model: 'default',
         effort: 'auto' as ClaudeEffort,
@@ -116,7 +157,7 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
         lens: '',
       })),
     )
-  }, [eligible, lensOptions, participants.length])
+  }, [lensOptions, participants.length, ready])
 
   const conflict = useMemo(() => {
     const on = Object.keys(enabledPacks)
@@ -145,6 +186,11 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
       const created = await apiSend<{ run: RunSummary }>('/api/runs', 'POST', body)
       announceChange()
       setRunId(created.run.runId)
+      window.history.replaceState(
+        null,
+        '',
+        `/design-panel/new?runId=${encodeURIComponent(created.run.runId)}`,
+      )
       setStatus(`Run ${created.run.runId} created. Choose the panel's inputs and participants.`)
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not reach the local server.'))
@@ -221,9 +267,20 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
     new Set(participants.map((participant) => participant.accountId)).size !== participants.length
   const duplicateLenses =
     new Set(participants.map((participant) => participant.lensId)).size !== participants.length
+  const unavailableParticipants = participants.flatMap((participant) => {
+    const account = eligible.find((candidate) => candidate.id === participant.accountId)
+    return account === undefined || account.authState === 'authenticated' || account.authState === 'external'
+      ? []
+      : [account]
+  })
+  const invalidSelectedAttachments = (attachments.data?.attachments ?? [])
+    .filter((attachment) => selectedAttachments.includes(attachment.attachmentId))
+    .filter((attachment) => attachmentProblem(attachment) !== null)
   const canSubmit =
     runId !== null && participants.length >= 2 && !duplicateAccounts && !duplicateLenses &&
-    brief.trim() !== '' && (conflict === null || acknowledgeConflict) && !busy
+    unavailableParticipants.length === 0 && invalidSelectedAttachments.length === 0 &&
+    brief.trim() !== '' &&
+    (conflict === null || acknowledgeConflict) && !busy
 
   return (
     <>
@@ -354,6 +411,7 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
                     <label>
                       <input
                         type="checkbox"
+                        disabled={attachmentProblem(attachment) !== null}
                         checked={selectedAttachments.includes(attachment.attachmentId)}
                         onChange={(event) =>
                           setSelectedAttachments((current) =>
@@ -367,6 +425,9 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
                         {shortHash(attachment.sha256)}
                       </span>
                     </label>
+                    {attachmentProblem(attachment) ? (
+                      <div className="muted">{attachmentProblem(attachment)}</div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -398,12 +459,20 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
           <fieldset>
             <legend><strong>Participants</strong></legend>
             {accounts.error ? <ErrorState error={accounts.error} /> : null}
-            {eligible.length < 2 ? (
+            {ready.length < 2 ? (
               <p className="banner danger" role="alert">
-                Fewer than two configured Claude identities carry the <code>ui-ux-design</code>{' '}
-                capability, so a panel cannot be formed on this machine.
+                Fewer than two design-capable Claude identities are signed in and available, so a
+                panel cannot be formed yet.
               </p>
             ) : null}
+            {unavailableParticipants.map((account) => (
+              <p className="banner danger" role="alert" key={`unavailable-${account.id}`}>
+                <strong>{account.label} cannot join this panel: </strong>
+                {account.authState === 'login_required'
+                  ? 'sign in to this Claude identity first.'
+                  : 'this Claude identity is unavailable on this machine.'}
+              </p>
+            ))}
             {duplicateAccounts ? (
               <p className="banner warn" role="alert">
                 Each account may take part once. The same account twice is one opinion, not a panel.
@@ -424,7 +493,11 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
                       })}
                     >
                       {eligible.map((account) => (
-                        <option key={account.id} value={account.id}>{account.label}</option>
+                        <option key={account.id} value={account.id}>
+                          {account.label}
+                          {account.authState === 'login_required' ? ' — sign-in required' : ''}
+                          {account.authState === 'unavailable' ? ' — unavailable' : ''}
+                        </option>
                       ))}
                     </select>
                   </label>

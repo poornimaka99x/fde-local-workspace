@@ -111,6 +111,42 @@ describe('the navigation rail', () => {
     expect(within(running).getByText('live')).toBeInTheDocument()
   })
 
+  it('polls sessions only on the page that is about them', async () => {
+    // The rail is on every screen. A 5-second poll on every screen is 12
+    // requests a minute for a list that only one page is watching.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      seed()
+      const calls = (): number =>
+        (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls
+          .filter(([url]) => String(url) === '/api/sessions').length
+
+      const elsewhere = render(<AppSidebar path="/runs" />)
+      await screen.findByRole('list', { name: 'Running' })
+      expect(calls()).toBe(1)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(calls()).toBe(1)
+      elsewhere.unmount()
+
+      vi.mocked(globalThis.fetch).mockClear()
+      render(<AppSidebar path="/sessions" />)
+      await screen.findByRole('list', { name: 'Running' })
+      await vi.advanceTimersByTimeAsync(11000)
+      expect(calls()).toBeGreaterThan(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still shows a running session from any screen', async () => {
+    // Not polling is not the same as not knowing: the one fetch on mount, plus
+    // whatever the shared change counter announces, keeps this list correct.
+    seed()
+    render(<AppSidebar path="/projects/returns-a1b2" />)
+    const running = await screen.findByRole('list', { name: 'Running' })
+    expect(within(running).getByText('live')).toBeInTheDocument()
+  })
+
   it('lists projects and marks the page you are on', async () => {
     seed()
     render(<AppSidebar path="/projects/returns-a1b2" />)

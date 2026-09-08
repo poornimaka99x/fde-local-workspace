@@ -38,6 +38,9 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
 
   const inputFiles = (files.data?.entries ?? []).filter((entry) => entry.path.startsWith('inputs/'))
   const artifactFiles = (files.data?.entries ?? []).filter((entry) => entry.path.startsWith('artifacts/'))
+  const unfinishedDesignPanel = run.designPanel === null
+    && run.plan?.source === 'shape'
+    && run.plan?.intent === '--shape design-panel'
 
   const deleteRun = async (): Promise<void> => {
     if (!window.confirm(
@@ -97,6 +100,25 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
             </span>
             <Link className="action primary" to={`/runs/${run.runId}/design-panel`}>
               Open the design panel
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      {unfinishedDesignPanel ? (
+        <div className="card banner warn">
+          <div className="stack" style={{ justifyContent: 'space-between' }}>
+            <span>
+              <strong>This design panel has not been configured yet.</strong>{' '}
+              <span className="muted">
+                The run was created, but its shared context and participants were not sealed.
+              </span>
+            </span>
+            <Link
+              className="action primary"
+              to={`/design-panel/new?runId=${encodeURIComponent(run.runId)}`}
+            >
+              Finish setting up the design panel
             </Link>
           </div>
         </div>

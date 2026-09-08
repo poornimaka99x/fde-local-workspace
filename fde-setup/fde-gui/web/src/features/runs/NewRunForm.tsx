@@ -81,8 +81,10 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
       if (shape.trim() !== '') body.shape = shape.trim()
       const created = await apiSend<{ run: RunSummary }>('/api/runs', 'POST', body)
       announceChange()
-      const startSession = orchestrator === 'codex' ? '' : '?startSession=1'
-      window.history.pushState(null, '', `/runs/${created.run.runId}${startSession}`)
+      const destination = shape.trim() === 'design-panel'
+        ? `/design-panel/new?runId=${encodeURIComponent(created.run.runId)}`
+        : `/runs/${created.run.runId}${orchestrator === 'codex' ? '' : '?startSession=1'}`
+      window.history.pushState(null, '', destination)
       window.dispatchEvent(new PopStateEvent('popstate'))
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not reach the local server.'))

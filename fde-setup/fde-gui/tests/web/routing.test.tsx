@@ -179,6 +179,20 @@ describe('the new-run routing preview', () => {
     expect(screen.getByText(/Switch to Manual to pick them yourself/)).toBeInTheDocument()
   })
 
+  it('continues a design-panel-shaped run into panel configuration', async () => {
+    stub()
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<NewRunForm />)
+    await screen.findByLabelText(/Automatic model and effort/)
+    await user.type(screen.getByLabelText(/What do you want done/), 'Rework the returns screen.')
+    await user.type(screen.getByLabelText(/Named shape/), 'design-panel')
+    await user.click(screen.getByRole('button', { name: /Create run/ }))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/design-panel/new'))
+    expect(new URLSearchParams(window.location.search).get('runId'))
+      .toBe('20260907-max-1-aaaa')
+  })
+
   it('offers the three strategies with what each one does', async () => {
     stub()
     render(<NewRunForm />)
