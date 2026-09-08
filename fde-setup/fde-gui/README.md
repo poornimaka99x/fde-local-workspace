@@ -44,6 +44,12 @@ created, the console opens its Session tab and starts the orchestrator so the
 plan conversation actually begins; a logged-out account is refused before an
 orphan run can be created.
 
+New chat also offers an explicit, deny-by-default service access list. Selected
+REST connections can resolve matching Jira, Confluence, GitHub and Bitbucket
+links in a message; tokens stay in the controller and are never written to the
+chat or passed to the AI CLI. Atlassian Rovo is configured separately because
+it uses client-owned OAuth/MCP rather than the Atlassian REST email/token pair.
+
 Approving is still yours. Assigning roles, approving a plan, granting a Codex
 write, deploying and publishing all happen in that conversation, typed by you —
 the console adds no button for any of them.

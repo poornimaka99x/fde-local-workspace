@@ -404,6 +404,24 @@ legend { padding: 0 6px; font-size: 13px; }
 
 /* -- chat ----------------------------------------------------------------- */
 
+.chat-service-access { margin-top: 16px; }
+.chat-service-access > .muted { margin: 0 0 12px; }
+.service-choice-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 9px;
+}
+.service-choice {
+  display: flex; align-items: center; gap: 10px; padding: 11px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+  cursor: pointer;
+}
+.service-choice:hover { border-color: var(--border-strong); }
+.service-choice.selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft);
+}
+.service-choice input { accent-color: var(--accent); }
+.service-choice span { display: grid; gap: 2px; }
+.service-choice small { color: var(--text-muted); }
+
 .chat-thread { display: grid; gap: 14px; margin: 20px 0; }
 .chat-message {
   max-width: min(760px, 94%); padding: 13px 16px; border: 1px solid var(--border);

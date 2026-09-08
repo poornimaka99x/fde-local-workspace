@@ -14,7 +14,7 @@ import { accountProblem } from './accounts'
 
 const idParams = z.object({ connectionId: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/) })
 const createBody = z.object({
-  provider: z.enum(['atlassian', 'github', 'bitbucket', 'figma']),
+  provider: z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma']),
   name: z.string().trim().min(1).max(49),
   fields: z.record(z.string(), z.string().max(300)).default({}),
 })

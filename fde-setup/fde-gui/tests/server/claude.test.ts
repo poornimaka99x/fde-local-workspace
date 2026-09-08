@@ -209,6 +209,53 @@ describe('Claude accounts and general chats', () => {
     expect(missing.statusCode).toBe(404)
   })
 
+  it('persists explicit service access and injects controller-resolved content without credentials', async () => {
+    harness.fixture('connections-list', { schemaVersion: 1, connections: [{
+      id: 'atlassian-maxeda', name: 'Maxeda', provider: 'atlassian', providerLabel: 'Atlassian REST API',
+      fields: { siteUrl: 'https://maxedadiy.atlassian.net', email: 'user@example.com' },
+      configured: true, status: 'connected', oauth: false,
+    }] })
+    harness.fixture('connections-context', {
+      schemaVersion: 1,
+      context: '<service-context>\nTitle: Internal FAQ\nSafe page text\n</service-context>\n\n',
+      warnings: [],
+    })
+    const created = await harness.app.inject({
+      method: 'POST', url: '/api/chats', headers: mutating(harness.token), payload: {
+        accountId: 'work', model: 'sonnet', effort: 'high',
+        serviceConnectionIds: ['atlassian-maxeda'],
+      },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.json().chat.serviceConnectionIds).toEqual(['atlassian-maxeda'])
+    const chatId = created.json().chat.chatId as string
+    const sent = await harness.app.inject({
+      method: 'POST', url: `/api/chats/${chatId}/messages`, headers: mutating(harness.token),
+      payload: { message: 'Read https://maxedadiy.atlassian.net/wiki/spaces/IDT/pages/6722617382/FAQ' },
+    })
+    expect(sent.statusCode).toBe(200)
+    expect(sent.json().chat.messages.at(-1).content).toContain('Internal FAQ')
+    expect(harness.stdinFor('connections-context')?.toString()).toContain('/pages/6722617382/')
+    expect(JSON.stringify(harness.calls())).not.toContain('Safe page text')
+    const revoked = await harness.app.inject({
+      method: 'PATCH', url: `/api/chats/${chatId}/services`, headers: mutating(harness.token),
+      payload: { serviceConnectionIds: [] },
+    })
+    expect(revoked.statusCode).toBe(200)
+    expect(revoked.json().chat.serviceConnectionIds).toEqual([])
+  })
+
+  it('rejects unknown or unconfigured service access at chat creation', async () => {
+    harness.fixture('connections-list', { schemaVersion: 1, connections: [] })
+    const response = await harness.app.inject({
+      method: 'POST', url: '/api/chats', headers: mutating(harness.token), payload: {
+        accountId: 'work', model: 'sonnet', effort: 'high', serviceConnectionIds: ['atlassian-missing'],
+      },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ type: 'about:fde/invalid-service-selection' })
+  })
+
   it('refuses to delete a chat while its provider is still responding', async () => {
     let finish: ((value: { code: number; stdout: string }) => void) | undefined
     const runner: ChatCommandRunner = () => ({

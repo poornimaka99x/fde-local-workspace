@@ -17,8 +17,8 @@ The console's **Configuration** page keeps two deliberately separate kinds of
 access. **AI accounts** are identities that may be assigned roles in a run;
 Claude and Codex use isolated profile directories, Gemini uses Antigravity's
 single machine Keychain sign-in, and Copilot Studio uses a separately stored
-Direct Line credential. **Service connections** are Atlassian, GitHub,
-Bitbucket and Figma access. They never become role identities and configuring
+Direct Line credential. **Service connections** are Atlassian REST, Atlassian
+Rovo MCP, GitHub, Bitbucket and Figma access. They never become role identities and configuring
 one never authorises an external write.
 
 Atlassian, GitHub and Bitbucket tokens are submitted once and stored in
@@ -28,6 +28,14 @@ browser and metadata registry never receive them back. Figma uses the official r
 `https://mcp.figma.com/mcp`; its OAuth credential remains owned by the MCP
 client. Figma is wired only after roles are confirmed, and canvas writes require
 `fde approve-publish <run-id> figma`, like every other publication target.
+
+General chats have no service access by default. The New chat screen lets the
+user grant read-only access to specific configured connections. For REST
+connections, FDE resolves only matching Jira, Confluence, GitHub or Bitbucket
+links included in the message, then gives the result—not the credential—to the
+selected Claude, Codex or Gemini account. Atlassian REST tokens and Rovo OAuth
+are separate connections: the former enables this bounded link reader; the
+latter remains owned by each MCP-capable client.
 
 ## The idea in two sentences
 

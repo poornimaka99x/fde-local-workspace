@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { GuiConfig } from '../config'
 import { problem } from '../problem'
 import { projectDetailSchema } from '../schemas/controller'
+import { connectionListResponseSchema } from '../schemas/connections'
 import { block, describeZod, line } from '../schemas/input'
 import { ACCOUNT_ID_PATTERN, EFFORTS, MODEL_PATTERN, ProfileDirectoryError, type Effort } from '../services/accounts'
 import { ChatBusy, CHAT_ID_PATTERN, ChatNotFound, InvalidAttachment } from '../services/chats'
@@ -20,9 +21,13 @@ const createChatBody = z.object({
   model: z.string().regex(MODEL_PATTERN).default('default'),
   effort: z.enum(EFFORTS).default('auto'),
   projectId: z.string().regex(PROJECT_ID_PATTERN).nullable().optional(),
+  serviceConnectionIds: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,79}$/)).max(12).default([]),
 })
 const messageBody = z.object({ message: block(20_000).transform((value) => value.trim()).pipe(z.string().min(1)) })
 const titleBody = z.object({ title: line(120).transform((value) => value.trim()).pipe(z.string().min(1)) })
+const serviceAccessBody = z.object({
+  serviceConnectionIds: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,79}$/)).max(12),
+})
 const stopBody = z.object({ force: z.boolean().default(false) }).default({ force: false })
 const attachmentBody = z.object({
   path: line(4096).transform((value) => value.trim()).pipe(z.string().min(1, 'a path is required')),
@@ -31,6 +36,15 @@ const attachmentParams = z.object({
   chatId: z.string().regex(CHAT_ID_PATTERN),
   attachmentId: z.string().regex(/^[0-9a-fA-F-]{1,64}$/),
 })
+
+async function serviceSelectionAvailable(config: GuiConfig, ids: string[]): Promise<boolean> {
+  if (new Set(ids).size !== ids.length) return false
+  if (ids.length === 0) return true
+  const available = connectionListResponseSchema.parse(
+    await runControllerJson(config, ['connections', 'list', '--json']),
+  ).connections
+  return ids.every((id) => available.some((item) => item.id === id && item.configured))
+}
 
 /** Account, login and general-chat surfaces. No endpoint accepts a command. */
 export function registerClaudeRoutes(
@@ -141,7 +155,7 @@ export function registerClaudeRoutes(
     if (!parsed.success) {
       return problem(reply, 400, 'invalid-body', 'That chat cannot be created as described.', describeZod(parsed.error))
     }
-    const { accountId, model, effort, projectId, title } = parsed.data
+    const { accountId, model, effort, projectId, title, serviceConnectionIds } = parsed.data
     if (!services.accounts.validateSelection(accountId, model, effort)) {
       return problem(reply, 400, 'invalid-selection', 'That model and effort combination is not available for this account.')
     }
@@ -151,6 +165,9 @@ export function registerClaudeRoutes(
     }
     if (auth.state === 'unavailable') {
       return problem(reply, 503, 'chat-provider-unavailable', 'The selected chat account is not available.')
+    }
+    if (!await serviceSelectionAvailable(config, serviceConnectionIds)) {
+      return problem(reply, 400, 'invalid-service-selection', 'One or more selected service connections are not configured.')
     }
     const release = projectId ? services.locks.tryAcquire(`project:${projectId}`) : () => undefined
     if (release === null) return problem(reply, 409, 'busy', 'This project is being changed right now.')
@@ -162,7 +179,9 @@ export function registerClaudeRoutes(
         ).project
         cwd = sessionCwd(config, project.repoPaths, existsSync)
       }
-      const chat = services.chats.create({ title, accountId, model, effort: effort as Effort, projectId, cwd })
+      const chat = services.chats.create({
+        title, accountId, model, effort: effort as Effort, projectId, cwd, serviceConnectionIds,
+      })
       services.watcher.touch()
       return await reply.status(201).send({ chat })
     } finally {
@@ -215,6 +234,23 @@ export function registerClaudeRoutes(
       return { chat: services.chats.updateTitle(params.data.chatId, body.data.title) }
     } catch (error) {
       if (error instanceof ChatNotFound) return problem(reply, 404, 'chat-not-found', 'No such chat.')
+      throw error
+    }
+  })
+
+  app.patch<{ Params: { chatId: string } }>('/api/chats/:chatId/services', async (request, reply) => {
+    const params = chatParams.safeParse(request.params)
+    const body = serviceAccessBody.safeParse(request.body)
+    if (!params.success || !body.success || !await serviceSelectionAvailable(config, body.data.serviceConnectionIds)) {
+      return problem(reply, 400, 'invalid-service-selection', 'Select only configured service connections.')
+    }
+    try {
+      const chat = services.chats.updateServiceConnections(params.data.chatId, body.data.serviceConnectionIds)
+      services.watcher.touch()
+      return { chat }
+    } catch (error) {
+      if (error instanceof ChatNotFound) return problem(reply, 404, 'chat-not-found', 'No such chat.')
+      if (error instanceof ChatBusy) return problem(reply, 409, 'chat-busy', 'Stop this chat before changing its service access.')
       throw error
     }
   })

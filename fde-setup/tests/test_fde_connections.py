@@ -53,6 +53,25 @@ class Connections(unittest.TestCase):
         answer = self.fde("set-secret", "figma-design", stdin="not-a-real-token", code=2)
         self.assertEqual(answer["error"]["code"], "oauth_connection")
 
+    def test_rovo_is_a_separate_oauth_connection(self):
+        providers = {item["provider"]: item for item in self.fde("providers")["providers"]}
+        self.assertEqual(providers["atlassian"]["label"], "Atlassian REST API")
+        self.assertTrue(providers["atlassian-rovo"]["oauth"])
+        answer = self.fde("add", "--provider", "atlassian-rovo", "--name", "Rovo")
+        self.assertEqual(answer["connection"]["provider"], "atlassian-rovo")
+        self.assertTrue(answer["connection"]["configured"])
+        self.assertEqual(answer["connection"]["status"], "oauth_required")
+        refused = self.fde("set-secret", "atlassian-rovo-rovo", stdin="not-a-real-token", code=2)
+        self.assertEqual(refused["error"]["code"], "oauth_connection")
+
+    def test_chat_context_requires_explicit_connection_and_never_emits_token(self):
+        self.fde("add", "--provider", "github", "--name", "Work")
+        secret = "ghp_unmistakable_secret_value"
+        self.fde("set-secret", "github-work", stdin=secret)
+        answer = self.fde("context", "--connection", "github-work", stdin="No linked URL in this turn")
+        self.assertEqual(answer["context"], "")
+        self.assertNotIn(secret, json.dumps(answer))
+
     def test_remove_deletes_secret_and_metadata(self):
         self.fde("add", "--provider", "bitbucket", "--name", "Work")
         self.fde("set-secret", "bitbucket-work", stdin="token-value-long-enough")

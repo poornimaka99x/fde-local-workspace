@@ -6,16 +6,19 @@ import { ApiError, apiSend } from '../../lib/api'
 import { announceChange } from '../../lib/changes'
 import { formatTime } from '../../lib/format'
 import { Link } from '../../lib/router'
-import type { ChatRecord } from '../../lib/types'
+import type { ChatRecord, ConnectionListResponse } from '../../lib/types'
 import { useApi } from '../../lib/useApi'
 
 export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
   const state = useApi<{ chat: ChatRecord }>(`/api/chats/${encodeURIComponent(chatId)}`, 3000)
+  const connections = useApi<ConnectionListResponse>('/api/connections', 10_000)
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
   const [attaching, setAttaching] = useState(false)
   const [attachError, setAttachError] = useState<ApiError | null>(null)
+  const [serviceError, setServiceError] = useState<ApiError | null>(null)
+  const [changingServices, setChangingServices] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const send = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -90,6 +93,24 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
     : chat.provider === 'gemini' ? 'Gemini'
       : chat.provider === 'bedrock' ? 'Claude on Bedrock' : 'Claude'
 
+  const setServiceAccess = async (connectionId: string, enabled: boolean): Promise<void> => {
+    setChangingServices(true)
+    setServiceError(null)
+    const next = enabled
+      ? [...chat.serviceConnectionIds, connectionId]
+      : chat.serviceConnectionIds.filter((id) => id !== connectionId)
+    try {
+      await apiSend<{ chat: ChatRecord }>(`/api/chats/${encodeURIComponent(chatId)}/services`, 'PATCH', {
+        serviceConnectionIds: next,
+      })
+      state.reload()
+    } catch (cause) {
+      setServiceError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not change service access.'))
+    } finally {
+      setChangingServices(false)
+    }
+  }
+
   const deleteChat = async (): Promise<void> => {
     if (!window.confirm(
       `Delete “${chat.title}” from this console? The chat record will be moved to recoverable trash. Attached files are not deleted.`,
@@ -129,6 +150,23 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
       </div>
       {error ? <ErrorState error={error} /> : null}
       {chat.lastError ? <div className="banner danger" role="alert">{chat.lastError}</div> : null}
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Service access</h3>
+        <p className="muted">Read-only and deny-by-default. FDE resolves linked content without sharing the connection credential with {assistantName}.</p>
+        {serviceError ? <ErrorState error={serviceError} /> : null}
+        {(connections.data?.connections ?? []).filter((connection) => connection.configured).length === 0 ?
+          <p className="muted" style={{ marginBottom: 0 }}>No configured connections are available.</p> :
+          <div className="service-choice-grid">
+            {(connections.data?.connections ?? []).filter((connection) => connection.configured).map((connection) =>
+              <label className={`service-choice${chat.serviceConnectionIds.includes(connection.id) ? ' selected' : ''}`} key={connection.id}>
+                <input type="checkbox" checked={chat.serviceConnectionIds.includes(connection.id)}
+                  disabled={changingServices || chat.status === 'running'}
+                  onChange={(event) => void setServiceAccess(connection.id, event.target.checked)} />
+                <span><strong>{connection.name}</strong><small>{connection.providerLabel} · {connection.status.replaceAll('_', ' ')}</small></span>
+              </label>)}
+          </div>}
+      </div>
 
       <div className="card">
         <div className="stack" style={{ justifyContent: 'space-between' }}>

@@ -672,6 +672,7 @@ export interface ChatRecord {
   lastError: string | null
   messages: ChatMessage[]
   attachments: ChatAttachment[]
+  serviceConnectionIds: string[]
 }
 
 export interface ChatSummary extends Omit<ChatRecord, 'messages'> {
@@ -983,7 +984,7 @@ export interface AccountRemovedResponse {
 
 // ------------------------------------------------------- service connections --
 export interface ConnectionProvider {
-  provider: 'atlassian' | 'github' | 'bitbucket' | 'figma'
+  provider: 'atlassian' | 'atlassian-rovo' | 'github' | 'bitbucket' | 'figma'
   label: string
   secretLabel: string | null
   docsUrl: string

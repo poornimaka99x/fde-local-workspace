@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const connectionProviderSchema = z.object({
-  provider: z.enum(['atlassian', 'github', 'bitbucket', 'figma']),
+  provider: z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma']),
   label: z.string(),
   secretLabel: z.string().nullable(),
   docsUrl: z.string().url(),
@@ -14,7 +14,7 @@ export const connectionProviderSchema = z.object({
 
 export const connectionSchema = z.object({
   id: z.string(), name: z.string(),
-  provider: z.enum(['atlassian', 'github', 'bitbucket', 'figma']),
+  provider: z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma']),
   providerLabel: z.string(), fields: z.record(z.string()),
   configured: z.boolean(), status: z.string(),
   verifiedIdentity: z.string().nullable().optional(),
@@ -34,4 +34,3 @@ export const connectionDetailResponseSchema = z.object({
 export const connectionRemovedResponseSchema = z.object({
   schemaVersion: z.literal(1), removed: connectionSchema,
 })
-

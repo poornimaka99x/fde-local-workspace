@@ -55,6 +55,11 @@ describe('general chat UI', () => {
         schemaVersion: 1, projects: [{ projectId: 'returns-a1b2', name: 'Returns', repoPaths: [] }],
         unassignedRunCount: 0, warnings: [],
       })
+      if (url === '/api/connections') return response({ schemaVersion: 1, connections: [{
+        id: 'atlassian-maxeda', name: 'Maxeda', provider: 'atlassian', providerLabel: 'Atlassian REST API',
+        fields: { siteUrl: 'https://maxedadiy.atlassian.net', email: 'user@example.com' },
+        configured: true, status: 'connected', oauth: false,
+      }] })
       if (url === '/api/chats' && init?.method === 'POST') {
         sent.push(JSON.parse(String(init.body)))
         return response({ chat: { chatId: 'chat-20260904-abcdef12' } }, 201)
@@ -68,9 +73,11 @@ describe('general chat UI', () => {
     await user.selectOptions(screen.getByLabelText(/Project context/), 'returns-a1b2')
     await user.selectOptions(screen.getByLabelText(/Model/), 'opus')
     await user.selectOptions(screen.getByLabelText(/Effort/), 'xhigh')
+    await user.click(screen.getByText('Maxeda'))
     await user.click(screen.getByRole('button', { name: 'Create chat' }))
     await waitFor(() => expect(sent).toEqual([{
       title: 'Architecture question', projectId: 'returns-a1b2', accountId: 'work', model: 'opus', effort: 'xhigh',
+      serviceConnectionIds: ['atlassian-maxeda'],
     }]))
     expect(window.location.pathname).toBe('/chats/chat-20260904-abcdef12')
   })
@@ -111,7 +118,7 @@ describe('general chat UI', () => {
       createdAt: '2026-09-04T00:00:00Z', updatedAt: '2026-09-04T00:00:00Z',
       status: 'idle' as const, lastError: null,
       messages: [{ id: 'one', role: 'assistant' as const, content: '**Ready.**', createdAt: '2026-09-04T00:00:00Z' }],
-      attachments: [],
+      attachments: [], serviceConnectionIds: [],
     }
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
@@ -138,7 +145,7 @@ describe('general chat UI', () => {
       accountId: 'work', profile: 'work', provider: 'anthropic', model: 'default', effort: 'auto',
       projectId: null, cwd: '/tmp', claudeSessionId: '11111111-1111-1111-1111-111111111111',
       createdAt: '2026-09-04T00:00:00Z', updatedAt: '2026-09-04T00:00:00Z',
-      status: 'idle', lastError: null, messages: [], attachments: [],
+      status: 'idle', lastError: null, messages: [], attachments: [], serviceConnectionIds: [],
     }
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') return response({ chat: {

@@ -3,8 +3,10 @@ import { spawn } from 'node:child_process'
 import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { open, readdir as readdirAsync, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import type { GuiConfig } from '../config'
 import type { AccountService, ChatProvider, Effort } from './accounts'
+import { runControllerWithStdin } from './controller'
 
 export const CHAT_ID_PATTERN = /^chat-[0-9]{8}-[a-f0-9]{8}$/
 
@@ -46,6 +48,7 @@ export interface ChatRecord {
   lastError: string | null
   messages: ChatMessage[]
   attachments: ChatAttachment[]
+  serviceConnectionIds: string[]
 }
 
 export interface ChatSummary extends Omit<ChatRecord, 'messages'> {
@@ -160,6 +163,7 @@ export class ChatService {
     effort: Effort
     projectId?: string | null
     cwd: string
+    serviceConnectionIds?: string[]
   }): ChatRecord {
     const account = this.accounts.getConfigured(input.accountId)
     if (account === null) throw new Error('unknown Claude account')
@@ -183,6 +187,7 @@ export class ChatService {
       lastError: null,
       messages: [],
       attachments: [],
+      serviceConnectionIds: input.serviceConnectionIds ?? [],
     }
     this.write(chat)
     return chat
@@ -191,6 +196,15 @@ export class ChatService {
   updateTitle(chatId: string, title: string): ChatRecord {
     const chat = this.read(chatId)
     chat.title = title.trim()
+    chat.updatedAt = new Date().toISOString()
+    this.write(chat)
+    return chat
+  }
+
+  updateServiceConnections(chatId: string, serviceConnectionIds: string[]): ChatRecord {
+    if (this.active.has(chatId)) throw new ChatBusy(chatId)
+    const chat = this.read(chatId)
+    chat.serviceConnectionIds = [...serviceConnectionIds]
     chat.updatedAt = new Date().toISOString()
     this.write(chat)
     return chat
@@ -326,6 +340,32 @@ export class ChatService {
       `<attached-context>\n${parts.join('\n\n')}\n</attached-context>\n\n`
   }
 
+  private async serviceContext(chat: ChatRecord, prompt: string): Promise<string> {
+    if (chat.serviceConnectionIds.length === 0) return ''
+    const args = ['connections', 'context']
+    for (const id of chat.serviceConnectionIds) args.push('--connection', id)
+    args.push('--json')
+    try {
+      const raw = await runControllerWithStdin(
+        this.config,
+        args,
+        Readable.from([Buffer.from(prompt, 'utf8')]),
+        20_000,
+      )
+      if (!raw || typeof raw !== 'object') return ''
+      const value = raw as Record<string, unknown>
+      const context = typeof value.context === 'string' ? value.context : ''
+      const warnings = Array.isArray(value.warnings)
+        ? value.warnings.filter((item): item is string => typeof item === 'string').slice(0, 12)
+        : []
+      return `${context}${warnings.length ? `Service access notes:\n${warnings.map((item) => `- ${item}`).join('\n')}\n\n` : ''}`
+    } catch {
+      // Provider/controller output can contain private response data. Keep the
+      // failure useful but fixed, and still let the conversation continue.
+      return 'Service access note: the selected connection could not read this message\'s linked content. No credential was shared with the chat provider.\n\n'
+    }
+  }
+
   async send(chatId: string, prompt: string): Promise<ChatRecord> {
     if (this.active.has(chatId)) throw new ChatBusy(chatId)
     const chat = this.read(chatId)
@@ -344,8 +384,13 @@ export class ChatService {
     chat.lastError = null
     this.write(chat)
 
-    const context = await this.attachmentContext(chat.attachments)
-    const outgoing = context === '' ? prompt : `${context}${prompt}`
+    // Keep the common no-service path to one asynchronous boundary. Besides
+    // being cheaper, this preserves prompt-launch timing for stop/delete.
+    const serviceContext = chat.serviceConnectionIds.length > 0
+      ? await this.serviceContext(chat, prompt)
+      : ''
+    const attachmentContext = await this.attachmentContext(chat.attachments)
+    const outgoing = `${serviceContext}${attachmentContext}${prompt}`
 
     const isCodex = chat.provider === 'codex'
     const isGemini = chat.provider === 'gemini'
@@ -527,6 +572,8 @@ export class ChatService {
       }
       // A chat written before attachments existed simply has none.
       if (!Array.isArray(parsed.attachments)) parsed.attachments = []
+      // Service access is deny-by-default for records from older versions.
+      if (!Array.isArray(parsed.serviceConnectionIds)) parsed.serviceConnectionIds = []
       return parsed
     } catch {
       throw new ChatNotFound(chatId)
