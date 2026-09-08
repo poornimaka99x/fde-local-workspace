@@ -154,27 +154,53 @@ function AddAccountForm({
   }
 
   return (
-    <form className="card stack" onSubmit={(event) => void submit(event)}>
-      <h2>Add an account</h2>
+    <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <div className="settings-form-head">
+        <div><p className="eyebrow">New identity</p><h3>Add an account</h3></div>
+        <p className="muted">Register first, then sign in using the provider&rsquo;s own flow.</p>
+      </div>
       {error ? <ErrorState error={error} /> : null}
-      <label>
-        <span>Provider</span>
-        <select
-          value={provider}
-          onChange={(event) => {
-            setProvider(event.target.value)
-            setFields({})
-          }}
-        >
-          {providers.map((item) => (
-            <option key={item.provider} value={item.provider}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="settings-form-grid">
+        <label>
+          <span>Provider</span>
+          <select
+            value={provider}
+            onChange={(event) => {
+              setProvider(event.target.value)
+              setFields({})
+            }}
+          >
+            {providers.map((item) => (
+              <option key={item.provider} value={item.provider}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Name</span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Work, client sandbox, personal…"
+            maxLength={49}
+          />
+        </label>
+        {(template?.fields ?? []).map((field) => (
+          <label key={field.name}>
+            <span>
+              {field.label}
+              {field.required ? '' : ' (optional)'}
+            </span>
+            <input
+              value={fields[field.name] ?? field.default ?? ''}
+              onChange={(event) => setFields((current) => ({ ...current, [field.name]: event.target.value }))}
+            />
+          </label>
+        ))}
+      </div>
       {template ? (
-        <p className="muted">
+        <p className="settings-provider-note">
           {template.summary}
           {template.credentialEnv
             ? ` Each account gets its own folder, selected by ${template.credentialEnv}.`
@@ -209,38 +235,16 @@ function AddAccountForm({
           the account now, but signing in needs that CLI.
         </p>
       ) : null}
-      <label>
-        <span>Name</span>
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="work, client sandbox, personal…"
-          maxLength={49}
-        />
-      </label>
-      <p className="muted">
-        The name is yours to choose and is what you will pick from when assigning roles. It also
-        becomes this account&rsquo;s folder name.
-      </p>
-      {(template?.fields ?? []).map((field) => (
-        <label key={field.name}>
-          <span>
-            {field.label}
-            {field.required ? '' : ' (optional)'}
-          </span>
-          <input
-            value={fields[field.name] ?? field.default ?? ''}
-            onChange={(event) => setFields((current) => ({ ...current, [field.name]: event.target.value }))}
-          />
-        </label>
-      ))}
-      <button
-        className="action"
-        type="submit"
-        disabled={busy || atLimit || name.trim() === '' || provider === ''}
-      >
-        {busy ? 'Adding…' : 'Add account'}
-      </button>
+      <div className="settings-form-actions">
+        <span className="muted">The account name is shown when assigning roles.</span>
+        <button
+          className="action primary"
+          type="submit"
+          disabled={busy || atLimit || name.trim() === '' || provider === ''}
+        >
+          {busy ? 'Adding…' : 'Add account'}
+        </button>
+      </div>
     </form>
   )
 }
@@ -276,15 +280,13 @@ function AccountCard({
   }
 
   return (
-    <article className="card stack">
-      <header className="row">
-        <h3 style={{ margin: 0 }}>{account.label}</h3>
-        <StateBadge account={account} />
-        {account.available ? null : <span className="badge danger">unavailable</span>}
+    <article className="account-card">
+      <header className="account-card-head">
+        <div><p className="eyebrow">{account.providerLabel}</p><h3>{account.label}</h3></div>
+        <div className="account-badges"><StateBadge account={account} />
+          {account.available ? null : <span className="badge danger">unavailable</span>}</div>
       </header>
-      <p className="muted">
-        {account.providerLabel} · {account.loginDetail}
-      </p>
+      <p className="account-summary">{account.loginDetail}</p>
       {account.available ? null : <p className="muted">Cannot be used: {account.availability}</p>}
       {account.confirmed === false && account.check ? (
         <p className="muted">{account.check.detail}</p>
@@ -321,19 +323,20 @@ function AccountCard({
       ) : account.loginMode === 'secret' ? (
         <SecretForm account={account} template={template} onDone={onChanged} />
       ) : account.loginMode === 'terminal' ? (
-        <p className="row">
+        <div className="account-actions">
           <button className="action" type="button" onClick={() => setSigningIn(true)}>
             {account.loggedIn ? 'Sign in again' : 'Sign in'}
           </button>
-        </p>
+        </div>
       ) : (
         <p className="muted">
           This provider has no interactive sign-in — it uses credentials you already hold on this
           machine.
         </p>
       )}
-      <p className="row">
+      <div className="account-actions">
         <button
+          className="action"
           type="button"
           disabled={busy}
           onClick={() =>
@@ -354,7 +357,7 @@ function AccountCard({
               <span>Also delete its credential folder</span>
             </label>
             <button
-              className="danger"
+              className="action danger"
               type="button"
               disabled={busy}
               onClick={() =>
@@ -367,16 +370,16 @@ function AccountCard({
             >
               Remove {account.label}
             </button>
-            <button type="button" onClick={() => setConfirmRemove(false)}>
+            <button className="action" type="button" onClick={() => setConfirmRemove(false)}>
               Cancel
             </button>
           </>
         ) : (
-          <button type="button" onClick={() => setConfirmRemove(true)}>
+          <button className="action" type="button" onClick={() => setConfirmRemove(true)}>
             Remove…
           </button>
         )}
-      </p>
+      </div>
       {confirmRemove ? (
         <p className="muted">
           Removing deregisters the account. Its credentials are kept unless you tick the box, and
@@ -412,17 +415,19 @@ export function AccountsView(): JSX.Element {
   const byProvider = new Map(templates.map((item) => [item.provider, item]))
 
   return (
-    <section className="stack">
-      <header>
-        <h1>AI accounts</h1>
+    <section className="settings-section">
+      <header className="settings-section-head">
+        <div><p className="eyebrow">AI providers</p><h2>AI accounts</h2></div>
+        <div className="settings-section-copy">
         <p className="lede">
-          The provider accounts this machine can use. Each account keeps its own credentials, so
-          several accounts on the same provider never share a login.
+          Add the provider identities this machine can use. Credentials remain isolated between
+          accounts whenever the provider supports it.
         </p>
         <p className="muted">
           Accounts are identities, not roles. Which of them does what is chosen per run, when you
           assign roles — nothing here grants anything.
         </p>
+        </div>
       </header>
 
       <AddAccountForm providers={templates} accounts={list} onAdded={reload} />
@@ -433,7 +438,7 @@ export function AccountsView(): JSX.Element {
           deliberate step.
         </EmptyState>
       ) : (
-        <div className="stack">
+        <div className="account-grid">
           {list.map((account) => (
             <AccountCard
               key={account.id}

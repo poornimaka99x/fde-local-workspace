@@ -52,14 +52,14 @@ function ConnectionCard({ connection, provider, reload }: {
       <button className="action" disabled={busy || secret.length < 8}>{connection.configured ? 'Replace' : 'Store securely'}</button>
     </form>}
     <div className="connection-actions">
-      {!connection.oauth ? <button disabled={busy} onClick={() => void act(async () => apiSend(
+      {!connection.oauth ? <button className="action" disabled={busy} onClick={() => void act(async () => apiSend(
         `/api/connections/${encodeURIComponent(connection.id)}/verify`, 'POST', {}))}>
         {busy ? 'Checking…' : 'Test connection'}
       </button> : null}
-      {removing ? <><button className="danger" disabled={busy} onClick={() => void act(async () => apiSend(
+      {removing ? <><button className="action danger" disabled={busy} onClick={() => void act(async () => apiSend(
         `/api/connections/${encodeURIComponent(connection.id)}`, 'DELETE'))}>Confirm removal</button>
-        <button onClick={() => setRemoving(false)}>Cancel</button></> :
-        <button onClick={() => setRemoving(true)}>Remove…</button>}
+        <button className="action" onClick={() => setRemoving(false)}>Cancel</button></> :
+        <button className="action" onClick={() => setRemoving(true)}>Remove…</button>}
       {provider ? <a href={provider.docsUrl} target="_blank" rel="noreferrer">Provider documentation</a> : null}
     </div>
   </article>
@@ -67,7 +67,10 @@ function ConnectionCard({ connection, provider, reload }: {
 
 export function ConnectionsView(): JSX.Element {
   const providers = useApi<ConnectionProviderListResponse>('/api/connections/providers')
-  const connections = useApi<ConnectionListResponse>('/api/connections')
+  // Connections may be added by the controller CLI or another open console.
+  // Refresh periodically so this inventory remains an honest view of the
+  // metadata already stored in the shared FDE configuration.
+  const connections = useApi<ConnectionListResponse>('/api/connections', 10_000)
   const [providerId, setProviderId] = useState<ConnectionProvider['provider']>('atlassian')
   const [name, setName] = useState('')
   const [fields, setFields] = useState<Record<string, string>>({})
@@ -87,7 +90,7 @@ export function ConnectionsView(): JSX.Element {
     finally { setBusy(false) }
   }
   const byProvider = new Map(providers.data.providers.map((p) => [p.provider, p]))
-  return <section className="stack">
+  return <section className="settings-section">
     <div className="settings-hero"><div><p className="eyebrow">External systems</p><h2>Service connections</h2>
       <p className="lede">Credentials are stored locally and establish identity only. External writes still require an FDE publication approval.</p></div>
       <div className="security-note"><strong>Secrets stay private</strong><span>Tokens are never returned to this page after submission.</span></div>
@@ -101,7 +104,7 @@ export function ConnectionsView(): JSX.Element {
       {(selected?.fields ?? []).map((field) => <label key={field.name}><span>{field.label}</span>
         <input required={field.required} placeholder={field.placeholder} value={fields[field.name] ?? ''}
           onChange={(e) => setFields((v) => ({ ...v, [field.name]: e.target.value }))} /></label>)}
-      <button className="action" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add connection'}</button>
+      <button className="action primary" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add connection'}</button>
     </form>
     {connections.data.connections.length === 0 ? <EmptyState title="No service connections">Add one above. Tokens are entered only after the safe metadata record exists.</EmptyState> :
       <div className="connection-grid">{connections.data.connections.map((c) => <ConnectionCard key={c.id} connection={c} provider={byProvider.get(c.provider)} reload={reload} />)}</div>}

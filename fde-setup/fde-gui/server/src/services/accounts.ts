@@ -9,7 +9,7 @@ export const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$/
 export const EFFORTS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const
 export type Effort = (typeof EFFORTS)[number]
 export type AuthState = 'authenticated' | 'login_required' | 'external' | 'unavailable'
-export type ChatProvider = 'anthropic' | 'bedrock' | 'codex'
+export type ChatProvider = 'anthropic' | 'bedrock' | 'codex' | 'gemini'
 
 /** The capability the registry requires of a design-panel participant. */
 export const DESIGN_CAPABILITY = 'ui-ux-design'
@@ -102,6 +102,10 @@ const CODEX_MODELS: ModelOption[] = [
   { id: 'gpt-5.2', label: 'GPT-5.2', efforts: ['low', 'medium', 'high', 'xhigh'] },
 ]
 
+const GEMINI_MODELS: ModelOption[] = [
+  { id: 'default', label: 'Antigravity default', efforts: ['auto', 'low', 'medium', 'high'] },
+]
+
 const BEDROCK_ENV_ALLOWLIST = new Set([
   'AWS_PROFILE',
   'AWS_REGION',
@@ -136,6 +140,7 @@ export interface ClaudeAccount {
   /** Registry capabilities, verbatim. Identities are not roles; this is what an
    *  identity is *allowed to be given*, and the run still decides who does what. */
   capabilities: string[]
+  orchestratorEligible: boolean
   /** Eligible to be a design-panel participant: a Claude account the registry
    *  says may hold the uiUxDesign role. */
   designPanelEligible: boolean
@@ -231,6 +236,15 @@ export class AccountService {
           })
           continue
         }
+        if (agent.kind === 'gemini' && ACCOUNT_ID_PATTERN.test(key)) {
+          found.set(key, {
+            identityId: key,
+            label: typeof agent.label === 'string' ? agent.label : 'Gemini (Antigravity)',
+            provider: 'gemini',
+            capabilities,
+          })
+          continue
+        }
         if (agent.kind === 'codex') {
           // Codex used to be a single hard-coded entry here, which meant a
           // second ChatGPT account was invisible to the console however many
@@ -292,10 +306,12 @@ export class AccountService {
         identityId: value.identityId,
         profile: id,
         provider: value.provider,
-        profilePresent: existsSync(this.profileDirectory(id)),
-        models: MODELS.map((model) => ({ ...model, efforts: [...model.efforts] })),
+        profilePresent: value.provider === 'gemini' || existsSync(this.profileDirectory(id)),
+        models: (value.provider === 'gemini' ? GEMINI_MODELS : MODELS)
+          .map((model) => ({ ...model, efforts: [...model.efforts] })),
         capabilities: [...value.capabilities],
-        designPanelEligible: value.capabilities.includes(DESIGN_CAPABILITY),
+        orchestratorEligible: value.capabilities.includes('orchestration'),
+        designPanelEligible: value.provider === 'anthropic' && value.capabilities.includes(DESIGN_CAPABILITY),
       }))
     return [
       ...claudeAccounts,
@@ -312,6 +328,7 @@ export class AccountService {
           profilePresent: existsSync(value.home),
           models: CODEX_MODELS.map((model) => ({ ...model, efforts: [...model.efforts] })),
           capabilities: [...value.capabilities],
+          orchestratorEligible: value.capabilities.includes('orchestration'),
           // A design panel is about separately authenticated *Claude* accounts
           // reading the same sealed context. Codex is not one of them.
           designPanelEligible: false,
@@ -383,21 +400,29 @@ export class AccountService {
         method: 'AWS credentials',
       }
     }
-    if (account.provider !== 'codex' && !account.profilePresent) return { state: 'login_required', method: null }
+    if (account.provider !== 'codex' && account.provider !== 'gemini' && !account.profilePresent) {
+      return { state: 'login_required', method: null }
+    }
     const cached = this.cache.get(id)
     if (!refresh && cached !== undefined && Date.now() - cached.at < 15_000) return cached.result
     let result: AuthResult
     try {
       const { stdout, stderr } = await this.runStatus(
-        account.provider === 'codex' ? this.config.codexBin : this.config.claudeBin,
-        account.provider === 'codex' ? ['login', 'status'] : ['auth', 'status'],
+        account.provider === 'codex'
+          ? this.config.codexBin
+          : account.provider === 'gemini' ? this.config.agyBin : this.config.claudeBin,
+        account.provider === 'codex'
+          ? ['login', 'status']
+          : account.provider === 'gemini' ? ['models'] : ['auth', 'status'],
         {
           cwd: this.config.sharedRoot,
           env: this.profileEnv(id),
           timeout: Math.min(this.config.controllerTimeoutMs, 10_000),
         },
       )
-      if (account.provider === 'codex') {
+      if (account.provider === 'gemini') {
+        result = { state: 'authenticated', method: 'Antigravity' }
+      } else if (account.provider === 'codex') {
         const statusText = `${stdout}\n${stderr}`
         const loggedIn = /logged in/i.test(statusText)
         result = {
@@ -461,6 +486,15 @@ export class AccountService {
   prepareLogin(id: string): { file: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } | null {
     const account = this.getConfigured(id)
     if (account === null || account.provider === 'bedrock') return null
+    if (account.provider === 'gemini') {
+      this.cache.delete(id)
+      return {
+        file: this.config.agyBin,
+        args: [],
+        cwd: this.config.sharedRoot,
+        env: this.profileEnv(id),
+      }
+    }
     if (account.provider === 'codex') {
       this.cache.delete(id)
       return {
@@ -488,6 +522,7 @@ export class AccountService {
   profileEnv(id: string): NodeJS.ProcessEnv {
     const account = this.getConfigured(id)
     if (account === null) throw new Error('unknown chat account')
+    if (account.provider === 'gemini') return sessionEnv(this.config)
     if (account.provider === 'codex') {
       const home = this.codexHome(id)
       // Set only for an account the controller registered. An entry that
@@ -525,7 +560,9 @@ export class AccountService {
   }
 
   binaryAvailable(provider: ChatProvider = 'anthropic'): boolean {
-    const binary = provider === 'codex' ? this.config.codexBin : this.config.claudeBin
+    const binary = provider === 'codex'
+      ? this.config.codexBin
+      : provider === 'gemini' ? this.config.agyBin : this.config.claudeBin
     if (path.isAbsolute(binary)) return existsSync(binary)
     return (process.env.PATH ?? '/usr/bin:/bin')
       .split(path.delimiter)

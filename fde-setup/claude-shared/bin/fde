@@ -55,6 +55,8 @@ PROFILES_DIR = pathlib.Path(os.environ.get("CLAUDE_PROFILES_DIR", HOME / ".claud
 AGENTS_FILE = SHARED / "config" / "agents.json"
 CONNECTIONS_FILE = pathlib.Path(os.environ.get(
     "FDE_CONNECTIONS_FILE", SHARED / "config" / "service-connections.json"))
+CONNECTION_SECRETS_DIR = pathlib.Path(os.environ.get(
+    "FDE_CONNECTION_SECRETS_DIR", SHARED / "secrets" / "service-connections"))
 MCP_SRC = SHARED / "mcp" / "mcp-servers.json"
 TOOLKIT_ROOT = pathlib.Path(os.environ.get(
     "FDE_TOOLKIT_ROOT", SHARED / "fde-toolkit" / "plugins" / "fde-core"))
@@ -948,6 +950,43 @@ def account_secret_path(templates, agent: dict, aid: str):
     return account_credential_dir(templates, agent, aid) / str(cred["secretFile"])
 
 
+def _account_verify_command(verify, fields, env, timeout=10):
+    """Run a provider's bounded status command and return safe status metadata.
+
+    Provider output can contain account email, organisation ids, or other
+    identity data. Authentication needs only the exit status, so stdout and
+    stderr are captured but deliberately never copied into the API response.
+    """
+    argv = verify.get("argv") or []
+    requires = str(verify.get("requires") or (argv[0] if argv else "provider CLI"))
+    if not argv:
+        return {"mode": "argv", "ran": False, "ok": None,
+                "detail": "the provider template has no status command"}
+    if not shutil.which(requires):
+        return {"mode": "argv", "ran": False, "ok": None,
+                "detail": f"{requires} is not installed on this machine — sign-in could not be confirmed either way"}
+    concrete = []
+    for value in argv:
+        token = str(value)
+        for name, field_value in (fields or {}).items():
+            token = token.replace("{" + name + "}", str(field_value))
+        concrete.append(token)
+    try:
+        result = subprocess.run(concrete, capture_output=True, text=True,
+                                timeout=timeout, env=env)
+        ok = result.returncode == 0
+        return {"mode": "argv", "ran": True, "ok": ok,
+                "exitCode": result.returncode,
+                "detail": (f"{requires} confirmed this account is signed in" if ok
+                           else f"{requires} reports this account is not signed in")}
+    except subprocess.TimeoutExpired:
+        return {"mode": "argv", "ran": False, "ok": None,
+                "detail": "the status check did not answer in time — sign-in could not be confirmed"}
+    except (OSError, subprocess.SubprocessError):
+        return {"mode": "argv", "ran": False, "ok": None,
+                "detail": "the provider status check could not be completed"}
+
+
 def account_login_state(templates, agents, aid: str):
     """(loggedIn, source, detail) — asked, never assumed.
 
@@ -978,6 +1017,16 @@ def account_login_state(templates, agents, aid: str):
                 and os.environ.get(str(cred.get("envOverride") or "x"))):
             return True, "environment", "secret supplied by the environment"
         return False, "none", "no secret stored for this account"
+    if tpl.get("requiresDir") and not directory.is_dir():
+        return False, "none", f"no account directory at {directory}"
+    verify = tpl.get("verify") or {}
+    if verify.get("mode") == "argv" and verify.get("statusOnList"):
+        env = dict(os.environ)
+        env.update(account_env(agents, aid, templates))
+        check = _account_verify_command(verify, agent.get("fields") or {}, env)
+        if check["ran"]:
+            return bool(check["ok"]), "provider", check["detail"]
+        return False, "unconfirmed", check["detail"]
     probes = cred.get("probeFiles") or []
     if not probes:
         # There is no file to look for: the credential lives somewhere only the
@@ -989,8 +1038,6 @@ def account_login_state(templates, agents, aid: str):
         return False, "unconfirmed", (
             f"not checked — this sign-in can only be confirmed by running {cli}: "
             f"fde accounts verify {aid}")
-    if not directory.is_dir():
-        return False, "none", f"no account directory at {directory}"
     for rel in probes:
         candidate = directory / str(rel)
         if candidate.is_file():
@@ -1710,39 +1757,18 @@ def cmd_accounts_verify(args):
     check = {"mode": verify.get("mode"), "ran": False, "ok": record["loggedIn"],
              "detail": record["loginDetail"]}
     if verify.get("mode") == "argv":
-        requires = verify.get("requires") or (verify["argv"][0])
-        if not shutil.which(requires):
-            # The checker is missing, which says nothing about the credential.
-            # Reporting "not signed in" here would be a claim this command
-            # cannot support, so the probe's answer stands and the check
-            # reports honestly that it could not run.
-            check.update(ok=None, detail=f"{requires} is not installed on this "
-                                         "machine — sign-in could not be "
-                                         "confirmed either way")
+        if verify.get("statusOnList") and record["credentialSource"] in ("provider", "unconfirmed"):
+            # account_record has just run the authoritative command. Reuse that
+            # answer so clicking Check sign-in does not launch it twice.
+            check.update(ran=record["credentialSource"] == "provider",
+                         ok=(record["loggedIn"] if record["credentialSource"] == "provider" else None),
+                         detail=record["loginDetail"])
         else:
-            concrete = []
-            for token in verify["argv"]:
-                token = str(token)
-                for name, value in record["fields"].items():
-                    token = token.replace("{" + name + "}", str(value))
-                concrete.append(token)
             env = dict(os.environ)
             env.update(account_env(agents, aid, templates))
-            try:
-                r = subprocess.run(concrete, capture_output=True, text=True,
-                                   timeout=int(getattr(args, "timeout", 45) or 45),
-                                   env=env)
-                check.update(ran=True, exitCode=r.returncode,
-                             ok=r.returncode == 0,
-                             detail=((r.stderr or r.stdout or "").strip()[:400]
-                                     or ("ok" if r.returncode == 0 else
-                                         "the check exited non-zero")))
-            except subprocess.TimeoutExpired:
-                check.update(ran=True, ok=False,
-                             detail="the check did not answer in time — login "
-                                    "could not be confirmed")
-            except (OSError, subprocess.SubprocessError) as exc:
-                check.update(ran=True, ok=False, detail=str(exc)[:400])
+            check.update(_account_verify_command(
+                verify, record["fields"], env,
+                timeout=int(getattr(args, "timeout", 45) or 45)))
         if check["ran"]:
             record["loggedIn"] = bool(check["ok"])
             record["loginDetail"] = check["detail"]
@@ -1858,7 +1884,7 @@ def cmd_accounts_remove(args):
 # Service credentials are deliberately separate from AI identities. They grant
 # a narrowly scoped child process access to a remote system; they never make an
 # entry eligible for a run role. Metadata is controller-owned and credentials
-# live in macOS Keychain (a private-file backend exists only for isolated tests).
+# live in owner-only local files. Legacy Keychain entries remain readable.
 CONNECTION_SCHEMA_VERSION = 1
 CONNECTION_PROVIDERS = {
     "atlassian": {
@@ -1933,10 +1959,18 @@ def _test_secret_path(cid):
     return pathlib.Path(root) / cid if root else None
 
 
-def connection_secret_exists(cid):
+def connection_secret_path(cid):
     test_path = _test_secret_path(cid)
-    if test_path is not None:
-        return test_path.is_file() and test_path.stat().st_size > 0
+    return test_path if test_path is not None else CONNECTION_SECRETS_DIR / cid
+
+
+def connection_secret_exists(cid):
+    secret_path = connection_secret_path(cid)
+    if secret_path.is_file() and secret_path.stat().st_size > 0:
+        return True
+    if _test_secret_path(cid) is not None:
+        return False
+    # Compatibility only: tokens stored by earlier FDE versions remain usable.
     security = shutil.which("security")
     if not security:
         return False
@@ -1950,35 +1984,24 @@ def connection_secret_exists(cid):
 
 
 def store_connection_secret(cid, secret):
-    test_path = _test_secret_path(cid)
-    if test_path is not None:
-        test_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        write_atomic(test_path, secret)
-        os.chmod(test_path, 0o600)
-        return
-    security = shutil.which("security")
-    if not security:
-        raise AccountError("keychain_unavailable",
-                           "macOS Keychain is unavailable; the token was not stored")
-    # With -w and no following value, security reads the password interactively
-    # from stdin. The secret therefore never appears in argv or a process list.
-    result = subprocess.run(
-        [security, "add-generic-password", "-U", "-a", cid,
-         "-s", connection_service(cid), "-w"],
-        input=secret + "\n", text=True, capture_output=True, timeout=20)
-    if result.returncode != 0:
-        raise AccountError("keychain_write_failed",
-                           "macOS Keychain refused the credential",
-                           (result.stderr or "unlock Keychain and try again")[:300])
+    secret_path = connection_secret_path(cid)
+    secret_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(secret_path.parent, 0o700)
+    write_atomic(secret_path, secret)
+    os.chmod(secret_path, 0o600)
 
 
 def read_connection_secret(cid):
-    test_path = _test_secret_path(cid)
-    if test_path is not None:
+    secret_path = connection_secret_path(cid)
+    if secret_path.is_file():
         try:
-            return test_path.read_text(encoding="utf-8")
+            return secret_path.read_text(encoding="utf-8")
         except OSError:
             return ""
+    if _test_secret_path(cid) is not None:
+        return ""
+    # Compatibility only: read a legacy Keychain entry when no local secret
+    # has been saved. New writes never invoke Keychain or request a password.
     security = shutil.which("security")
     if not security:
         return ""
@@ -1990,10 +2013,10 @@ def read_connection_secret(cid):
 
 
 def delete_connection_secret(cid):
-    test_path = _test_secret_path(cid)
-    if test_path is not None:
-        with contextlib.suppress(FileNotFoundError):
-            test_path.unlink()
+    secret_path = connection_secret_path(cid)
+    with contextlib.suppress(FileNotFoundError):
+        secret_path.unlink()
+    if _test_secret_path(cid) is not None:
         return
     security = shutil.which("security")
     if security:
@@ -2004,13 +2027,23 @@ def delete_connection_secret(cid):
 
 def public_connection(cid, item):
     configured = bool(item.get("provider") == "figma" or connection_secret_exists(cid))
+    status = item.get("status")
+    # Secret presence is the current configuration truth. Metadata can lag
+    # when an earlier process stored the token but stopped before rewriting the
+    # JSON record, or when a connection record is recreated for an existing
+    # secret record.
+    if item.get("provider") != "figma":
+        if configured and status == "not_configured":
+            status = "configured"
+        elif not configured and status in ("configured", "connected"):
+            status = "not_configured"
     return {
         "id": cid, "name": item.get("name", cid),
         "provider": item.get("provider"),
         "providerLabel": CONNECTION_PROVIDERS.get(item.get("provider"), {}).get("label", item.get("provider")),
         "fields": dict(item.get("fields") or {}),
         "configured": configured,
-        "status": item.get("status", "configured" if configured else "not_configured"),
+        "status": status or ("configured" if configured else "not_configured"),
         "verifiedIdentity": item.get("verifiedIdentity"),
         "verifiedAt": item.get("verifiedAt"),
         "detail": item.get("detail"),

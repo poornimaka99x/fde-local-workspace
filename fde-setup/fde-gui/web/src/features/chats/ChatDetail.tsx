@@ -87,7 +87,8 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
   if (!chat) return <Loading label="Loading chat…" />
   const assistantName = chat.provider === 'codex'
     ? 'ChatGPT / Codex'
-    : chat.provider === 'bedrock' ? 'Claude on Bedrock' : 'Claude'
+    : chat.provider === 'gemini' ? 'Gemini'
+      : chat.provider === 'bedrock' ? 'Claude on Bedrock' : 'Claude'
 
   const deleteChat = async (): Promise<void> => {
     if (!window.confirm(

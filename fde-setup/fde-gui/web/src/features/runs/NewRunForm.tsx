@@ -232,6 +232,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
           onModel={setModel}
           onEffort={setEffort}
           includeCodex
+          orchestratorsOnly
           lockModelAndEffort={auto}
           lockedNote="Chosen by the controller for this account. Switch to Manual to pick them yourself."
         />

@@ -15,6 +15,7 @@ export interface GuiConfig {
   fdeStartBin: string
   claudeBin: string
   codexBin: string
+  agyBin: string
   home: string
   sharedRoot: string
   runsRoot: string
@@ -70,7 +71,7 @@ function intFrom(value: string | undefined, fallback: number, label: string): nu
   return parsed
 }
 
-function resolveCliBin(name: 'claude' | 'codex', override: string | undefined, env: NodeJS.ProcessEnv): string {
+function resolveCliBin(name: 'claude' | 'codex' | 'agy', override: string | undefined, env: NodeJS.ProcessEnv): string {
   if (override?.trim()) return override.trim()
   for (const directory of (env.PATH ?? '').split(path.delimiter)) {
     if (!directory) continue
@@ -116,6 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
     fdeStartBin,
     claudeBin: resolveCliBin('claude', env.FDE_CLAUDE_BIN, env),
     codexBin: resolveCliBin('codex', env.FDE_CODEX_BIN, env),
+    agyBin: resolveCliBin('agy', env.FDE_AGY_BIN, env),
     home,
     sharedRoot,
     runsRoot,

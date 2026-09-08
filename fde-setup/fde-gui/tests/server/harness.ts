@@ -118,6 +118,17 @@ if (args[0] === 'exec') {
 process.exit(0)
 `
 
+const AGY_STUB = `#!/usr/bin/env node
+const args = process.argv.slice(2)
+if (args[0] === 'models') process.exit(0)
+if (args.includes('--print')) {
+  const prompt = args[args.indexOf('--print') + 1] || ''
+  process.stdout.write('Gemini reply: ' + prompt)
+  process.exit(0)
+}
+process.exit(0)
+`
+
 export interface Harness {
   config: GuiConfig
   app: ReturnType<typeof buildApp>
@@ -178,6 +189,10 @@ export async function makeHarness(
           label: 'ChatGPT/Codex', kind: 'codex',
           capabilities: baseCapabilities, write_requires_approval: true,
         },
+        gemini: {
+          label: 'Gemini', kind: 'gemini',
+          capabilities: ['research', 'review'],
+        },
       },
       roleCapability: { orchestrator: 'orchestration', research: 'research' },
     }),
@@ -226,6 +241,9 @@ export async function makeHarness(
   const codexPath = path.join(shared, 'bin', 'codex-test')
   writeFileSync(codexPath, CODEX_STUB)
   chmodSync(codexPath, 0o755)
+  const agyPath = path.join(shared, 'bin', 'agy-test')
+  writeFileSync(agyPath, AGY_STUB)
+  chmodSync(agyPath, 0o755)
 
   const token = 'test-token-not-a-real-one'
   const config = loadConfig({
@@ -238,6 +256,7 @@ export async function makeHarness(
     FDE_GUI_PORT: '7317',
     FDE_CLAUDE_BIN: claudePath,
     FDE_CODEX_BIN: codexPath,
+    FDE_AGY_BIN: agyPath,
     ...(options.panelTimeoutMs === undefined
       ? {}
       : { FDE_GUI_PANEL_TIMEOUT_MS: String(options.panelTimeoutMs) }),

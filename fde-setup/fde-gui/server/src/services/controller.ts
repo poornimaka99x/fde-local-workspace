@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import type { GuiConfig } from '../config'
 
 /**
@@ -104,6 +105,10 @@ export function controllerEnv(config: GuiConfig): NodeJS.ProcessEnv {
   return {
     HOME: config.home,
     PATH: process.env.PATH ?? '/usr/bin:/bin',
+    // Claude Code uses the macOS account name to resolve profile credentials
+    // from Keychain. Sign-in terminals already receive this non-secret value;
+    // controller status checks must receive the same identity context.
+    USER: process.env.USER ?? path.basename(config.home),
     CLAUDE_SHARED: config.sharedRoot,
     FDE_RUNS_DIR: config.runsRoot,
     FDE_PROJECTS_DIR: config.projectsRoot,

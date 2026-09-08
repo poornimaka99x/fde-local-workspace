@@ -258,6 +258,7 @@ describe('controller boundary', () => {
       'HOME',
       'LANG',
       'PATH',
+      'USER',
     ])
     expect(JSON.stringify(passed)).not.toContain(harness.token)
   })

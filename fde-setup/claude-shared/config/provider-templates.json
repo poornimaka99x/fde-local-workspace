@@ -36,10 +36,8 @@
       "credential": {
         "env": "CLAUDE_CONFIG_DIR",
         "dirTemplate": "${CLAUDE_PROFILES_DIR:~/.claude-profiles}/{account}",
-        "probeFiles": [
-          ".credentials.json"
-        ],
-        "source": "CLAUDE_CONFIG_DIR is the documented Claude Code config-directory variable; claude-profile-new in this toolkit creates the directory."
+        "probeFiles": [],
+        "source": "CLAUDE_CONFIG_DIR is the documented Claude Code config-directory variable; current Claude Code confirms authentication with `claude auth status --json`, including credentials backed by the OS keychain."
       },
       "provision": {
         "argv": [
@@ -58,7 +56,16 @@
         "instruction": "Complete the browser sign-in, then close the pane."
       },
       "verify": {
-        "mode": "probe"
+        "mode": "argv",
+        "argv": [
+          "claude",
+          "auth",
+          "status",
+          "--json"
+        ],
+        "requires": "claude",
+        "statusOnList": true,
+        "note": "Claude Code is the authority for profile authentication. FDE uses only the exit status and never returns the command output."
       },
       "capabilities": [
         "orchestration",
@@ -248,6 +255,7 @@
           "models"
         ],
         "requires": "agy",
+        "statusOnList": true,
         "note": "Lists the models this sign-in can reach. It sends no prompt, so verifying costs nothing; a signed-out CLI cannot answer it."
       },
       "interactiveSessionNote": "Antigravity is invoked here as a one-shot headless call (agy -p) with no session state, so it cannot hold an interactive orchestrator conversation.",

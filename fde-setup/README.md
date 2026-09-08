@@ -21,9 +21,10 @@ Direct Line credential. **Service connections** are Atlassian, GitHub,
 Bitbucket and Figma access. They never become role identities and configuring
 one never authorises an external write.
 
-Atlassian, GitHub and Bitbucket tokens are submitted once and stored in macOS
-Keychain under `fde-service-<connection-id>`. The browser and metadata registry
-never receive them back. Figma uses the official remote MCP endpoint
+Atlassian, GitHub and Bitbucket tokens are submitted once and stored in
+`~/.claude-shared/secrets/service-connections/` with owner-only directory and
+file permissions. This avoids an interactive Keychain password prompt; the
+browser and metadata registry never receive them back. Figma uses the official remote MCP endpoint
 `https://mcp.figma.com/mcp`; its OAuth credential remains owned by the MCP
 client. Figma is wired only after roles are confirmed, and canvas writes require
 `fde approve-publish <run-id> figma`, like every other publication target.

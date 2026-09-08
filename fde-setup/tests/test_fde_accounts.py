@@ -219,6 +219,32 @@ class TestAdd(AccountsBase):
 
 
 class TestLoginState(AccountsBase):
+    def test_claude_uses_provider_status_not_an_obsolete_marker_file(self):
+        """Modern Claude sessions may live in Keychain, so the CLI is the
+        authority. Its potentially identifying output must stay private."""
+        self.stub("claude", """#!/usr/bin/env bash
+echo 'private-identity@example.test'
+if [ -f "$CLAUDE_CONFIG_DIR/provider-says-signed-in" ]; then
+  exit 0
+fi
+exit 1
+""")
+
+        # The fixture deliberately has the legacy file that used to cause a
+        # false positive. A non-zero provider status must override it.
+        answer = self.json_fde("accounts", "verify", "claude_work", expected=4)
+        account = answer["account"]
+        self.assertFalse(account["loggedIn"])
+        self.assertEqual(account["credentialSource"], "provider")
+        self.assertNotIn("private-identity@example.test", json.dumps(answer))
+
+        (self.profiles / "work" / "provider-says-signed-in").write_text("")
+        answer = self.json_fde("accounts", "list")
+        account = next(a for a in answer["accounts"] if a["id"] == "claude_work")
+        self.assertTrue(account["loggedIn"])
+        self.assertEqual(account["credentialSource"], "provider")
+        self.assertNotIn("private-identity@example.test", json.dumps(answer))
+
     def test_a_registered_account_is_signed_out_until_its_credential_appears(self):
         self.json_fde("accounts", "add", "--provider", "codex", "--name", "work")
         account = self.json_fde("accounts", "verify", "codex_work", expected=4)["account"]

@@ -7,7 +7,11 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   root: 'web',
   plugins: [react()],
-  build: { outDir: '../dist/web', emptyOutDir: true, sourcemap: false },
+  // Keep earlier content-hashed chunks while a newer build is installed. Tabs
+  // that were already open can finish their lazy imports instead of receiving
+  // a 404 halfway through navigation. New index.html responses still point
+  // only at the current build.
+  build: { outDir: '../dist/web', emptyOutDir: false, sourcemap: false },
   server: {
     host: '127.0.0.1',
     port: 5199,

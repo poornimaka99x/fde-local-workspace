@@ -110,4 +110,18 @@ describe('service connections panel', () => {
     expect(within(card).getByText(/OAuth in the assigned MCP client/)).toBeInTheDocument()
     expect(within(card).queryByRole('textbox')).toBeNull()
   })
+
+  it('shows connection metadata returned by the existing shared inventory', async () => {
+    connections = [{
+      id: 'atlassian-maxeda', name: 'Maxeda', provider: 'atlassian',
+      providerLabel: 'Atlassian Cloud',
+      fields: { siteUrl: 'https://maxedadiy.atlassian.net', email: 'user@example.test' },
+      configured: true, status: 'configured', oauth: false,
+    }]
+    render(<ConnectionsView />)
+
+    const card = (await screen.findByRole('heading', { name: 'Maxeda' })).closest('article') as HTMLElement
+    expect(within(card).getByText('https://maxedadiy.atlassian.net')).toBeInTheDocument()
+    expect(screen.queryByText('No service connections')).toBeNull()
+  })
 })

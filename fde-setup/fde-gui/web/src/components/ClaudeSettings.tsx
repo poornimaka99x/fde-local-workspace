@@ -15,6 +15,7 @@ export function ClaudeSettings({
   includeCodex = false,
   lockModelAndEffort = false,
   lockedNote,
+  orchestratorsOnly = false,
 }: {
   accountId: string
   model: string
@@ -30,10 +31,15 @@ export function ClaudeSettings({
    */
   lockModelAndEffort?: boolean
   lockedNote?: string
+  /** Restrict the new-run picker to identities allowed to orchestrate. */
+  orchestratorsOnly?: boolean
 }): JSX.Element {
   const accounts = useApi<ClaudeAccountsResponse>('/api/claude/accounts')
   const [showLogin, setShowLogin] = useState(false)
-  const availableAccounts = accounts.data?.accounts ?? []
+  const availableAccounts = (accounts.data?.accounts ?? [])
+    // Older compatible servers did not return this property, so preserve
+    // their choices. Current servers provide an explicit answer.
+    .filter((account) => !orchestratorsOnly || account.orchestratorEligible !== false)
   const selected = availableAccounts.find((account) => account.id === accountId) ?? null
   const models = selected?.models ?? []
   const selectedModel = models.find((option) => option.id === model) ?? models[0] ?? null
@@ -56,7 +62,7 @@ export function ClaudeSettings({
   }, [effort, managedCodex, model, models, onEffort, onModel, selectedModel])
 
   const statusLabel = selected?.authState.replace('_', ' ') ?? null
-  const canLogin = (selected?.provider === 'anthropic' || selected?.provider === 'codex') &&
+  const canLogin = (selected?.provider === 'anthropic' || selected?.provider === 'codex' || selected?.provider === 'gemini') &&
     selected.authState !== 'authenticated'
 
   return (

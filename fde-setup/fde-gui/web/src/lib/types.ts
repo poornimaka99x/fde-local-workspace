@@ -625,12 +625,14 @@ export interface ClaudeAccount {
   id: string
   label: string
   profile: string
-  provider: 'anthropic' | 'bedrock' | 'codex'
+  provider: 'anthropic' | 'bedrock' | 'codex' | 'gemini'
   profilePresent: boolean
   authState: 'authenticated' | 'login_required' | 'external' | 'unavailable'
   authMethod: string | null
   models: ClaudeModelOption[]
   capabilities: string[]
+  /** Optional only for compatibility with servers predating role-aware account lists. */
+  orchestratorEligible?: boolean
   designPanelEligible: boolean
 }
 
@@ -658,7 +660,7 @@ export interface ChatRecord {
   title: string
   accountId: string
   profile: string
-  provider: 'anthropic' | 'bedrock' | 'codex'
+  provider: 'anthropic' | 'bedrock' | 'codex' | 'gemini'
   model: string
   effort: ClaudeEffort
   projectId: string | null
@@ -928,7 +930,7 @@ export interface ProviderAccount {
   loginMode: 'terminal' | 'secret' | 'none'
   credentialDir: string
   loggedIn: boolean
-  credentialSource: 'file' | 'keychain' | 'environment' | 'unconfirmed' | 'none'
+  credentialSource: 'file' | 'keychain' | 'environment' | 'provider' | 'unconfirmed' | 'none'
   loginDetail: string
   available: boolean
   availability: string

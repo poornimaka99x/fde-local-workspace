@@ -24,6 +24,12 @@ const accounts = {
         { id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
       ],
     },
+    {
+      id: 'gemini', label: 'Gemini', profile: 'gemini', provider: 'gemini',
+      profilePresent: true, authState: 'authenticated', authMethod: 'Antigravity',
+      capabilities: ['research'], designPanelEligible: false, identityId: 'gemini',
+      models: [{ id: 'default', label: 'Antigravity default', efforts: ['auto', 'low', 'medium', 'high'] }],
+    },
   ],
 }
 
@@ -81,6 +87,19 @@ describe('general chat UI', () => {
     await user.selectOptions(screen.getByLabelText('Model'), 'gpt-5.6-sol')
     expect(screen.getByRole('option', { name: 'ultra' })).toBeInTheDocument()
     expect(screen.getByText('ChatGPT')).toBeInTheDocument()
+  })
+
+  it('offers the connected Gemini Antigravity account', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/claude/accounts') return response(accounts)
+      return response({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] })
+    }))
+    const user = userEvent.setup()
+    render(<NewChatForm />)
+    const account = await screen.findByLabelText('Chat account')
+    await user.selectOptions(account, 'gemini')
+    expect(screen.getByText('Antigravity')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'medium' })).toBeInTheDocument()
   })
 
   it('renders the transcript and sends the next message', async () => {

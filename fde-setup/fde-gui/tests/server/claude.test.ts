@@ -37,6 +37,11 @@ describe('Claude accounts and general chats', () => {
       authState: 'authenticated', authMethod: 'ChatGPT',
     })
     expect(codex.models.find((item: { id: string }) => item.id === 'gpt-5.6-sol').efforts).toContain('ultra')
+    const gemini = response.json().accounts.find((item: { id: string }) => item.id === 'gemini')
+    expect(gemini).toMatchObject({
+      label: 'Gemini', provider: 'gemini', identityId: 'gemini',
+      authState: 'authenticated', authMethod: 'Antigravity',
+    })
     expect(response.payload).not.toContain('.credentials.json')
     expect(response.payload).not.toContain(harness.token)
   })
@@ -149,6 +154,31 @@ describe('Claude accounts and general chats', () => {
       method: 'GET', url: '/api/chats', headers: authed(harness.token),
     })
     expect(listed.json().chats).toMatchObject([{ chatId, messageCount: 2 }])
+  })
+
+  it('runs a Gemini chat through Antigravity with bounded conversation context', async () => {
+    const created = await harness.app.inject({
+      method: 'POST', url: '/api/chats', headers: mutating(harness.token),
+      payload: { accountId: 'gemini', model: 'default', effort: 'medium' },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.json().chat).toMatchObject({ provider: 'gemini', claudeSessionId: '' })
+    const chatId = created.json().chat.chatId as string
+
+    const first = await harness.app.inject({
+      method: 'POST', url: `/api/chats/${chatId}/messages`, headers: mutating(harness.token),
+      payload: { message: 'First question' },
+    })
+    expect(first.statusCode).toBe(200)
+    expect(first.json().chat.messages.at(-1).content).toContain('Gemini reply: First question')
+
+    const second = await harness.app.inject({
+      method: 'POST', url: `/api/chats/${chatId}/messages`, headers: mutating(harness.token),
+      payload: { message: 'Follow-up question' },
+    })
+    expect(second.statusCode).toBe(200)
+    expect(second.json().chat.messages.at(-1).content).toContain('First question')
+    expect(second.json().chat.messages.at(-1).content).toContain('Follow-up question')
   })
 
   it('moves a deleted chat to recoverable trash without deleting attachments', async () => {

@@ -284,6 +284,15 @@ export function registerRunRoutes(
         'Register it under AI accounts, then it can orchestrate a run.',
       )
     }
+    if (!orchestrator.capabilities.includes('orchestration')) {
+      return problem(
+        reply,
+        400,
+        'orchestrator-capability-required',
+        'That identity can work in a run, but it is not permitted to orchestrate one.',
+        'Choose it for a supported specialist role after the run starts, or select an orchestrator-capable account.',
+      )
+    }
     // Which checks apply is decided by the account's provider, not by its id.
     // With one hard-coded Codex account the two were the same string; with as
     // many as the operator registers they are not.

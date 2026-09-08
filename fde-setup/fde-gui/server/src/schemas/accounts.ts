@@ -84,7 +84,7 @@ export const accountSchema = z.object({
   loginMode: z.enum(LOGIN_MODES),
   credentialDir: z.string().max(4096),
   loggedIn: z.boolean(),
-  credentialSource: z.enum(['file', 'keychain', 'environment', 'unconfirmed', 'none']),
+  credentialSource: z.enum(['file', 'keychain', 'environment', 'provider', 'unconfirmed', 'none']),
   loginDetail: z.string().max(600),
   available: z.boolean(),
   availability: z.string().max(600),

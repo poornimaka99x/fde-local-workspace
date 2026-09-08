@@ -33,6 +33,16 @@ class Connections(unittest.TestCase):
         self.assertNotIn(secret, Path(self.env["FDE_CONNECTIONS_FILE"]).read_text())
         self.assertTrue(answer["connection"]["configured"])
 
+    def test_list_reconciles_stale_metadata_with_the_saved_secret(self):
+        self.fde("add", "--provider", "github", "--name", "Work")
+        secret_dir = Path(self.env["FDE_TEST_CONNECTION_SECRET_DIR"])
+        secret_dir.mkdir()
+        (secret_dir / "github-work").write_text("existing-token")
+
+        connection = self.fde("list")["connections"][0]
+        self.assertTrue(connection["configured"])
+        self.assertEqual(connection["status"], "configured")
+
     def test_atlassian_host_is_allowlisted(self):
         answer = self.fde("add", "--provider", "atlassian", "--name", "Bad",
                           "--site-url", "https://evil.example", "--email", "a@b.com", code=2)

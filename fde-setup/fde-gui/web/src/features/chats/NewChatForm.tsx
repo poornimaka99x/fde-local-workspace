@@ -39,7 +39,7 @@ export function NewChatForm(): JSX.Element {
   return (
     <>
       <h1>New chat</h1>
-      <p className="lede">A private conversation using a Claude, Bedrock or ChatGPT / Codex account. It creates no FDE run, roles, approvals or checkpoints.</p>
+      <p className="lede">A private conversation using Claude, Bedrock, ChatGPT / Codex or Gemini through Antigravity. It creates no FDE run, roles, approvals or checkpoints.</p>
       {error ? <ErrorState error={error} /> : null}
       <form className="card" onSubmit={(event) => void submit(event)}>
         <div className="form-grid">
@@ -66,7 +66,7 @@ export function NewChatForm(): JSX.Element {
           onEffort={setEffort}
         />
         <p className="banner warn">
-          Claude chats have tools disabled. Codex chats ignore personal tools and configuration and run read-only without approvals. Select a project only to set the conversation’s working directory.
+          Claude chats have tools disabled. Codex chats run read-only without approvals. Gemini chats run Antigravity in plan mode and a restricted sandbox. Select a project only to set the conversation’s working directory.
         </p>
         <div className="stack">
           <button className="action primary" type="submit" disabled={saving || accountId === ''}>{saving ? 'Creating…' : 'Create chat'}</button>
