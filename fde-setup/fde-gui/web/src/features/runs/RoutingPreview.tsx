@@ -49,12 +49,17 @@ export function RoutingPreview({
 
   const trimmed = requirement.trim()
   const tooShort = trimmed.length < minChars
+  // The account's provider, not its id: a console with several Codex accounts
+  // registered gives them registry keys, so comparing against the literal
+  // 'codex' matched nothing and a preview was requested for a run that cannot
+  // have one.
+  const codexLed = account?.provider === 'codex'
   const loginNeeded = account !== null
     && account.authState !== 'authenticated'
     && account.authState !== 'external'
 
   useEffect(() => {
-    if (!enabled || tooShort || orchestrator === 'codex' || loginNeeded) {
+    if (!enabled || tooShort || codexLed || loginNeeded) {
       setPreview(null)
       setError(null)
       setLoading(false)
@@ -88,11 +93,11 @@ export function RoutingPreview({
     return () => {
       window.clearTimeout(timer)
     }
-  }, [enabled, tooShort, orchestrator, strategy, trimmed, shape, projectId, loginNeeded])
+  }, [enabled, tooShort, codexLed, orchestrator, strategy, trimmed, shape, projectId, loginNeeded])
 
   if (!enabled) return null
 
-  if (orchestrator === 'codex') {
+  if (codexLed) {
     return (
       <p className="banner warn" role="status">
         A Codex-led run is driven from its own Codex task. The controller will still record a

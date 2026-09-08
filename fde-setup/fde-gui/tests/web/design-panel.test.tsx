@@ -193,7 +193,7 @@ describe('the design-panel form', () => {
     expect(screen.getByText(/context is sealed when you create the panel/i)).toBeInTheDocument()
   })
 
-  it('explains that an oversized archive must be extracted before panel selection', async () => {
+  it('accepts a prototype archive and explains its bounded safe inspection', async () => {
     window.history.pushState(null, '', '/design-panel/new?runId=20260906-returns-aaaa')
     stubFetch((url) => {
       const catalog = catalogHandler(url)
@@ -219,8 +219,8 @@ describe('the design-panel form', () => {
     render(<DesignPanelForm />)
 
     const archive = await screen.findByRole('checkbox', { name: /Design-prototype-V5\.zip/ })
-    expect(archive).toBeDisabled()
-    expect(screen.getByText(/archive exceeds the 256 KiB per-file context limit/))
+    expect(archive).toBeEnabled()
+    expect(screen.getByText(/Safe HTML, CSS, JavaScript and other text files will be read/))
       .toBeInTheDocument()
   })
 

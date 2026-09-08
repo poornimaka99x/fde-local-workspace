@@ -97,14 +97,22 @@ describe('creating and editing through the controller', () => {
     expect(screen.getByRole('button', { name: 'Create project' })).toBeEnabled()
   })
 
+  // Codex accounts are registry-keyed, so the console no longer invents a
+  // 'codex' option: whichever ones exist arrive in this list like any other.
   const accountsResponse = {
     accounts: [{
-      id: 'work', label: 'Claude: work', profile: 'work', provider: 'anthropic',
+      id: 'work', label: 'Claude: work', identityId: 'claude_work', profile: 'work',
+      provider: 'anthropic',
       profilePresent: true, authState: 'authenticated', authMethod: 'subscription',
       models: [
         { id: 'default', label: 'Account default', efforts: ['auto', 'low', 'medium', 'high'] },
         { id: 'sonnet', label: 'Claude Sonnet', efforts: ['auto', 'low', 'medium', 'high', 'max'] },
       ],
+    }, {
+      id: 'codex_client-a', label: 'ChatGPT / Codex: Client A',
+      identityId: 'codex_client-a', profile: 'codex_client-a', provider: 'codex',
+      profilePresent: true, authState: 'authenticated', authMethod: 'ChatGPT',
+      models: [{ id: 'default', label: 'Account default', efforts: ['auto', 'high'] }],
     }],
   }
 
@@ -157,7 +165,10 @@ describe('creating and editing through the controller', () => {
       : jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] }))
     const user = userEvent.setup()
     render(<NewRunForm />)
-    await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'codex')
+    // The options arrive with the account list; selecting before it lands would
+    // be selecting from an empty list.
+    await screen.findByRole('option', { name: 'ChatGPT / Codex: Client A' })
+    await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'codex_client-a')
     expect(screen.getByText(/driven from its own Codex task/)).toBeInTheDocument()
   })
 })

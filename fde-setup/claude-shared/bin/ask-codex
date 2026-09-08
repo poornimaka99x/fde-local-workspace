@@ -22,10 +22,42 @@
 # are validated and passed as separate arguments; there is no shell
 # interpolation, and a value cannot smuggle an option through them.
 #
+# Accounts: CODEX_HOME selects which ChatGPT account this call signs in as. The
+# controller exports it from the account's provider template; unset, the CLI uses
+# its own default (~/.codex), which is exactly what happened before accounts
+# existed. This script never reads auth.json — it only checks that the directory
+# an explicit CODEX_HOME names has one, so "signed out" is reported as itself
+# instead of surfacing as a confusing mid-run authentication prompt.
+#
 # There is no bypass flag here and there must never be one.
 set -uo pipefail
 
 die() { printf 'ask-codex: %s\n' "$*" >&2; exit 1; }
+
+codex_account_check() {
+  # Prints where this call's credentials come from. Never prints a credential.
+  if [[ -n "${CODEX_HOME:-}" ]]; then
+    if [[ ! -d "$CODEX_HOME" ]]; then
+      printf 'ask-codex: CODEX_HOME=%s does not exist\n' "$CODEX_HOME" >&2
+      return 1
+    fi
+    if [[ ! -f "$CODEX_HOME/auth.json" ]]; then
+      printf 'ask-codex: no credential in CODEX_HOME=%s — this account is signed out\n' \
+        "$CODEX_HOME" >&2
+      return 1
+    fi
+    printf 'Codex: signed in for this account (%s)\n' "$CODEX_HOME"
+    return 0
+  fi
+  if [[ -f "${HOME}/.codex/auth.json" ]]; then
+    printf 'Codex: signed in with the CLI default (%s/.codex)\n' "$HOME"
+    return 0
+  fi
+  printf 'ask-codex: no Codex credential found — run: codex login\n' >&2
+  return 1
+}
+
+if [[ "${1:-}" == "--check" ]]; then codex_account_check; exit $?; fi
 
 # The standing brief goes FIRST and byte-identical on every call: both Gemini and
 # Codex do automatic prefix caching, and a prefix that shifts by one byte is a
@@ -54,6 +86,14 @@ compose_prompt() {  # compose_prompt <question>
 
 command -v codex >/dev/null || die "codex CLI not installed: npm i -g @openai/codex"
 
+# An explicitly selected account that is signed out is refused here, before a
+# prompt is composed or a task file is read: the alternative is Codex asking to
+# authenticate in the middle of a non-interactive run, where nobody can answer.
+if [[ -n "${CODEX_HOME:-}" && ! -f "${CODEX_HOME}/auth.json" ]]; then
+  die "the selected Codex account is signed out (no auth.json in $CODEX_HOME).
+            sign it in:  fde accounts login <account-id>"
+fi
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FDE="$here/fde"; [[ -x "$FDE" ]] || FDE="$(command -v fde || true)"
 
@@ -71,7 +111,8 @@ while [[ $# -gt 0 ]]; do
     --yolo|--dangerously-bypass-approvals-and-sandbox|--sandbox) # fde-safety-exempt: refusal, not an invocation
       die "refusing: '$1' is not available through this toolkit. Sandbox and approval
             policy are decided here, not by the caller." ;;
-    -h|--help)   sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --check)     codex_account_check; exit $? ;;
+    -h|--help)   sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --)          shift; prompt="$prompt $*"; break ;;
     *)           prompt="$prompt $1"; shift ;;
   esac

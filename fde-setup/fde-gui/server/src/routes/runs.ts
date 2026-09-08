@@ -21,7 +21,7 @@ import {
 } from '../schemas/controller'
 import { block, describeZod, line } from '../schemas/input'
 import type { Services } from '../services/types'
-import { EFFORTS, MODEL_PATTERN } from '../services/accounts'
+import { ACCOUNT_ID_PATTERN, EFFORTS, MODEL_PATTERN } from '../services/accounts'
 import { STRATEGIES as ROUTING_STRATEGIES } from '../schemas/routing'
 import {
   FilePathError,
@@ -73,7 +73,12 @@ const createRunBody = z
   .object({
     projectId: z.string().regex(PROJECT_ID_PATTERN, 'not a valid project id').optional(),
     requirement: block(4000).optional(),
-    orchestrator: z.enum(['work', 'msc', 'alt', 'bedrock', 'codex']),
+    // Not an enum. The identities that exist are whatever the operator has
+    // registered — several Claude accounts, several Codex accounts — so a fixed
+    // list here would make an account they just added unusable for a run. The
+    // pattern bounds what may reach argv; the check below is what decides
+    // whether this particular account exists and can be used.
+    orchestrator: z.string().regex(ACCOUNT_ID_PATTERN, 'not a configured account'),
     model: z.string().regex(MODEL_PATTERN).optional(),
     effort: z.enum(EFFORTS).optional(),
     routing: z.enum(['auto', 'manual']).default('manual'),
@@ -255,9 +260,37 @@ export function registerRunRoutes(
     // showed it, exactly as before.
     const manualModel = parsed.data.model ?? 'default'
     const manualEffort = parsed.data.effort ?? 'auto'
+    const orchestrator = services.accounts.getConfigured(parsed.data.orchestrator)
+    if (orchestrator === null) {
+      return problem(
+        reply,
+        400,
+        'unknown-orchestrator',
+        'That account is not registered as an orchestrator for this console.',
+        'Add it under AI accounts, or pick one that is listed.',
+      )
+    }
+    // The controller knows identities by registry key. A profile directory the
+    // operator created but never registered can be signed in and can hold a
+    // chat, but it is not an identity, so it cannot be given a run — and
+    // saying that here is better than forwarding a name the controller will
+    // refuse as unknown.
+    if (orchestrator.identityId === null) {
+      return problem(
+        reply,
+        400,
+        'orchestrator-not-registered',
+        `"${orchestrator.label}" is a profile folder with no identity registered for it.`,
+        'Register it under AI accounts, then it can orchestrate a run.',
+      )
+    }
+    // Which checks apply is decided by the account's provider, not by its id.
+    // With one hard-coded Codex account the two were the same string; with as
+    // many as the operator registers they are not.
+    const isCodex = orchestrator.provider === 'codex'
     if (
       parsed.data.routing === 'manual' &&
-      parsed.data.orchestrator !== 'codex' &&
+      !isCodex &&
       !services.accounts.validateSelection(
         parsed.data.orchestrator,
         manualModel,
@@ -271,7 +304,7 @@ export function registerRunRoutes(
         'That model and effort combination is not available for this account.',
       )
     }
-    if (parsed.data.orchestrator !== 'codex') {
+    if (!isCodex) {
       const auth = await services.accounts.status(parsed.data.orchestrator)
       if (auth.state === 'login_required') {
         return problem(
@@ -295,10 +328,13 @@ export function registerRunRoutes(
       return problem(reply, 409, 'busy', 'Another run is being created right now.')
     }
     try {
-      const args = ['start', '--json', '--orchestrator', parsed.data.orchestrator]
+      // The registry key, never this console\'s own handle: with several
+      // accounts registered a bare profile name can name two identities, and
+      // the controller correctly refuses an ambiguous one.
+      const args = ['start', '--json', '--orchestrator', orchestrator.identityId]
       if (parsed.data.routing === 'auto') {
         args.push('--routing', 'auto', '--strategy', parsed.data.strategy ?? 'balanced')
-      } else if (parsed.data.orchestrator !== 'codex') {
+      } else if (!isCodex) {
         args.push('--model', manualModel, '--effort', manualEffort)
       }
       if (parsed.data.projectId !== undefined) args.push('--project', parsed.data.projectId)

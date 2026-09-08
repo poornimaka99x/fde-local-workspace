@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs'
 import type { FastifyInstance } from 'fastify'
-import type WebSocket from 'ws'
 import { z } from 'zod'
 import type { GuiConfig } from '../config'
 import { problem } from '../problem'
@@ -11,6 +10,7 @@ import { ChatBusy, CHAT_ID_PATTERN, ChatNotFound, InvalidAttachment } from '../s
 import { PROJECT_ID_PATTERN, runControllerJson } from '../services/controller'
 import { NoSuchSession, SessionExists, sessionCwd } from '../services/sessions'
 import type { Services } from '../services/types'
+import { attachTerminal, runningLogin } from './terminal'
 
 const accountParams = z.object({ accountId: z.string().regex(ACCOUNT_ID_PATTERN) })
 const chatParams = z.object({ chatId: z.string().regex(CHAT_ID_PATTERN) })
@@ -31,49 +31,6 @@ const attachmentParams = z.object({
   chatId: z.string().regex(CHAT_ID_PATTERN),
   attachmentId: z.string().regex(/^[0-9a-fA-F-]{1,64}$/),
 })
-
-function attachTerminal(
-  socket: WebSocket,
-  sessions: Services['sessions'],
-  key: string,
-): void {
-  const send = (payload: unknown): void => {
-    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(payload))
-  }
-  let attached: { detach: () => void } | null = null
-  try {
-    const attachment = sessions.attach(
-      key,
-      (chunk) => send({ type: 'output', data: chunk }),
-      (exitCode) => send({ type: 'exit', exitCode }),
-    )
-    attached = attachment
-    send({ type: 'ready', session: attachment.view, backlog: attachment.backlog })
-  } catch {
-    socket.close(4404, 'no session')
-    return
-  }
-  socket.on('message', (raw: Buffer) => {
-    let message: Record<string, unknown>
-    try {
-      message = JSON.parse(raw.toString('utf8')) as Record<string, unknown>
-    } catch {
-      return
-    }
-    if (message.type === 'input' && typeof message.data === 'string') {
-      try {
-        sessions.write(key, message.data)
-      } catch {
-        send({ type: 'exit', exitCode: sessions.get(key)?.exitCode ?? 0 })
-      }
-      return
-    }
-    if (message.type === 'resize' && typeof message.cols === 'number' && typeof message.rows === 'number') {
-      sessions.resize(key, Math.floor(message.cols), Math.floor(message.rows))
-    }
-  })
-  socket.on('close', () => attached?.detach())
-}
 
 /** Account, login and general-chat surfaces. No endpoint accepts a command. */
 export function registerClaudeRoutes(
@@ -108,10 +65,19 @@ export function registerClaudeRoutes(
     if (!services.sessions.available) {
       return problem(reply, 503, 'terminal-unavailable', 'Interactive login needs the terminal backend.')
     }
-    const key = `login:${account.id}`
-    if (services.sessions.isRunning(key)) {
-      return { status: 'existing', session: services.sessions.get(key), ticket: services.sessions.issueTicket(key) }
+    // Both sign-in surfaces write the same credential directory, so a sign-in
+    // running under the AI-accounts key is this account's sign-in too.
+    const keys = [`login:${account.id}`]
+    if (account.identityId !== null) keys.push(`account-login:${account.identityId}`)
+    const running = runningLogin(services.sessions, keys)
+    if (running !== null) {
+      return {
+        status: 'existing',
+        session: services.sessions.get(running),
+        ticket: services.sessions.issueTicket(running),
+      }
     }
+    const key = keys[0] as string
     let spec: ReturnType<typeof services.accounts.prepareLogin>
     try {
       spec = services.accounts.prepareLogin(account.id)

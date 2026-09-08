@@ -35,6 +35,10 @@ class FdeStartTest(unittest.TestCase):
             self.shared / "config/agents.json",
         )
         shutil.copy2(
+            ROOT / "claude-shared/config/provider-templates.json",
+            self.shared / "config/provider-templates.json",
+        )
+        shutil.copy2(
             ROOT / "claude-shared/mcp/mcp-servers.json",
             self.shared / "mcp/mcp-servers.json",
         )
@@ -45,7 +49,12 @@ class FdeStartTest(unittest.TestCase):
         self.log = self.root / "claude.log"
         self.count = self.root / "claude.count"
         self.stub = self.root / "claude-stub"
-        self.stub.write_text(textwrap.dedent("""\
+        # A raw string: the stub's own printf format needs a literal backslash-n,
+        # and an interpreted one puts a real newline at column 0, which defeats
+        # dedent and leaves the shebang indented. A stub with no usable shebang
+        # is not the stub this test means to exercise — it silently became
+        # whatever shell the caller's exec fallback chose.
+        self.stub.write_text(textwrap.dedent(r"""
             #!/usr/bin/env bash
             set -euo pipefail
             count=0
@@ -63,7 +72,7 @@ class FdeStartTest(unittest.TestCase):
               printf 'APPROVE PLAN %s\n' "$FDE_RUN_ID" | \
                 "$FDE_CONTROLLER" approve-plan "$FDE_RUN_ID"
             fi
-        """))
+        """).lstrip("\n"))
         self.stub.chmod(0o755)
 
     def tearDown(self):
@@ -190,11 +199,11 @@ class FdeStartTest(unittest.TestCase):
         (self.profiles / "work" / "projects").mkdir()
         # This run is already scoped, so the Claude stub only needs to accept
         # the fresh execution session; it must not rewrite the run.
-        self.stub.write_text(textwrap.dedent("""\
+        self.stub.write_text(textwrap.dedent(r"""
             #!/usr/bin/env bash
             set -euo pipefail
             printf 'ARG=%s\n' "$@" >> "$FDE_TEST_LOG"
-        """))
+        """).lstrip("\n"))
         self.stub.chmod(0o755)
 
         result = subprocess.run(

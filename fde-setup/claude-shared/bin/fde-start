@@ -16,7 +16,7 @@ RUNS="${FDE_RUNS_DIR:-${CLAUDE_SHARED:-$HOME/.claude-shared}/runs}"
 usage() {
   cat <<'USAGE'
 usage:
-  fde-start [--orchestrator work|msc|alt|bedrock] [--model ALIAS-OR-ID]
+  fde-start [--orchestrator IDENTITY] [--model ALIAS-OR-ID]
             [--effort auto|low|medium|high|xhigh|max]
   fde-start --resume <run-id>
 
@@ -28,12 +28,16 @@ Starts a chat with the selected orchestrator. In that chat:
   5. type /exit once prompted; fde-start resumes the same conversation with
      run-scoped connectors and executes the approved plan.
 
-Codex remains assignable to any supported role, including orchestrator, but the
-continuous two-process chat launcher currently requires a Claude profile.
+IDENTITY is any registered Claude account — an id or a name (see:
+fde accounts list). Codex remains assignable to any supported role, including
+orchestrator, but the continuous two-process chat launcher currently requires a
+Claude profile; the controller says so by name when you pick one that cannot.
 USAGE
 }
 
 orchestrator=""
+orchestrator_id=""
+profile_dir=""
 resume_id=""
 model=""
 effort=""
@@ -64,51 +68,130 @@ print(value or "")
 PY
 }
 
+# Which identities exist, which of them can hold a continuous conversation, and
+# the environment that selects one, are all the controller's answers. This
+# launcher used to restate them as two case statements, which meant an account
+# the operator added was unlaunchable until someone edited this file.
+#
+# launch_env is built from NUL-delimited KEY=VALUE pairs and passed to env(1) as
+# an array: nothing goes through a shell, so a directory with a space or a dollar
+# sign in it survives intact.
+launch_env=()
+launch_json=""
+
+# One helper reads one field out of the controller's JSON. Kept as a separate
+# function so nothing here interpolates a shell value into a Python source
+# string, and so no f-string needs a quote escaped inside it — an f-string
+# expression cannot contain a backslash before Python 3.12, and getting that
+# wrong once made the interactive prompt unreachable on every older
+# interpreter.
+launch_field() {  # launch_field <dotted.path>
+  printf '%s' "$launch_json" | FIELD="$1" python3 -c '
+import json, os, sys
+value = json.load(sys.stdin)
+for part in os.environ["FIELD"].split("."):
+    value = value.get(part) if isinstance(value, dict) else None
+print("" if value is None else value)
+'
+}
+
+load_launch() {  # load_launch <identity-token>
+  # The controller answers with a plan; a refusal is a typed envelope with its
+  # own sentence, and that sentence is the useful part. Its stderr is not
+  # discarded: for an ambiguous or unknown identity it is the only place the
+  # candidates are named.
+  launch_json="$("$FDE" accounts launch "$1" --json)" || true
+  [[ -n "$launch_json" ]] && printf '%s' "$launch_json" | python3 -c '
+import json, sys
+json.load(sys.stdin)
+' 2>/dev/null || {
+    echo "fde-start: the controller could not describe identity '$1'" >&2
+    echo "  see: fde accounts list" >&2
+    return 2; }
+  local refusal
+  refusal="$(launch_field error.message)"
+  if [[ -n "$refusal" ]]; then
+    echo "fde-start: $refusal" >&2
+    local hint; hint="$(launch_field error.hint)"
+    [[ -n "$hint" ]] && echo "  $hint" >&2
+    return 4
+  fi
+  if [[ "$(launch_field launch.interactive)" != "True" ]]; then
+    local reason; reason="$(launch_field launch.reason)"
+    echo "fde-start: ${reason:-this identity cannot hold an interactive session}" >&2
+    return 3
+  fi
+  orchestrator="$(launch_field launch.account)"
+  orchestrator_id="$(launch_field launch.accountId)"
+  profile_dir="$(launch_field launch.configDir)"
+  [[ -n "$profile_dir" ]] || {
+    echo "fde-start: identity '$1' has no Claude profile directory" >&2; return 3; }
+
+  # The environment comes from a second call, and its status is checked: a
+  # process substitution reports none, so a failure there would leave
+  # launch_env empty and start Claude against its DEFAULT credential
+  # directory — the one thing per-account isolation exists to prevent.
+  local env_file; env_file="$(mktemp)"
+  if ! "$FDE" accounts launch "$1" --env0 > "$env_file"; then
+    rm -f "$env_file"
+    echo "fde-start: the controller could not describe the environment for '$1'" >&2
+    return 3
+  fi
+  launch_env=()
+  while IFS= read -r -d "" pair; do launch_env+=("$pair"); done < "$env_file"
+  rm -f "$env_file"
+  # A Claude session must carry its account's config directory. Starting one
+  # without it is not a degraded launch, it is the wrong account.
+  local found=0 pair
+  for pair in ${launch_env[@]+"${launch_env[@]}"}; do
+    [[ "$pair" == "CLAUDE_CONFIG_DIR=$profile_dir" ]] && found=1
+  done
+  (( found )) || {
+    echo "fde-start: the controller did not return CLAUDE_CONFIG_DIR for '$1';" >&2
+    echo "  refusing to start a session that would use the default account" >&2
+    return 3; }
+  return 0
+}
+
 if [[ -n "$resume_id" ]]; then
   run_id="$resume_id"
   run_dir="$RUNS/$run_id"
   [[ -d "$run_dir" ]] || { echo "fde-start: no such run: $run_id" >&2; exit 4; }
   orchestrator_id="$(read_json_field "$run_dir/roles.json" assignments.orchestrator)"
-  case "$orchestrator_id" in
-    claude_work) orchestrator=work ;;
-    claude_msc) orchestrator=msc ;;
-    claude_alt) orchestrator=alt ;;
-    claude_bedrock) orchestrator=bedrock ;;
-    chatgpt_codex)
-      echo "fde-start: this run uses Codex as orchestrator; resume it in Codex." >&2
-      exit 3 ;;
-    *) echo "fde-start: run has no supported interactive orchestrator yet" >&2; exit 3 ;;
-  esac
+  [[ -n "$orchestrator_id" ]] || {
+    echo "fde-start: run $run_id has no orchestrator assigned yet" >&2; exit 3; }
+  load_launch "$orchestrator_id" || exit $?
 else
   if [[ -z "$orchestrator" ]]; then
-    printf '%s\n' "Choose the orchestrator for this run:" \
-      "  work      Claude: work" \
-      "  msc       Claude: msc" \
-      "  alt       Claude: alt" \
-      "  bedrock   Claude Code: Bedrock"
+    echo "Choose the orchestrator for this run:"
+    "$FDE" accounts list --json | python3 -c '
+import json, sys
+accounts = json.load(sys.stdin).get("accounts") or []
+launchable = [a for a in accounts if a.get("kind") == "claude"]
+if not launchable:
+    print("  (no Claude account is registered)")
+    print("  add one:  fde accounts add --provider claude --name work")
+for a in launchable:
+    state = "signed in" if a.get("loggedIn") else "SIGNED OUT"
+    print("  {:<24} {}  [{}]".format(a["id"], a["label"], state))
+'
     read -r -p "orchestrator: " orchestrator
   fi
-  case "$orchestrator" in
-    work|msc|alt|bedrock) ;;
-    codex)
-      echo "fde-start: Codex may orchestrate, but continuous chat launch currently requires Claude." >&2
-      echo "Use: fde start; fde orchestrator <run-id> codex" >&2
-      exit 3 ;;
-    *) echo "fde-start: unknown orchestrator '$orchestrator'" >&2; exit 2 ;;
-  esac
+  load_launch "$orchestrator" || exit $?
   start_args=(start)
   [[ -n "$model" ]] && start_args+=(--model "$model")
   [[ -n "$effort" ]] && start_args+=(--effort "$effort")
   start_output="$("$FDE" "${start_args[@]}")"
   run_id="$(printf '%s\n' "$start_output" | awk '$1 == "run" {print $2; exit}')"
   [[ -n "$run_id" ]] || { echo "fde-start: controller did not return a run id" >&2; exit 1; }
-  "$FDE" orchestrator "$run_id" "$orchestrator"
+  "$FDE" orchestrator "$run_id" "$orchestrator_id"
   run_dir="$RUNS/$run_id"
 fi
 
-profile_dir="$HOME/.claude-profiles/$orchestrator"
 [[ -d "$profile_dir" ]] || {
-  echo "fde-start: profile '$orchestrator' is not configured at $profile_dir" >&2; exit 3; }
+  echo "fde-start: account '$orchestrator_id' has no profile directory at $profile_dir" >&2
+  echo "  create it:  fde accounts add --provider claude --name $orchestrator" >&2
+  exit 3; }
 
 session_file="$run_dir/orchestrator-session-id"
 [[ -n "$model" ]] || model="$(read_json_field "$run_dir/manifest.json" sessionConfig.model)"
@@ -132,7 +215,7 @@ fi
 # persists the conversation, that durable pointer becomes stale and every
 # later retry otherwise fails with `--resume` forever. Claude stores sessions
 # under the selected profile as <uuid>.jsonl; check names only, never content.
-if (( have_session )) && [[ -d "$profile_dir/projects" ]] && \
+if (( have_session )) && \
    ! find "$profile_dir/projects" -type f -name "$session_id.jsonl" -print -quit \
       2>/dev/null | grep -q .; then
   old_session_id="$session_id"
@@ -143,18 +226,14 @@ if (( have_session )) && [[ -d "$profile_dir/projects" ]] && \
 fi
 
 run_claude() {
+  # The account's environment comes from the controller, whole: which variable
+  # points Claude at which credentials, and whether this account routes through
+  # Bedrock, are recorded once in the provider template and not restated here.
   local session_options=()
   [[ -n "$model" && "$model" != "default" ]] && session_options+=(--model "$model")
   [[ -n "$effort" && "$effort" != "auto" ]] && session_options+=(--effort "$effort")
-  if [[ "$orchestrator" == "bedrock" ]]; then
-    CLAUDE_CONFIG_DIR="$profile_dir" CLAUDE_PROFILE="$orchestrator" \
-      CLAUDE_CODE_USE_BEDROCK=1 FDE_RUN_ID="$run_id" "$CLAUDE_BIN" \
-      ${session_options[@]+"${session_options[@]}"} "$@"
-  else
-    CLAUDE_CONFIG_DIR="$profile_dir" CLAUDE_PROFILE="$orchestrator" \
-      FDE_RUN_ID="$run_id" "$CLAUDE_BIN" \
-      ${session_options[@]+"${session_options[@]}"} "$@"
-  fi
+  env ${launch_env[@]+"${launch_env[@]}"} FDE_RUN_ID="$run_id" "$CLAUDE_BIN" \
+    ${session_options[@]+"${session_options[@]}"} "$@"
 }
 
 state="$(read_json_field "$run_dir/manifest.json" state)"

@@ -76,6 +76,8 @@ class Sandbox:
             shutil.copy2(SRC_SHARED / "bin" / name, dst)
             dst.chmod(0o755)
         shutil.copy2(SRC_SHARED / "config/agents.json", self.shared / "config/agents.json")
+        shutil.copy2(SRC_SHARED / "config/provider-templates.json",
+                     self.shared / "config/provider-templates.json")
         shutil.copy2(SRC_SHARED / "config/routing-policy.json",
                      self.shared / "config/routing-policy.json")
         shutil.copy2(SRC_SHARED / "mcp/mcp-servers.json", self.shared / "mcp/mcp-servers.json")
@@ -642,7 +644,8 @@ class TestCodexGate(FDETest):
 
 class TestNoBypassFlags(unittest.TestCase):
     FORBIDDEN = ("--yolo", "danger-full-access",
-                 "--dangerously-bypass-approvals-and-sandbox")
+                 "--dangerously-bypass-approvals-and-sandbox",
+                 "--dangerously-skip-permissions")
     EXEMPT = "fde-safety-exempt"
 
     def test_no_command_uses_a_sandbox_bypass(self):
@@ -770,6 +773,7 @@ class TestAtlassian(FDETest):
         self.assertTrue((mcp_dir / "claude-alt.mcp.json").exists())
         cfg = json.loads((mcp_dir / "claude-alt.mcp.json").read_text())
         self.assertEqual(cfg["mcpServers"]["atlassian"]["url"], self.ENDPOINT)
+        self.assertEqual(cfg["mcpServers"]["figma"]["url"], "https://mcp.figma.com/mcp")
         others = [p.name for p in mcp_dir.glob("claude-*.mcp.json")]
         self.assertEqual(others, ["claude-alt.mcp.json"])
 

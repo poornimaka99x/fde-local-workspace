@@ -35,6 +35,7 @@ import os
 import pathlib
 import re
 import secrets
+import shlex
 import shutil
 import stat
 import subprocess
@@ -52,6 +53,8 @@ RUNS = pathlib.Path(os.environ.get("FDE_RUNS_DIR", SHARED / "runs"))
 CHATS = pathlib.Path(os.environ.get("FDE_CHATS_DIR", SHARED / "chats"))
 PROFILES_DIR = pathlib.Path(os.environ.get("CLAUDE_PROFILES_DIR", HOME / ".claude-profiles"))
 AGENTS_FILE = SHARED / "config" / "agents.json"
+CONNECTIONS_FILE = pathlib.Path(os.environ.get(
+    "FDE_CONNECTIONS_FILE", SHARED / "config" / "service-connections.json"))
 MCP_SRC = SHARED / "mcp" / "mcp-servers.json"
 TOOLKIT_ROOT = pathlib.Path(os.environ.get(
     "FDE_TOOLKIT_ROOT", SHARED / "fde-toolkit" / "plugins" / "fde-core"))
@@ -74,10 +77,12 @@ PROJECTS = pathlib.Path(os.environ.get("FDE_PROJECTS_DIR", SHARED / "projects"))
 # ceiling is configurable downward only — no caller may raise it.
 MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
 
-# Flags that must never appear anywhere in this toolkit.
+# Flags that must never appear anywhere in this toolkit — a sandbox bypass or a
+# blanket approval, whichever CLI offers it. What may be approved is decided by
+# this controller and the user; a caller does not get to opt out of that.
 # One line on purpose: the exemption marker below covers exactly the line it is
 # on, and this list is the one honest place these strings are allowed to appear.
-FORBIDDEN_CODEX_FLAGS = ("--yolo", "danger-full-access", "--dangerously-bypass-approvals-and-sandbox")  # fde-safety-exempt: the list itself
+FORBIDDEN_BYPASS_FLAGS = ("--yolo", "danger-full-access", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-skip-permissions")  # fde-safety-exempt: the list itself
 
 # ------------------------------------------------------------- state machine --
 
@@ -281,7 +286,7 @@ MULTI_ROLES = {"research", "review", "uiUxDesign"}
 
 PUBLICATION_TARGETS = (
     "jira", "confluence", "sharepoint", "bitbucket", "github", "deployment",
-    "email", "teams",
+    "email", "teams", "figma",
 )
 
 ARTIFACT_DIRS = [
@@ -485,41 +490,1703 @@ def agent_label(agents, aid):
 
 def agent_available(agents, aid):
     """(available: bool, detail: str). Availability is about the local surface,
-    not about whether the identity is any good at the job."""
+    not about whether the identity is any good at the job — and not about
+    whether it is signed in, which 'fde accounts verify' answers separately.
+
+    Every fact used here comes from the provider template, so adding a provider
+    is a change to one JSON file rather than to this function."""
     a = agents["agents"].get(aid)
     if not a:
         return False, "unknown identity"
-    kind = a.get("kind")
-    if kind == "claude":
-        p = a.get("profile", "")
-        d = PROFILES_DIR / p
-        if not d.is_dir():
-            return False, f"no profile dir at {d} — run claude-profile-new {p}"
-        return True, f"profile {p}"
-    if kind == "codex":
-        return (True, "codex CLI") if shutil.which("codex") else (False, "codex CLI not installed")
-    if kind == "gemini":
-        return (True, "gemini CLI") if shutil.which("gemini") else (False, "gemini CLI not installed")
-    if kind == "copilot-studio":
-        if directline_secret(quiet=True) or os.environ.get("COPILOT_TOKEN_ENDPOINT"):
-            return True, "Direct Line configured"
-        return False, "no Direct Line secret or token endpoint"
-    return False, f"unknown kind '{kind}'"
+    templates = read_json(PROVIDER_TEMPLATES_FILE)
+    if not isinstance(templates, dict):
+        return False, f"provider templates unreadable at {PROVIDER_TEMPLATES_FILE}"
+    provider = account_provider(a)
+    tpl = (templates.get("providers") or {}).get(provider)
+    if not tpl:
+        return False, f"unknown provider '{provider}'"
+    cli = tpl.get("cli")
+    if cli and not shutil.which(cli):
+        return False, f"{cli} CLI not installed"
+    if tpl.get("loginMode") == "secret":
+        # A token endpoint in the environment is one tenant's, not one
+        # account's, so it stands in only for an entry that predates
+        # per-account credentials.
+        if (not account_isolated(tpl, a)
+                and os.environ.get("COPILOT_TOKEN_ENDPOINT")):
+            return True, "token endpoint configured"
+        ok, _source, detail = account_login_state(templates, agents, aid)
+        return (True, detail) if ok else (False, detail)
+    if tpl.get("requiresDir"):
+        directory = account_credential_dir(templates, a, aid)
+        if not directory.is_dir():
+            hint = " ".join(str(x).replace("{account}", account_slug_of(aid, a))
+                            for x in ((tpl.get("provision") or {}).get("argv") or []))
+            return False, (f"no account directory at {directory}"
+                           + (f" — run {hint}" if hint else ""))
+        return True, f"account {account_slug_of(aid, a)}"
+    return True, f"{cli} CLI" if cli else "available"
 
 
-def directline_secret(quiet=False):
-    """Keychain first, environment second. Never printed by anything that logs."""
-    if shutil.which("security"):
+# There is deliberately no function here that retrieves a Direct Line secret.
+# This controller only ever needs to know WHETHER one exists — keychain_has and
+# account_login_state answer that without reading a value — and the sidecar
+# that actually needs the secret reads it at call time, in its own process.
+
+
+# ------------------------------------------------------------------ accounts --
+
+# An account is an identity you can actually sign in to: a provider, a name you
+# gave it, and a directory on this machine where that provider's own CLI keeps
+# that account's credentials. The registry records the first two and the path to
+# the third. It never records the credentials themselves, and no command here
+# reads, prints, copies or hashes them — the most any of them does is ask whether
+# the file the provider writes on a successful login exists.
+#
+# agents.json stays controller-owned: the console asks for an account, this
+# controller decides whether the request is legal and is the only thing that
+# writes the file.
+
+PROVIDER_TEMPLATES_FILE = SHARED / "config" / "provider-templates.json"
+PROVIDER_TEMPLATES_SCHEMA_VERSION = 1
+ACCOUNTS_SCHEMA_VERSION = 1
+
+# A display name is what the operator typed. A slug is what becomes a directory
+# name, so it is the narrower of the two by a wide margin: no dots, no spaces,
+# nothing that could climb out of the directory it names.
+ACCOUNT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'()/-]{0,48}$")
+ACCOUNT_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+ACCOUNT_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+LOGIN_MODES = ("terminal", "secret", "none")
+VERIFY_MODES = ("probe", "argv")
+MAX_ACCOUNTS = 64
+
+# A pasted secret is bounded so a mis-paste cannot fill the disk, and floored so
+# an empty clipboard cannot silently register an account as configured.
+MAX_SECRET_BYTES = 8192
+
+
+class AccountError(Exception):
+    """A refusal about accounts that a caller can act on.
+
+    Deliberately the same envelope as RoutingError: a stable machine code, a
+    sentence for a human, and the thing to do next where there is one. The
+    console already knows how to read this shape."""
+
+    def __init__(self, code, message, hint="", exit_code=2):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+        self.exit_code = exit_code
+
+    def payload(self):
+        return {
+            "schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+            "error": {"code": self.code, "message": self.message,
+                      "hint": self.hint or None},
+        }
+
+
+def account_command(fn):
+    """JSON callers get a typed error and a documented exit code; a terminal
+    gets the controller's usual one-line refusal. Neither gets a traceback."""
+    def wrapper(args):
         try:
-            r = subprocess.run(
-                ["security", "find-generic-password", "-a", os.environ.get("USER", ""),
-                 "-s", "fde-copilot-directline", "-w"],
-                capture_output=True, text=True, timeout=10)
-            if r.returncode == 0 and r.stdout.strip():
-                return r.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
+            return fn(args)
+        except AccountError as exc:
+            if getattr(args, "json", False):
+                emit_json(exc.payload())
+                return exc.exit_code
+            hint = f"\n       {exc.hint}" if exc.hint else ""
+            die(f"{exc.message}{hint}", exc.exit_code)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+_DIR_OVERRIDE_RE = re.compile(r"^\$\{([A-Z][A-Z0-9_]*):([^}]*)\}(.*)$")
+
+
+def _expand_dir_template(template: str, account: str) -> pathlib.Path:
+    """'${VAR:~/.x}/{account}' -> an absolute path under this machine's HOME.
+
+    The override variable exists so a second machine, or a test, can relocate
+    every account directory without editing the template file. The result is
+    checked, not trusted: a slug is already restricted to lowercase letters,
+    digits and hyphens, and the expanded path must still be absolute and must
+    still contain the slug as its own final component. A template that resolves
+    anywhere else is a configuration error and is refused rather than created."""
+    text = str(template or "")
+    match = _DIR_OVERRIDE_RE.match(text)
+    if match:
+        var, fallback, rest = match.groups()
+        base = os.environ.get(var, "").strip() or fallback
+        text = base + rest
+    text = text.replace("{account}", account)
+    if text.startswith("~"):
+        text = str(HOME) + text[1:]
+    path = pathlib.Path(text)
+    if not path.is_absolute():
+        die(f"provider template directory '{template}' does not resolve to an "
+            f"absolute path (got {text!r})", 2)
+    resolved = pathlib.Path(os.path.normpath(str(path)))
+    if resolved.name != account:
+        die(f"provider template directory '{template}' does not end in the "
+            f"account name (resolved to {resolved})", 2)
+    return resolved
+
+
+def load_provider_templates():
+    """The provider catalogue, validated. A malformed template is refused here
+    rather than halfway through creating an account."""
+    data = read_json(PROVIDER_TEMPLATES_FILE)
+    if data is None:
+        die(f"no provider templates at {PROVIDER_TEMPLATES_FILE} — is the "
+            "toolkit installed?", 2)
+    if data.get("schemaVersion") != PROVIDER_TEMPLATES_SCHEMA_VERSION:
+        die(f"{PROVIDER_TEMPLATES_FILE} was written by a different schema "
+            f"({data.get('schemaVersion')}); this controller speaks "
+            f"{PROVIDER_TEMPLATES_SCHEMA_VERSION}", 2)
+    providers = data.get("providers")
+    if not isinstance(providers, dict) or not providers:
+        die(f"{PROVIDER_TEMPLATES_FILE} has no 'providers'", 2)
+    prefixes = {}
+    for name, tpl in providers.items():
+        where = f"{PROVIDER_TEMPLATES_FILE}: provider '{name}'"
+        if not isinstance(tpl, dict):
+            die(f"{where} is not an object", 2)
+        for key in ("label", "kind", "idPrefix", "loginMode", "credential"):
+            if not tpl.get(key):
+                die(f"{where} is missing '{key}'", 2)
+        if tpl["loginMode"] not in LOGIN_MODES:
+            die(f"{where} has loginMode '{tpl['loginMode']}'; expected one of "
+                f"{', '.join(LOGIN_MODES)}", 2)
+        prefix = tpl["idPrefix"]
+        if not ACCOUNT_SLUG_RE.match(str(prefix)):
+            die(f"{where} has an unusable idPrefix {prefix!r}", 2)
+        if prefix in prefixes:
+            die(f"{where} reuses the idPrefix of '{prefixes[prefix]}'; account "
+                "ids would collide", 2)
+        prefixes[prefix] = name
+        cred = tpl["credential"]
+        if not isinstance(cred, dict):
+            die(f"{where} has a malformed credential block", 2)
+        if cred.get("shared"):
+            # A provider whose credential lives somewhere a directory cannot
+            # separate — an OS keyring — must say so, and must cap how many
+            # accounts it will accept, or the registry would offer an isolation
+            # it has no way to deliver.
+            if not cred.get("defaultDir"):
+                die(f"{where} is credential.shared but names no defaultDir", 2)
+            if tpl.get("maxAccounts") != 1:
+                die(f"{where} is credential.shared, so it must declare "
+                    '"maxAccounts": 1 — accounts on it cannot be kept apart', 2)
+            if cred.get("env"):
+                die(f"{where} is credential.shared but names a credential "
+                    "variable; there is no per-account directory to point at", 2)
+            if (tpl.get("verify") or {}).get("mode") != "argv":
+                die(f"{where} is credential.shared, so sign-in can only be "
+                    "confirmed by running the provider's own command "
+                    '(verify.mode "argv")', 2)
+        elif not cred.get("dirTemplate"):
+            die(f"{where} has no credential.dirTemplate", 2)
+        if not cred.get("defaultDir") and not tpl.get("legacyIsolation"):
+            # A provider that did not isolate accounts before this command
+            # existed must name the directory its CLI actually uses, or 'verify'
+            # has nowhere to look for a pre-accounts entry's credential.
+            die(f"{where} has no credential.defaultDir", 2)
+        limit = tpl.get("maxAccounts")
+        if limit is not None and (not isinstance(limit, int) or limit < 1):
+            die(f"{where} has an unusable maxAccounts {limit!r}", 2)
+        caps = tpl.get("capabilities")
+        if not isinstance(caps, list) or not caps or not all(
+                isinstance(c, str) and c for c in caps):
+            die(f"{where} must declare a non-empty list of capabilities", 2)
+        for banned in ("role", "defaultRole", "preferred", "default"):
+            if banned in tpl:
+                die(f"{where} declares '{banned}'. Templates carry capabilities, "
+                    "never roles — roles are assigned per run.", 2)
+        verify = tpl.get("verify") or {"mode": "probe"}
+        if verify.get("mode") not in VERIFY_MODES:
+            die(f"{where} has verify.mode '{verify.get('mode')}'; expected one "
+                f"of {', '.join(VERIFY_MODES)}", 2)
+        if verify.get("mode") == "argv" and not isinstance(verify.get("argv"), list):
+            die(f"{where} has verify.mode 'argv' but no argv list", 2)
+        if tpl["loginMode"] == "terminal":
+            login = tpl.get("login") or {}
+            argv = login.get("argv")
+            if not isinstance(argv, list) or not argv or not all(
+                    isinstance(x, str) and x for x in argv):
+                die(f"{where} has loginMode 'terminal' but no login.argv", 2)
+        if tpl["loginMode"] == "secret" and not cred.get("secretFile"):
+            die(f"{where} has loginMode 'secret' but no credential.secretFile", 2)
+        for field in tpl.get("fields") or []:
+            if not isinstance(field, dict) or not field.get("name"):
+                die(f"{where} has a field with no name", 2)
+            pattern = field.get("pattern")
+            if pattern:
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    die(f"{where} field '{field['name']}' has an unusable "
+                        f"pattern: {exc}", 2)
+    return data
+
+
+# ---- reading an account back out of the registry ----
+
+def _infer_provider(agent: dict) -> str:
+    """Which template an agent written before this command existed belongs to.
+
+    The registry shipped with entries that name only a kind and, for Claude, a
+    profile. Those keep working untouched: the provider is inferred, the
+    credential directory it resolves to is the same directory the launcher has
+    always used, and nothing about the entry is rewritten to make it fit."""
+    kind = agent.get("kind")
+    if kind == "claude":
+        if agent.get("profile") == "bedrock":
+            return "claude-bedrock"
+        return "claude"
+    if kind == "codex":
+        return "codex"
+    if kind == "gemini":
+        return "antigravity"
+    if kind == "copilot-studio":
+        return "copilot-studio"
+    return ""
+
+
+def account_provider(agent: dict) -> str:
+    return str(agent.get("provider") or _infer_provider(agent))
+
+
+def account_slug_of(aid: str, agent: dict) -> str:
+    """The directory name for this account.
+
+    Explicit 'account' wins. Then 'profile', which is what Claude entries have
+    always carried. Failing both, the identity id with its provider prefix
+    stripped — which is how the shipped codex, gemini and copilot entries, none
+    of which had any per-account directory at all, acquire one."""
+    for key in ("account", "profile"):
+        value = str(agent.get(key) or "").strip()
+        if value:
+            return value
+    return slug(aid, 31) or "default"
+
+
+def account_template(templates, agent: dict, aid: str):
+    provider = account_provider(agent)
+    tpl = (templates.get("providers") or {}).get(provider)
+    if tpl is None:
+        die(f"identity '{aid}' names provider '{provider}', which is not in "
+            f"{PROVIDER_TEMPLATES_FILE}", 2)
+    return provider, tpl
+
+
+# What an entry no template describes is called. A hand-edited registry with
+# one such entry used to fail the whole listing, which left every account
+# invisible and the offending entry unremovable from the console. It is
+# reported as itself instead, and can still be removed.
+UNTEMPLATED_LABEL = "(no provider template)"
+
+
+def account_template_or_none(templates, agent: dict, aid: str):
+    provider = account_provider(agent)
+    tpl = (templates.get("providers") or {}).get(provider)
+    return provider, tpl
+
+
+def make_private_dir(directory: pathlib.Path, mode: int = 0o700):
+    """Create a credential directory owner-only, at every level it creates.
+
+    pathlib's parents=True applies the mode to the last component only, so the
+    intermediate directory that holds every account name would be left at the
+    umask default — which is not a credential, but it is a list of the
+    operator's accounts. A directory that cannot be made private is refused
+    rather than registered: an account whose credentials are world-readable is
+    worse than an account that failed to be created."""
+    missing = []
+    probe = directory
+    while not probe.exists():
+        missing.append(probe)
+        if probe.parent == probe:
+            break
+        probe = probe.parent
+    for path in reversed(missing):
+        try:
+            path.mkdir(mode=mode)
+        except FileExistsError:
             pass
-    return os.environ.get("COPILOT_DIRECTLINE_SECRET", "").strip()
+        except OSError as exc:
+            raise AccountError("credential_dir_failed",
+                               f"could not create {path}: {exc}", exit_code=5)
+    if not directory.is_dir():
+        raise AccountError("credential_dir_failed",
+                           f"{directory} is not a directory", exit_code=5)
+    try:
+        os.chmod(directory, mode)
+    except OSError as exc:
+        raise AccountError(
+            "credential_dir_failed",
+            f"could not make {directory} readable only by you: {exc}",
+            exit_code=5)
+    return directory
+
+
+def account_declared(agent: dict) -> bool:
+    """Whether this entry was created by 'fde accounts add'.
+
+    The distinction matters for one reason only: an entry that predates this
+    command must keep behaving exactly as it did. It is never rewritten, and it
+    is never handed a credential variable it did not have before — pointing an
+    already-signed-in CLI at a fresh empty directory would look, to the
+    operator, like being silently signed out."""
+    return "provider" in agent
+
+
+def _expand_plain_path(text: str) -> pathlib.Path:
+    text = str(text or "")
+    if text.startswith("~"):
+        text = str(HOME) + text[1:]
+    return pathlib.Path(os.path.normpath(text))
+
+
+def account_isolated(tpl, agent: dict) -> bool:
+    """Whether this account gets its own credential directory at all.
+
+    A provider marked credential.shared never does, however it was registered:
+    its credential is held somewhere a directory cannot divide, and saying
+    otherwise here is what would turn "two accounts" into "one login used
+    twice"."""
+    if (tpl.get("credential") or {}).get("shared"):
+        return False
+    return bool(account_declared(agent) or tpl.get("legacyIsolation"))
+
+
+def require_template(templates, agent: dict, aid: str):
+    """The provider template for an account, or a refusal a caller can act on."""
+    provider, tpl = account_template_or_none(templates, agent, aid)
+    if tpl is None:
+        raise AccountError(
+            "no_provider_template",
+            f"identity '{aid}' names provider '{provider or '(none)'}', which "
+            f"is not in {PROVIDER_TEMPLATES_FILE}",
+            "add the provider to that file, or remove this identity",
+            exit_code=4)
+    return provider, tpl
+
+
+def account_credential_dir(templates, agent: dict, aid: str) -> pathlib.Path:
+    """Where this account's credentials live.
+
+    For an account this controller registered, the template decides. For a
+    shipped entry on a provider that had no per-account isolation, it is that
+    CLI's own default directory — recorded so 'verify' can look in the right
+    place, not so anything is moved there."""
+    _provider, tpl = account_template(templates, agent, aid)
+    cred = tpl.get("credential") or {}
+    if account_isolated(tpl, agent):
+        return _expand_dir_template(cred["dirTemplate"], account_slug_of(aid, agent))
+    default = cred.get("defaultDir")
+    if not default:
+        # Better to say the location is unknown than to name the operator's home
+        # directory, which is what a bare "~" fallback would do — and what would
+        # then be reported as a credential folder, chmod'd, or offered for
+        # deletion.
+        die(f"{PROVIDER_TEMPLATES_FILE}: provider '{account_provider(agent)}' "
+            "has no credential.defaultDir, so there is nowhere to look for a "
+            "credential this toolkit is not isolating", 2)
+    return _expand_plain_path(default)
+
+
+def account_env(agents, aid: str, templates=None) -> dict:
+    """The environment that points one provider's CLI at one account.
+
+    This is the whole isolation mechanism, in one place, derived from the
+    template rather than restated per call site. An identity with no template
+    entry gets an empty environment, which is exactly the behaviour that existed
+    before accounts did — the CLI falls back to its own default directory."""
+    templates = templates if templates is not None else load_provider_templates()
+    agent = (agents.get("agents") or {}).get(aid)
+    if not agent:
+        return {}
+    provider = account_provider(agent)
+    tpl = (templates.get("providers") or {}).get(provider)
+    if not tpl:
+        return {}
+    cred = tpl.get("credential") or {}
+    account = account_slug_of(aid, agent)
+    env = {}
+    for key, value in (tpl.get("env") or {}).items():
+        env[str(key)] = str(value)
+    if not account_isolated(tpl, agent):
+        # A shipped entry on a provider that never had per-account credentials
+        # keeps the environment it had before this command existed: none. Its
+        # CLI goes on reading its own default directory.
+        return env
+    directory = _expand_dir_template(cred["dirTemplate"], account)
+    if cred.get("env"):
+        env[cred["env"]] = str(directory)
+    if cred.get("dirEnv"):
+        env[cred["dirEnv"]] = str(directory)
+    if cred.get("keychainService") and cred.get("serviceEnv"):
+        env[cred["serviceEnv"]] = str(cred["keychainService"]).replace(
+            "{account}", account)
+    # Claude's launcher has always exported the profile name alongside the
+    # directory; keeping it means nothing downstream has to change.
+    if cred.get("env") == "CLAUDE_CONFIG_DIR":
+        env["CLAUDE_PROFILE"] = account
+    return env
+
+
+def account_secret_path(templates, agent: dict, aid: str):
+    provider, tpl = account_template(templates, agent, aid)
+    cred = tpl.get("credential") or {}
+    if not cred.get("secretFile") or not account_isolated(tpl, agent):
+        return None
+    return account_credential_dir(templates, agent, aid) / str(cred["secretFile"])
+
+
+def account_login_state(templates, agents, aid: str):
+    """(loggedIn, source, detail) — asked, never assumed.
+
+    'probe' asks the filesystem whether the file the provider writes on a
+    successful login is there. It reads no part of it. 'argv' runs the
+    provider's own status command, which is the only honest answer where the
+    credential does not live in a file this toolkit can name."""
+    agent = (agents.get("agents") or {}).get(aid) or {}
+    provider, tpl = account_template_or_none(templates, agent, aid)
+    if tpl is None:
+        return False, "none", (f"no provider template for '{provider}'" if provider
+                               else "this entry names no provider this "
+                                    "controller knows")
+    cred = tpl.get("credential") or {}
+    directory = account_credential_dir(templates, agent, aid)
+    if tpl.get("loginMode") == "secret":
+        secret = account_secret_path(templates, agent, aid)
+        if secret is not None and secret.is_file() and secret.stat().st_size > 0:
+            return True, "file", "secret stored for this account"
+        service = keychain_service_of(tpl, agent, aid)
+        if service and keychain_has(service):
+            return True, "keychain", f"keychain service {service}"
+        # An environment variable is global: it is one credential, and every
+        # account on this provider would report itself signed in on it. It is
+        # honoured only for a pre-accounts entry, which is what it was always
+        # the fallback for; an account registered here has its own file.
+        if (not account_isolated(tpl, agent)
+                and os.environ.get(str(cred.get("envOverride") or "x"))):
+            return True, "environment", "secret supplied by the environment"
+        return False, "none", "no secret stored for this account"
+    probes = cred.get("probeFiles") or []
+    if not probes:
+        # There is no file to look for: the credential lives somewhere only the
+        # provider's own command can report on, such as an OS keyring. Guessing
+        # either way here is worse than saying so — "signed in" would send a run
+        # at an account that cannot answer, and "signed out" would report a
+        # working sign-in as broken. 'fde accounts verify' is what settles it.
+        cli = tpl.get("cli") or (tpl.get("verify") or {}).get("requires") or "its CLI"
+        return False, "unconfirmed", (
+            f"not checked — this sign-in can only be confirmed by running {cli}: "
+            f"fde accounts verify {aid}")
+    if not directory.is_dir():
+        return False, "none", f"no account directory at {directory}"
+    for rel in probes:
+        candidate = directory / str(rel)
+        if candidate.is_file():
+            return True, "file", f"credential present in {directory}"
+    return False, "none", "signed out — no credential in the account directory"
+
+
+def keychain_service_of(tpl, agent: dict, aid: str) -> str:
+    """The keychain service this account's credential lives under, if any.
+
+    A pre-accounts entry keeps the single fixed service it has always used; an
+    account this controller registered gets one of its own."""
+    cred = (tpl or {}).get("credential") or {}
+    if account_isolated(tpl, agent) and cred.get("keychainService"):
+        return str(cred["keychainService"]).replace(
+            "{account}", account_slug_of(aid, agent))
+    return str(cred.get("legacyKeychainService") or "")
+
+
+def keychain_has(service: str) -> bool:
+    """Whether a keychain entry exists. Never retrieves the value."""
+    if not service or not shutil.which("security"):
+        return False
+    try:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-a",
+             os.environ.get("USER", ""), "-s", service],
+            capture_output=True, text=True, timeout=10)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def account_record(templates, agents, aid: str) -> dict:
+    """One account as a machine reader sees it. No secret, and no value read out
+    of a credential file — only whether one is there."""
+    agent = (agents.get("agents") or {}).get(aid) or {}
+    provider, tpl = account_template_or_none(templates, agent, aid)
+    if tpl is None:
+        reason = (f"no provider template for '{provider}'" if provider
+                  else "this entry names no provider this controller knows")
+        return {
+            "id": aid, "label": agent.get("label", aid), "provider": provider,
+            "providerLabel": UNTEMPLATED_LABEL, "kind": agent.get("kind"),
+            "account": account_slug_of(aid, agent), "loginMode": "none",
+            "credentialDir": "", "loggedIn": False,
+            "credentialSource": "none",
+            "loginDetail": f"{reason} — this account cannot be used or signed in",
+            "available": False, "availability": reason,
+            "capabilities": list(agent.get("capabilities") or []),
+            "declared": account_declared(agent), "isolated": False,
+            "fields": {}, "note": agent.get("note"),
+            "surface": agent.get("surface"),
+            "forbidden": list(agent.get("forbidden") or []),
+            "writeRequiresApproval": bool(agent.get("write_requires_approval")),
+        }
+    logged_in, source, detail = account_login_state(templates, agents, aid)
+    available, availability = agent_available(agents, aid)
+    return {
+        "id": aid,
+        "label": agent.get("label", aid),
+        "provider": provider,
+        "providerLabel": tpl.get("label", provider),
+        "kind": agent.get("kind"),
+        "account": account_slug_of(aid, agent),
+        "loginMode": tpl.get("loginMode"),
+        "credentialDir": str(account_credential_dir(templates, agent, aid)),
+        "loggedIn": logged_in,
+        "credentialSource": source,
+        "loginDetail": detail,
+        "available": bool(available),
+        "availability": availability,
+        "capabilities": list(agent.get("capabilities") or []),
+        "declared": account_declared(agent),
+        "isolated": account_isolated(tpl, agent),
+        "fields": {name: agent[name] for name in
+                   [f["name"] for f in (tpl.get("fields") or [])]
+                   if name in agent},
+        "note": agent.get("note"),
+        "surface": agent.get("surface"),
+        "forbidden": list(agent.get("forbidden") or []),
+        "writeRequiresApproval": bool(agent.get("write_requires_approval")),
+    }
+
+
+def provider_record(templates, name: str) -> dict:
+    tpl = templates["providers"][name]
+    cred = tpl.get("credential") or {}
+    login = tpl.get("login") or {}
+    requires = tpl.get("cli") or login.get("requires") or (
+        tpl.get("verify") or {}).get("requires")
+    return {
+        "provider": name,
+        "label": tpl.get("label", name),
+        "kind": tpl.get("kind"),
+        "summary": tpl.get("summary"),
+        "loginMode": tpl.get("loginMode"),
+        "loginInstruction": login.get("instruction"),
+        "credentialEnv": cred.get("env"),
+        "credentialDirTemplate": cred.get("dirTemplate"),
+        "cliRequired": requires,
+        "cliInstalled": bool(shutil.which(requires)) if requires else None,
+        "fields": [
+            {"name": f.get("name"), "label": f.get("label", f.get("name")),
+             "required": bool(f.get("required")), "default": f.get("default"),
+             "pattern": f.get("pattern")}
+            for f in (tpl.get("fields") or [])
+        ],
+        "secret": tpl.get("secret") if tpl.get("loginMode") == "secret" else None,
+        "capabilities": list(tpl.get("capabilities") or []),
+        "maxAccounts": tpl.get("maxAccounts"),
+        "maxAccountsReason": tpl.get("maxAccountsReason"),
+        "sharedCredential": bool(cred.get("shared")),
+        "multipleAccounts": tpl.get("maxAccounts") != 1,
+        "note": tpl.get("note"),
+        "surface": tpl.get("surface"),
+    }
+
+
+# ---- writing the registry ----
+
+@contextlib.contextmanager
+def agents_lock():
+    """One registry writer at a time. Held only for the length of one mutation.
+
+    Two consoles adding an account at the same moment would otherwise both read
+    the registry, both add their entry, and the second write would drop the
+    first."""
+    lock_file = AGENTS_FILE.parent / ".agents.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(str(lock_file), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise AccountError(
+                "registry_busy",
+                "another account change is in flight; try again",
+                exit_code=5)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        os.close(handle)
+
+
+def _unique_account_id(agents, prefix: str, base: str) -> str:
+    taken = set(agents.get("agents") or {})
+    candidate = f"{prefix}_{base}" if base != prefix else prefix
+    if candidate not in taken:
+        return candidate
+    for n in range(2, 100):
+        alt = f"{candidate}-{n}"
+        if alt not in taken:
+            return alt
+    raise AccountError("id_exhausted",
+                       f"too many accounts named like '{candidate}'")
+
+
+def _account_slug_from_name(name: str) -> str:
+    s = slug(name, 31)
+    if not s or not ACCOUNT_SLUG_RE.match(s):
+        raise AccountError(
+            "bad_name",
+            f"'{name}' does not reduce to a usable directory name",
+            "use letters, digits, spaces or hyphens")
+    return s
+
+
+def _field_option(name: str) -> str:
+    """'awsProfile' -> 'aws-profile'. The option spelling, for a hint."""
+    return re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), str(name))
+
+
+def _validate_fields(tpl, supplied: dict) -> dict:
+    out = {}
+    for field in tpl.get("fields") or []:
+        name = field["name"]
+        value = supplied.get(name)
+        if value in (None, ""):
+            value = field.get("default")
+        if value in (None, "") and field.get("required"):
+            raise AccountError(
+                "field_required",
+                f"{tpl.get('label')} needs {field.get('label', name)}",
+                "pass --" + _field_option(name) + " <value>")
+        if value in (None, ""):
+            continue
+        pattern = field.get("pattern")
+        if pattern and not re.match(pattern, str(value)):
+            raise AccountError(
+                "field_invalid",
+                f"{field.get('label', name)} {str(value)!r} is not in the "
+                "expected form")
+        out[name] = str(value)
+    return out
+
+
+def accounts_in_use(aid: str):
+    """Runs whose roles.json still names this identity.
+
+    Removing an account out from under a run in flight would leave a role
+    assigned to an identity that no longer exists, and the run could neither be
+    invoked nor explained. Finished runs are historical record and do not block
+    anything — their roles.json keeps naming the identity that did the work."""
+    used = []
+    for directory in run_dirs():
+        manifest = read_json(directory / "manifest.json") or {}
+        # A finished run's roles.json is historical record and blocks nothing.
+        # A blocked run is unfinished work that can still be unblocked, so it
+        # does hold its identities — '--force' is the documented way past that.
+        if manifest.get("state") == "complete":
+            continue
+        roles = read_json(directory / "roles.json")
+        if not isinstance(roles, dict):
+            continue
+        assigned = roles.get("assignments")
+        if not isinstance(assigned, dict):
+            continue
+        for role, value in assigned.items():
+            names = value if isinstance(value, list) else [value]
+            if aid in [str(n) for n in names if n]:
+                used.append({"runId": directory.name, "role": role,
+                             "state": manifest.get("state")})
+    return used
+
+
+def provision_account(tpl, directory, account: str, fields: dict):
+    """Create the account's directory, and run the provider's own provisioning
+    step where it has one.
+
+    Provisioning is best-effort by design: 'claude-profile-new' does more than
+    make a directory (it links CLAUDE.md and writes settings.json), but if it is
+    not on PATH the account is still registered with its directory created, and
+    'verify' will say plainly that the login has not happened yet."""
+    if directory is None:
+        # A provider whose credential this toolkit cannot isolate has no
+        # directory of its own to create, and the one its CLI uses is that
+        # CLI's — not ours to create, chmod or provision into.
+        return {"ran": False,
+                "reason": "this provider keeps its credential where a folder "
+                          "cannot separate accounts, so there is nothing to "
+                          "provision"}
+    make_private_dir(directory, int(str((tpl.get("credential") or {}).get("mode")
+                                        or "0700"), 8))
+    provision = tpl.get("provision") or {}
+    argv = provision.get("argv")
+    if not isinstance(argv, list) or not argv:
+        return {"ran": False, "reason": "provider has no provisioning step"}
+    if not shutil.which(argv[0]):
+        return {"ran": False, "reason": f"{argv[0]} is not on PATH"}
+    concrete = []
+    for token in argv:
+        token = str(token).replace("{account}", account)
+        for name, value in fields.items():
+            token = token.replace("{" + name + "}", str(value))
+        concrete.append(token)
+    try:
+        r = subprocess.run(concrete, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ran": False, "reason": str(exc)}
+    return {"ran": True, "exitCode": r.returncode,
+            "detail": (r.stderr or r.stdout or "").strip()[:400] or None}
+
+
+# ---- commands ----
+
+@account_command
+def cmd_accounts_providers(args):
+    """What you can add, and whether this machine can sign in to it."""
+    templates = load_provider_templates()
+    records = [provider_record(templates, name)
+               for name in sorted(templates["providers"])]
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+                          "providers": records})
+    print("Providers you can add an account for:")
+    print()
+    for r in records:
+        print(f"  {r['provider']:<16} {r['label']}")
+        print(f"  {'':<16} {r['summary']}")
+        if r["loginMode"] == "terminal":
+            state = ("installed" if r["cliInstalled"] else
+                     f"NOT installed — {r['cliRequired']} is not on PATH")
+            print(f"  {'':<16} sign-in: interactive terminal ({state})")
+        elif r["loginMode"] == "secret":
+            print(f"  {'':<16} sign-in: paste a {r['secret']['label']}")
+        else:
+            print(f"  {'':<16} sign-in: none — uses credentials you already have")
+        if r["credentialEnv"]:
+            print(f"  {'':<16} isolation: {r['credentialEnv']}="
+                  f"{r['credentialDirTemplate']}")
+        for f in r["fields"]:
+            need = "required" if f["required"] else "optional"
+            print(f"  {'':<16} field: {f['name']} ({need}, default "
+                  f"{f['default']!r})")
+        if r["sharedCredential"]:
+            print(f"  {'':<16} isolation: NONE — {r['maxAccountsReason']}")
+        elif r["maxAccounts"]:
+            print(f"  {'':<16} accounts: at most {r['maxAccounts']}")
+        print()
+    print("  Providers support as many accounts as you want to add, except "
+          "where a ceiling is shown above.")
+    print("  (no credential value is read or printed by this command)")
+    return 0
+
+
+@account_command
+def cmd_accounts_list(args):
+    """Every registered account and whether it is signed in."""
+    templates = load_provider_templates()
+    agents = load_agents()
+    ids = sorted(agents.get("agents") or {})
+    if getattr(args, "provider", None):
+        ids = [a for a in ids
+               if account_provider(agents["agents"][a]) == args.provider]
+    records = [account_record(templates, agents, aid) for aid in ids]
+    if getattr(args, "logged_in", False):
+        records = [r for r in records if r["loggedIn"]]
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+                          "accounts": records})
+    if not records:
+        print("No accounts registered.")
+        print("  add one: fde accounts add --provider claude --name work")
+        return 0
+    print(f"{len(records)} account(s). Roles are assigned per run, never here.")
+    print()
+    for r in records:
+        mark = ("signed in " if r["loggedIn"]
+                else "not checked" if r["credentialSource"] == "unconfirmed"
+                else "signed out ")
+        print(f"  [{mark}] {r['id']:<22} {r['label']}")
+        print(f"  {'':<13} {r['providerLabel']} — {r['loginDetail']}")
+        if not r["available"]:
+            print(f"  {'':<13} unavailable: {r['availability']}")
+    print()
+    print("  (no credential value is read or printed by this command)")
+    return 0
+
+
+@account_command
+def cmd_accounts_add(args):
+    """Register an account. Creates its credential directory; signs in to nothing.
+
+    Adding an account and signing it in are deliberately separate: the sign-in
+    is interactive and belongs to the operator, and an account that exists but
+    is not signed in is an honest state the console can show and act on."""
+    templates = load_provider_templates()
+    provider = str(getattr(args, "provider", "") or "")
+    tpl = (templates.get("providers") or {}).get(provider)
+    if tpl is None:
+        raise AccountError(
+            "unknown_provider",
+            f"'{provider}' is not a known provider",
+            f"known: {', '.join(sorted(templates['providers']))}")
+    name = str(getattr(args, "name", "") or "").strip()
+    if not name:
+        raise AccountError("bad_name", "an account needs a name",
+                           "pass --name \"work\"")
+    if not ACCOUNT_NAME_RE.match(name):
+        raise AccountError(
+            "bad_name", f"{name!r} is not a usable account name",
+            "letters, digits, spaces and . _ - ' ( ) / only, up to 49 characters")
+    account = _account_slug_from_name(name)
+    fields = _validate_fields(tpl, {
+        f["name"]: getattr(args, f["name"].replace("-", "_"), None)
+        for f in (tpl.get("fields") or [])
+    })
+    with agents_lock():
+        agents = load_agents()
+        existing = agents.get("agents") or {}
+        if len(existing) >= MAX_ACCOUNTS:
+            raise AccountError(
+                "too_many_accounts",
+                f"the registry already holds {len(existing)} identities "
+                f"(ceiling {MAX_ACCOUNTS})",
+                "remove one you no longer use")
+        # Two providers can share a credential root — Claude and Claude on
+        # Bedrock both live under the profiles directory — so the thing that
+        # must be unique is the directory, not the (provider, name) pair.
+        # Registering a second account onto an existing account's directory
+        # would silently give two identities one login.
+        wanted_dir = (
+            None if (tpl.get("credential") or {}).get("shared")
+            else _expand_dir_template(tpl["credential"]["dirTemplate"], account))
+        wanted_service = str((tpl.get("credential") or {}).get("keychainService")
+                             or "").replace("{account}", account)
+        for aid, agent in existing.items():
+            if account_provider(agent) == provider and account_slug_of(aid, agent) == account:
+                raise AccountError(
+                    "duplicate_account",
+                    f"'{tpl['label']}' already has an account called "
+                    f"{account!r} ({aid})",
+                    "give this one a different name")
+            other = (templates.get("providers") or {}).get(account_provider(agent))
+            if not other:
+                continue
+            # A keychain service name is a credential location exactly as a
+            # directory is. An account named "directline" would otherwise
+            # resolve to fde-copilot-directline — the single fixed service the
+            # shipped Copilot entry has always used — and sign in as it.
+            if wanted_service and keychain_service_of(other, agent, aid) == wanted_service:
+                raise AccountError(
+                    "credential_service_taken",
+                    f"{aid} ({agent.get('label', aid)}) already uses the "
+                    f"keychain service {wanted_service}",
+                    "give this one a different name")
+            if wanted_dir is None or not account_isolated(other, agent):
+                continue
+            if account_credential_dir(templates, agent, aid) == wanted_dir:
+                raise AccountError(
+                    "credential_dir_taken",
+                    f"{aid} ({agent.get('label', aid)}) already keeps its "
+                    f"credentials in {wanted_dir}",
+                    "give this one a different name")
+        # A ceiling the provider itself imposes. Refusing here, with the
+        # provider's own reason, is the alternative to registering a second
+        # account that would quietly share the first one's sign-in.
+        limit = tpl.get("maxAccounts")
+        if isinstance(limit, int):
+            held = sorted(aid for aid, agent in existing.items()
+                          if account_provider(agent) == provider)
+            if len(held) >= limit:
+                reason = (tpl.get("maxAccountsReason")
+                          or f"{tpl['label']} accepts at most {limit} "
+                             "account(s) on this machine")
+                raise AccountError(
+                    "provider_account_limit",
+                    f"{reason} Already registered: {', '.join(held)}.",
+                    f"remove {held[0]} first, or switch account inside the "
+                    "provider's own CLI",
+                    exit_code=5)
+        aid = _unique_account_id(agents, tpl["idPrefix"], account)
+        if not ACCOUNT_ID_RE.match(aid):
+            raise AccountError("bad_id", f"derived an unusable identity id {aid!r}")
+        entry = {
+            "label": f"{tpl['label']}: {name}",
+            "kind": tpl["kind"],
+            "provider": provider,
+            "account": account,
+            "capabilities": list(tpl["capabilities"]),
+        }
+        # Claude's launcher reads 'profile'. Writing it for Claude-kind accounts
+        # keeps every existing reader working without a migration.
+        if (tpl.get("credential") or {}).get("env") == "CLAUDE_CONFIG_DIR":
+            entry["profile"] = account
+        entry.update(fields)
+        for key, value in (("note", tpl.get("note")),
+                           ("surface", tpl.get("surface"))):
+            if value:
+                entry[key] = value
+        if tpl.get("forbidden"):
+            entry["forbidden"] = list(tpl["forbidden"])
+        if tpl.get("writeRequiresApproval"):
+            entry["write_requires_approval"] = True
+        provisioned = provision_account(tpl, wanted_dir, account, fields)
+        agents.setdefault("agents", {})[aid] = entry
+        write_json(AGENTS_FILE, agents)
+    agents = load_agents()
+    record = account_record(templates, agents, aid)
+    record["provisioning"] = provisioned
+    record["nextAction"] = (
+        f"fde accounts login {aid}" if tpl["loginMode"] == "terminal"
+        else f"fde accounts set-secret {aid}" if tpl["loginMode"] == "secret"
+        else f"fde accounts verify {aid}")
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+                          "account": record})
+    print(f"Registered {record['id']} — {record['label']}")
+    print(f"  credentials will live in {record['credentialDir']}")
+    if not provisioned.get("ran") and provisioned.get("reason"):
+        print(f"  provisioning skipped: {provisioned['reason']}")
+    print(f"  not signed in yet. next: {record['nextAction']}")
+    return 0
+
+
+@account_command
+def cmd_accounts_login(args):
+    """The exact command that signs this account in, and the environment it needs.
+
+    This prints a plan; it does not run an interactive sign-in itself. The
+    console attaches a terminal to exactly this argv and environment, which is
+    why the argv is returned as an array — nothing here is shell-interpolated,
+    and no part of an account name can become a flag."""
+    templates = load_provider_templates()
+    agents = load_agents()
+    aid = str(getattr(args, "account_id", "") or "")
+    agent = (agents.get("agents") or {}).get(aid)
+    if not agent:
+        raise AccountError("unknown_account", f"no account '{aid}'",
+                           "fde accounts list", exit_code=4)
+    provider, tpl = require_template(templates, agent, aid)
+    mode = tpl.get("loginMode")
+    if mode == "none":
+        raise AccountError(
+            "no_login",
+            f"{tpl['label']} has no interactive sign-in",
+            f"it uses credentials you already have — fde accounts verify {aid}")
+    if mode == "secret":
+        raise AccountError(
+            "secret_login",
+            f"{tpl['label']} is configured by pasting a "
+            f"{(tpl.get('secret') or {}).get('label', 'secret')}",
+            f"fde accounts set-secret {aid}")
+    login = tpl.get("login") or {}
+    argv = [str(x) for x in login["argv"]]
+    requires = login.get("requires")
+    if requires and not shutil.which(requires):
+        raise AccountError(
+            "cli_missing",
+            f"{requires} is not installed on this machine",
+            f"install it, then run: fde accounts login {aid}", exit_code=4)
+    env = account_env(agents, aid, templates)
+    payload = {
+        "schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+        "login": {
+            "accountId": aid,
+            "provider": provider,
+            "argv": argv,
+            "env": env,
+            "cwd": str(HOME),
+            "instruction": login.get("instruction"),
+            "interactiveUi": bool(login.get("interactiveUi")),
+            "verifyCommand": ["fde", "accounts", "verify", aid, "--json"],
+        },
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"Sign in to {agent.get('label', aid)}:")
+    print()
+    for key, value in sorted(env.items()):
+        print(f"  export {key}={shlex.quote(value)}")
+    print("  " + " ".join(shlex.quote(x) for x in argv))
+    print()
+    if login.get("instruction"):
+        print(f"  {login['instruction']}")
+    print(f"  then: fde accounts verify {aid}")
+    return 0
+
+
+@account_command
+def cmd_accounts_set_secret(args):
+    """Store a pasted secret for one account. Reads stdin, echoes nothing.
+
+    The secret arrives on stdin and never as an argument, so it does not appear
+    in this machine's process list or in any shell history. It is written to a
+    0600 file inside the account's own directory and is never read back by any
+    command in this controller — only the sidecar that needs it, at call time."""
+    templates = load_provider_templates()
+    agents = load_agents()
+    aid = str(getattr(args, "account_id", "") or "")
+    agent = (agents.get("agents") or {}).get(aid)
+    if not agent:
+        raise AccountError("unknown_account", f"no account '{aid}'",
+                           "fde accounts list", exit_code=4)
+    provider, tpl = require_template(templates, agent, aid)
+    if tpl.get("loginMode") != "secret":
+        raise AccountError(
+            "not_secret_login",
+            f"{tpl['label']} is not configured with a pasted secret",
+            f"fde accounts login {aid}")
+    spec = tpl.get("secret") or {}
+    path = account_secret_path(templates, agent, aid)
+    if path is None:
+        # A pre-accounts entry has no directory of its own, so there is nowhere
+        # to put a secret that belongs to it alone. Writing one anyway is how a
+        # plaintext secret ends up in the working directory under a name nobody
+        # is looking for.
+        raise AccountError(
+            "account_not_isolated",
+            f"{aid} predates per-account credentials, so this controller has "
+            "no folder of its own to store a secret in",
+            f"add a new account for this provider — 'fde accounts add "
+            f"--provider {provider} --name <name>' — and store the secret "
+            "against that one",
+            exit_code=5)
+    raw = sys.stdin.buffer.read(MAX_SECRET_BYTES + 1)
+    if len(raw) > MAX_SECRET_BYTES:
+        raise AccountError(
+            "secret_too_long",
+            f"the value on stdin is larger than {MAX_SECRET_BYTES} bytes",
+            "paste only the secret")
+    secret = raw.decode("utf-8", errors="replace").strip()
+    minimum = int(spec.get("minLength") or 1)
+    if len(secret) < minimum:
+        raise AccountError(
+            "secret_too_short",
+            f"a {spec.get('label', 'secret')} is at least {minimum} characters; "
+            f"stdin held {len(secret)}",
+            "pipe the secret in: pbpaste | fde accounts set-secret " + aid)
+    if "\n" in secret or "\r" in secret:
+        raise AccountError(
+            "secret_multiline",
+            "the value on stdin spans several lines",
+            "paste only the secret, with no surrounding text")
+    cred = tpl.get("credential") or {}
+    make_private_dir(account_credential_dir(templates, agent, aid),
+                     int(str(cred.get("mode") or "0700"), 8))
+    mode = int(str(cred.get("secretFileMode") or "0600"), 8)
+    # Created with its final mode from the first byte: a secret must never exist
+    # on disk, even briefly, as a world-readable file. A write that fails part
+    # way leaves no fragment behind, and only the atomic rename makes the value
+    # visible under its real name.
+    tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+    payload = secret.encode("utf-8")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        written = 0
+        while written < len(payload):
+            written += os.write(fd, payload[written:])
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except OSError as exc:
+        raise AccountError("secret_write_failed",
+                           f"the secret could not be stored: {exc}",
+                           exit_code=5)
+    finally:
+        if fd != -1:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            if tmp.exists():
+                tmp.unlink()
+    del secret, raw, payload
+    record = account_record(templates, load_agents(), aid)
+    if getattr(args, "json", False):
+        return emit_json({"schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+                          "account": record})
+    print(f"Stored a {spec.get('label', 'secret')} for {aid}.")
+    print(f"  {path} (mode {oct(mode)[2:]})")
+    print("  the value was not echoed, logged or returned")
+    return 0
+
+
+@account_command
+def cmd_accounts_launch(args):
+    """The plan for launching an interactive session as one account.
+
+    The launcher used to carry its own list of which identities it could start a
+    continuous conversation as, and which profile directory each mapped to. It
+    no longer needs one: both are facts about the registry, so an account added
+    today is launchable today without editing a shell script."""
+    templates = load_provider_templates()
+    agents = load_agents()
+    token = str(getattr(args, "account_id", "") or "")
+    aid = resolve_agent(agents, token)
+    if not aid:
+        raise AccountError("unknown_account", f"no account '{token}'",
+                           "fde accounts list", exit_code=4)
+    agent = agents["agents"][aid]
+    provider, tpl = require_template(templates, agent, aid)
+    env = account_env(agents, aid, templates)
+    interactive = bool(tpl.get("interactiveSession"))
+    config_dir = env.get("CLAUDE_CONFIG_DIR") or None
+    available, availability = agent_available(agents, aid)
+    payload = {
+        "schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+        "launch": {
+            "accountId": aid,
+            "label": agent.get("label", aid),
+            "provider": provider,
+            "kind": agent.get("kind"),
+            "account": account_slug_of(aid, agent),
+            "interactive": interactive,
+            "reason": (None if interactive
+                       else (tpl.get("interactiveSessionNote")
+                             or f"{tpl.get('label', provider)} cannot hold an "
+                                "interactive orchestrator conversation")),
+            "canOrchestrate": orchestrator_capable(agents, aid),
+            "configDir": config_dir,
+            "env": env,
+            "available": bool(available),
+            "availability": availability,
+        },
+    }
+    if getattr(args, "env0", False):
+        # NUL-delimited KEY=VALUE pairs, for `env "${pairs[@]}" <command>`.
+        # Nothing is quoted or interpolated on the way through a shell, so a
+        # path with a space, a newline or a dollar sign in it stays itself.
+        for key in sorted(env):
+            sys.stdout.write(f"{key}={env[key]}\0")
+        return 0 if interactive else 3
+    if getattr(args, "json", False):
+        emit_json(payload)
+        return 0 if interactive else 3
+    launch = payload["launch"]
+    print(f"{aid} — {launch['label']}")
+    print(f"  interactive session: {'yes' if interactive else 'no'}")
+    if launch["reason"]:
+        print(f"  {launch['reason']}")
+    for key, value in sorted(env.items()):
+        print(f"  {key}={value}")
+    return 0 if interactive else 3
+
+
+@account_command
+def cmd_accounts_verify(args):
+    """Ask whether this account is actually signed in.
+
+    Never guesses. A probe asks the filesystem for the file the provider writes
+    on a successful login; an argv check runs the provider's own status command.
+    If neither can answer, this says so rather than reporting success."""
+    templates = load_provider_templates()
+    agents = load_agents()
+    aid = str(getattr(args, "account_id", "") or "")
+    agent = (agents.get("agents") or {}).get(aid)
+    if not agent:
+        raise AccountError("unknown_account", f"no account '{aid}'",
+                           "fde accounts list", exit_code=4)
+    provider, tpl = require_template(templates, agent, aid)
+    verify = tpl.get("verify") or {"mode": "probe"}
+    record = account_record(templates, agents, aid)
+    check = {"mode": verify.get("mode"), "ran": False, "ok": record["loggedIn"],
+             "detail": record["loginDetail"]}
+    if verify.get("mode") == "argv":
+        requires = verify.get("requires") or (verify["argv"][0])
+        if not shutil.which(requires):
+            # The checker is missing, which says nothing about the credential.
+            # Reporting "not signed in" here would be a claim this command
+            # cannot support, so the probe's answer stands and the check
+            # reports honestly that it could not run.
+            check.update(ok=None, detail=f"{requires} is not installed on this "
+                                         "machine — sign-in could not be "
+                                         "confirmed either way")
+        else:
+            concrete = []
+            for token in verify["argv"]:
+                token = str(token)
+                for name, value in record["fields"].items():
+                    token = token.replace("{" + name + "}", str(value))
+                concrete.append(token)
+            env = dict(os.environ)
+            env.update(account_env(agents, aid, templates))
+            try:
+                r = subprocess.run(concrete, capture_output=True, text=True,
+                                   timeout=int(getattr(args, "timeout", 45) or 45),
+                                   env=env)
+                check.update(ran=True, exitCode=r.returncode,
+                             ok=r.returncode == 0,
+                             detail=((r.stderr or r.stdout or "").strip()[:400]
+                                     or ("ok" if r.returncode == 0 else
+                                         "the check exited non-zero")))
+            except subprocess.TimeoutExpired:
+                check.update(ran=True, ok=False,
+                             detail="the check did not answer in time — login "
+                                    "could not be confirmed")
+            except (OSError, subprocess.SubprocessError) as exc:
+                check.update(ran=True, ok=False, detail=str(exc)[:400])
+        if check["ran"]:
+            record["loggedIn"] = bool(check["ok"])
+            record["loginDetail"] = check["detail"]
+        else:
+            record["confirmed"] = False
+    record["check"] = check
+    record.setdefault("confirmed", True)
+    if getattr(args, "json", False):
+        # The answer and the exit code are separate: emit_json returns 0, and
+        # returning it here would report every signed-out account as fine.
+        emit_json({"schemaVersion": ACCOUNTS_SCHEMA_VERSION, "account": record})
+        return 0 if record["loggedIn"] else 4
+    state = "signed in" if record["loggedIn"] else "NOT signed in"
+    if not record["confirmed"]:
+        state += " (unconfirmed)"
+    print(f"{aid} — {record['label']}: {state}")
+    print(f"  {record['loginDetail']}")
+    if not record["confirmed"]:
+        print(f"  {check['detail']}")
+    if not record["loggedIn"] and tpl.get("loginMode") == "terminal":
+        print(f"  next: fde accounts login {aid}")
+    return 0 if record["loggedIn"] else 4
+
+
+@account_command
+def cmd_accounts_remove(args):
+    """Deregister an account. Leaves its credentials alone unless told otherwise.
+
+    An account in use by a run that has not finished is refused: a role assigned
+    to an identity that no longer exists is a run that can be neither invoked
+    nor explained. Credentials are kept by default, because deregistering an
+    account and revoking a login are different decisions."""
+    templates = load_provider_templates()
+    aid = str(getattr(args, "account_id", "") or "")
+    agents = load_agents()
+    agent = (agents.get("agents") or {}).get(aid)
+    if not agent:
+        raise AccountError("unknown_account", f"no account '{aid}'",
+                           "fde accounts list", exit_code=4)
+    provider, tpl = account_template_or_none(templates, agent, aid)
+    in_use = accounts_in_use(aid)
+    if in_use and not getattr(args, "force", False):
+        runs = ", ".join(f"{u['runId']} ({u['role']})" for u in in_use[:5])
+        raise AccountError(
+            "account_in_use",
+            f"{aid} still holds a role in {len(in_use)} unfinished run(s): {runs}",
+            "finish or reassign those runs, or pass --force to remove it anyway",
+            exit_code=5)
+    directory = (account_credential_dir(templates, agent, aid)
+                 if tpl is not None else None)
+    record = account_record(templates, agents, aid)
+    with agents_lock():
+        agents = load_agents()
+        if aid not in (agents.get("agents") or {}):
+            raise AccountError("unknown_account", f"no account '{aid}'",
+                               exit_code=4)
+        del agents["agents"][aid]
+        write_json(AGENTS_FILE, agents)
+    purged = {"requested": bool(getattr(args, "purge_credentials", False)),
+              "removed": False, "path": str(directory) if directory else ""}
+    if purged["requested"] and directory is None:
+        purged["reason"] = ("no provider template describes this entry, so "
+                            "this controller cannot say which folder was its "
+                            "own — nothing was deleted")
+    elif purged["requested"]:
+        # Only a directory this controller would itself have created for this
+        # account, and only when it is not a symlink standing in for somewhere
+        # else. Anything unexpected is left where it is and reported — a purge
+        # that cannot be proved safe is not attempted, and never raises after
+        # the registry has already been written.
+        provider_tpl = (templates.get("providers") or {}).get(
+            account_provider(agent)) or {}
+        dir_template = (provider_tpl.get("credential") or {}).get("dirTemplate")
+        expected = (_expand_dir_template(dir_template, account_slug_of(aid, agent))
+                    if dir_template and account_isolated(provider_tpl, agent)
+                    else None)
+        if expected is None:
+            purged["reason"] = (
+                "this account has no credential folder of its own — its "
+                "credential lives where a folder cannot separate accounts, so "
+                "there is nothing here to delete")
+        elif directory != expected:
+            purged["reason"] = "the account directory is not where the template puts it"
+        elif directory.is_symlink():
+            purged["reason"] = "the account directory is a symlink"
+        elif not directory.is_dir():
+            purged["reason"] = "there was no account directory"
+        else:
+            try:
+                shutil.rmtree(directory)
+                purged["removed"] = True
+            except OSError as exc:
+                purged["reason"] = str(exc)[:200]
+    payload = {"schemaVersion": ACCOUNTS_SCHEMA_VERSION,
+               "removed": record, "credentials": purged,
+               "stillInUse": in_use}
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"Removed {aid} from the registry.")
+    if in_use:
+        print(f"  WARNING: it still held a role in {len(in_use)} unfinished "
+              "run(s); reassign them")
+    if purged["requested"]:
+        print("  credentials deleted" if purged["removed"]
+              else f"  credentials kept: {purged.get('reason', 'unknown')}")
+    elif directory is not None:
+        print(f"  credentials kept at {directory}")
+    return 0
+
+
+# ------------------------------------------------------- service connections --
+
+# Service credentials are deliberately separate from AI identities. They grant
+# a narrowly scoped child process access to a remote system; they never make an
+# entry eligible for a run role. Metadata is controller-owned and credentials
+# live in macOS Keychain (a private-file backend exists only for isolated tests).
+CONNECTION_SCHEMA_VERSION = 1
+CONNECTION_PROVIDERS = {
+    "atlassian": {
+        "label": "Atlassian Cloud", "secretLabel": "API token",
+        "docsUrl": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "fields": [
+            {"name": "siteUrl", "label": "Site URL", "required": True,
+             "placeholder": "https://company.atlassian.net"},
+            {"name": "email", "label": "Account email", "required": True,
+             "placeholder": "you@example.com"},
+        ],
+        "note": "Jira and Confluence REST access. Rovo MCP OAuth is separate.",
+    },
+    "github": {
+        "label": "GitHub", "secretLabel": "Personal access token",
+        "docsUrl": "https://github.com/settings/personal-access-tokens",
+        "fields": [],
+        "note": "Uses api.github.com. Prefer a fine-grained, least-privilege token.",
+    },
+    "bitbucket": {
+        "label": "Bitbucket Cloud", "secretLabel": "API token",
+        "docsUrl": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "fields": [],
+        "note": "REST API access through Bearer authentication. Git may use SSH separately.",
+    },
+    "figma": {
+        "label": "Figma", "secretLabel": None,
+        "docsUrl": "https://developers.figma.com/docs/figma-mcp-server/",
+        "fields": [], "oauth": True,
+        "note": "Uses Figma's remote MCP server. OAuth stays in the MCP client; FDE stores no Figma token.",
+    },
+}
+
+
+@contextlib.contextmanager
+def connections_lock():
+    lock = CONNECTIONS_FILE.parent / ".service-connections.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(str(lock), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise AccountError("connections_busy", "another connection change is in flight",
+                               exit_code=5)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        os.close(handle)
+
+
+def load_connections():
+    data = read_json(CONNECTIONS_FILE, {"schemaVersion": 1, "connections": {}})
+    if not isinstance(data, dict) or data.get("schemaVersion") != 1 \
+            or not isinstance(data.get("connections"), dict):
+        raise AccountError("connections_invalid", "service connection metadata is invalid")
+    return data
+
+
+def save_connections(data):
+    write_json(CONNECTIONS_FILE, data)
+    os.chmod(CONNECTIONS_FILE, 0o600)
+
+
+def connection_service(cid):
+    return f"fde-service-{cid}"
+
+
+def _test_secret_path(cid):
+    root = os.environ.get("FDE_TEST_CONNECTION_SECRET_DIR")
+    return pathlib.Path(root) / cid if root else None
+
+
+def connection_secret_exists(cid):
+    test_path = _test_secret_path(cid)
+    if test_path is not None:
+        return test_path.is_file() and test_path.stat().st_size > 0
+    security = shutil.which("security")
+    if not security:
+        return False
+    try:
+        result = subprocess.run(
+            [security, "find-generic-password", "-a", cid,
+             "-s", connection_service(cid)], capture_output=True, timeout=10)
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def store_connection_secret(cid, secret):
+    test_path = _test_secret_path(cid)
+    if test_path is not None:
+        test_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        write_atomic(test_path, secret)
+        os.chmod(test_path, 0o600)
+        return
+    security = shutil.which("security")
+    if not security:
+        raise AccountError("keychain_unavailable",
+                           "macOS Keychain is unavailable; the token was not stored")
+    # With -w and no following value, security reads the password interactively
+    # from stdin. The secret therefore never appears in argv or a process list.
+    result = subprocess.run(
+        [security, "add-generic-password", "-U", "-a", cid,
+         "-s", connection_service(cid), "-w"],
+        input=secret + "\n", text=True, capture_output=True, timeout=20)
+    if result.returncode != 0:
+        raise AccountError("keychain_write_failed",
+                           "macOS Keychain refused the credential",
+                           (result.stderr or "unlock Keychain and try again")[:300])
+
+
+def read_connection_secret(cid):
+    test_path = _test_secret_path(cid)
+    if test_path is not None:
+        try:
+            return test_path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+    security = shutil.which("security")
+    if not security:
+        return ""
+    result = subprocess.run(
+        [security, "find-generic-password", "-a", cid,
+         "-s", connection_service(cid), "-w"],
+        capture_output=True, text=True, timeout=10)
+    return result.stdout.rstrip("\r\n") if result.returncode == 0 else ""
+
+
+def delete_connection_secret(cid):
+    test_path = _test_secret_path(cid)
+    if test_path is not None:
+        with contextlib.suppress(FileNotFoundError):
+            test_path.unlink()
+        return
+    security = shutil.which("security")
+    if security:
+        subprocess.run([security, "delete-generic-password", "-a", cid,
+                        "-s", connection_service(cid)],
+                       capture_output=True, timeout=10)
+
+
+def public_connection(cid, item):
+    configured = bool(item.get("provider") == "figma" or connection_secret_exists(cid))
+    return {
+        "id": cid, "name": item.get("name", cid),
+        "provider": item.get("provider"),
+        "providerLabel": CONNECTION_PROVIDERS.get(item.get("provider"), {}).get("label", item.get("provider")),
+        "fields": dict(item.get("fields") or {}),
+        "configured": configured,
+        "status": item.get("status", "configured" if configured else "not_configured"),
+        "verifiedIdentity": item.get("verifiedIdentity"),
+        "verifiedAt": item.get("verifiedAt"),
+        "detail": item.get("detail"),
+        "oauth": bool(CONNECTION_PROVIDERS.get(item.get("provider"), {}).get("oauth")),
+    }
+
+
+@account_command
+def cmd_connections_providers(args):
+    providers = []
+    for pid, spec in CONNECTION_PROVIDERS.items():
+        providers.append({"provider": pid, **spec})
+    return emit_json({"schemaVersion": 1, "providers": providers}) if args.json else 0
+
+
+@account_command
+def cmd_connections_list(args):
+    data = load_connections()
+    records = [public_connection(cid, item)
+               for cid, item in sorted(data["connections"].items())]
+    return emit_json({"schemaVersion": 1, "connections": records}) if args.json else 0
+
+
+def _validate_connection_fields(provider, values):
+    spec = CONNECTION_PROVIDERS[provider]
+    allowed = {f["name"] for f in spec["fields"]}
+    unknown = set(values) - allowed
+    if unknown:
+        raise AccountError("field_invalid", f"unknown field(s): {', '.join(sorted(unknown))}")
+    out = {str(k): str(v).strip() for k, v in values.items()}
+    for field in spec["fields"]:
+        if field["required"] and not out.get(field["name"]):
+            raise AccountError("field_required", f"{field['label']} is required")
+    if provider == "atlassian":
+        parsed = urllib.parse.urlparse(out["siteUrl"])
+        if parsed.scheme != "https" or not parsed.hostname or \
+                not parsed.hostname.endswith(".atlassian.net") or parsed.path.rstrip("/"):
+            raise AccountError("field_invalid", "Atlassian site URL must be https://<site>.atlassian.net")
+        out["siteUrl"] = f"https://{parsed.hostname}"
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", out["email"]):
+            raise AccountError("field_invalid", "Atlassian account email is invalid")
+    return out
+
+
+@account_command
+def cmd_connections_add(args):
+    provider = args.provider
+    if provider not in CONNECTION_PROVIDERS:
+        raise AccountError("unknown_provider", f"unknown service provider '{provider}'")
+    name = str(args.name or "").strip()
+    if not name or not ACCOUNT_NAME_RE.match(name):
+        raise AccountError("bad_name", "a usable connection name is required")
+    supplied = {}
+    if getattr(args, "site_url", None): supplied["siteUrl"] = args.site_url
+    if getattr(args, "email", None): supplied["email"] = args.email
+    fields = _validate_connection_fields(provider, supplied)
+    with connections_lock():
+        data = load_connections()
+        base = f"{provider}-{slug(name, 31)}"
+        cid = base
+        n = 2
+        while cid in data["connections"]:
+            cid, n = f"{base}-{n}", n + 1
+        data["connections"][cid] = {
+            "provider": provider, "name": name, "fields": fields,
+            "status": "oauth_required" if provider == "figma" else "not_configured",
+            "createdAt": iso(),
+        }
+        save_connections(data)
+    return emit_json({"schemaVersion": 1,
+                      "connection": public_connection(cid, data["connections"][cid])})
+
+
+@account_command
+def cmd_connections_set_secret(args):
+    raw = sys.stdin.read(MAX_SECRET_BYTES + 1)
+    if not raw or len(raw.encode()) > MAX_SECRET_BYTES or "\n" in raw.rstrip("\r\n"):
+        raise AccountError("secret_invalid", "token must be one non-empty line under 8 KiB")
+    secret = raw.rstrip("\r\n")
+    if len(secret) < 8:
+        raise AccountError("secret_too_short", "token is too short")
+    with connections_lock():
+        data = load_connections()
+        item = data["connections"].get(args.connection_id)
+        if not item:
+            raise AccountError("unknown_connection", f"no connection '{args.connection_id}'", exit_code=4)
+        if CONNECTION_PROVIDERS[item["provider"]].get("oauth"):
+            raise AccountError("oauth_connection", "Figma uses MCP OAuth; no token is accepted here")
+        store_connection_secret(args.connection_id, secret)
+        item.update(status="configured", detail=None, verifiedAt=None,
+                    verifiedIdentity=None)
+        save_connections(data)
+    return emit_json({"schemaVersion": 1,
+                      "connection": public_connection(args.connection_id, item)})
+
+
+def _verify_http(url, headers):
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            return None
+    req = urllib.request.Request(url, headers={**headers, "User-Agent": "fde-local/1"})
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        with opener.open(req, timeout=12) as response:
+            raw = response.read(256 * 1024)
+            try:
+                body = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise AccountError("verification_response",
+                                   "the provider returned an unreadable verification response",
+                                   exit_code=4)
+            if not isinstance(body, dict):
+                raise AccountError("verification_response",
+                                   "the provider returned an unexpected verification response",
+                                   exit_code=4)
+            return response.status, body
+    except urllib.error.HTTPError as exc:
+        return exc.code, {}
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        raise AccountError("verification_network", "connection verification failed", str(exc)[:240], 4)
+
+
+@account_command
+def cmd_connections_verify(args):
+    data = load_connections(); item = data["connections"].get(args.connection_id)
+    if not item:
+        raise AccountError("unknown_connection", f"no connection '{args.connection_id}'", exit_code=4)
+    provider = item["provider"]
+    if provider == "figma":
+        item.update(status="oauth_required",
+                    detail="Authenticate https://mcp.figma.com/mcp in the assigned MCP client; FDE stores no OAuth token.")
+    else:
+        secret = read_connection_secret(args.connection_id)
+        if not secret:
+            raise AccountError("not_configured", "this connection has no stored token", exit_code=4)
+        if provider == "github":
+            code, body = _verify_http("https://api.github.com/user", {
+                "Authorization": f"Bearer {secret}", "Accept": "application/vnd.github+json"})
+            identity = body.get("login")
+        elif provider == "bitbucket":
+            code, body = _verify_http("https://api.bitbucket.org/2.0/user", {
+                "Authorization": f"Bearer {secret}", "Accept": "application/json"})
+            identity = body.get("display_name") or body.get("username")
+        else:
+            fields = item["fields"]
+            auth = base64.b64encode(f"{fields['email']}:{secret}".encode()).decode()
+            code, body = _verify_http(fields["siteUrl"] + "/rest/api/3/myself", {
+                "Authorization": f"Basic {auth}", "Accept": "application/json"})
+            identity = body.get("displayName") or body.get("emailAddress")
+        if code == 200:
+            item.update(status="connected", verifiedIdentity=str(identity or "authenticated"),
+                        verifiedAt=iso(), detail="Connection verified")
+        else:
+            status = "unauthorized" if code == 401 else "forbidden" if code == 403 else "verification_failed"
+            item.update(status=status, verifiedIdentity=None, verifiedAt=iso(),
+                        detail=f"Provider returned HTTP {code}")
+    with connections_lock():
+        current = load_connections()
+        if args.connection_id not in current["connections"]:
+            raise AccountError("unknown_connection", f"connection '{args.connection_id}' was removed while it was being verified", exit_code=4)
+        current["connections"][args.connection_id] = item
+        save_connections(current)
+    payload = {"schemaVersion": 1, "connection": public_connection(args.connection_id, item)}
+    emit_json(payload)
+    return 0 if item["status"] == "connected" else 4
+
+
+@account_command
+def cmd_connections_remove(args):
+    with connections_lock():
+        data = load_connections(); item = data["connections"].pop(args.connection_id, None)
+        if not item:
+            raise AccountError("unknown_connection", f"no connection '{args.connection_id}'", exit_code=4)
+        save_connections(data)
+        delete_connection_secret(args.connection_id)
+    return emit_json({"schemaVersion": 1, "removed": public_connection(args.connection_id, item)})
 
 
 # ----------------------------------------------------------------- run store --
@@ -772,7 +2439,7 @@ class Run:
                 die(f"run {self.id} cannot publish: nothing has been approved for "
                     f"publication.\n"
                     f"       run: fde approve-publish {self.id} "
-                    f"<jira|confluence|sharepoint|bitbucket|email|teams>", 7)
+                    f"<jira|confluence|sharepoint|bitbucket|github|figma|email|teams>", 7)
 
     def next_state(self, current=None):
         seq = self.sequence()
@@ -2364,10 +4031,43 @@ def scan_for_bypass_flags(roots):
             for n, line in enumerate(txt.splitlines(), 1):
                 if SAFETY_EXEMPT in line:
                     continue
-                for flag in FORBIDDEN_CODEX_FLAGS:
+                for flag in FORBIDDEN_BYPASS_FLAGS:
                     if flag in line:
                         hits.append(f"{q}:{n}: {flag}")
     return hits
+
+
+def copilot_credential_report(agents=None):
+    """Which Copilot identities have a credential, without reading one.
+
+    The old check retrieved the secret value from the Keychain purely to test
+    that it was there, and asked only about the single fixed service — so a
+    machine whose Copilot accounts each have their own credential reported
+    itself unconfigured."""
+    try:
+        agents = agents if agents is not None else load_agents()
+        templates = load_provider_templates()
+    except SystemExit:
+        return {"configured": False,
+                "detail": "registry or provider templates unreadable"}
+    ids = [aid for aid, agent in (agents.get("agents") or {}).items()
+           if (templates.get("providers") or {}).get(
+               account_provider(agent), {}).get("loginMode") == "secret"]
+    if not ids:
+        return {"configured": False, "detail": "no Copilot account is registered"}
+    ready = []
+    for aid in ids:
+        logged_in, source, _detail = account_login_state(templates, agents, aid)
+        if logged_in:
+            ready.append(f"{aid} ({source})")
+    if os.environ.get("COPILOT_TOKEN_ENDPOINT"):
+        ready.append("token endpoint (environment)")
+    if ready:
+        return {"configured": True,
+                "detail": "credential present for " + ", ".join(ready)}
+    return {"configured": False,
+            "detail": f"{len(ids)} account(s) registered, none with a stored "
+                      "secret — fde accounts set-secret <account-id>"}
 
 
 def check_codex_safety():
@@ -2472,17 +4172,20 @@ def cmd_doctor(args):
 
     _row(rows, "Codex", *( (OK, shutil.which("codex")) if shutil.which("codex")
                            else (WARN, "not installed — npm i -g @openai/codex") ))
-    _row(rows, "Gemini", *( (OK, shutil.which("gemini")) if shutil.which("gemini")
-                            else (WARN, "not installed — npm i -g @google/gemini-cli") ))
+    agy = os.environ.get("FDE_AGY_BIN", "agy")
+    _row(rows, "Gemini", *((OK, f"Antigravity CLI at {shutil.which(agy)}")
+                           if shutil.which(agy)
+                           else (WARN, "Antigravity CLI not installed — "
+                                       "https://antigravity.google/docs/cli "
+                                       "(the binary is 'agy')")))
 
-    if directline_secret(quiet=True):
-        src = "macOS Keychain" if shutil.which("security") else "environment"
-        _row(rows, "Microsoft Copilot Studio", OK, f"Direct Line secret present ({src})")
-    elif os.environ.get("COPILOT_TOKEN_ENDPOINT"):
-        _row(rows, "Microsoft Copilot Studio", OK, "token endpoint configured")
+    # Asked of the accounts that exist, and asked without retrieving anything:
+    # presence is the question, and the value is not needed to answer it.
+    copilot = copilot_credential_report(agents)
+    if copilot["configured"]:
+        _row(rows, "Microsoft Copilot Studio", OK, copilot["detail"])
     else:
-        _row(rows, "Microsoft Copilot Studio", WARN,
-             "unconfigured — security add-generic-password -a \"$USER\" -s fde-copilot-directline -w")
+        _row(rows, "Microsoft Copilot Studio", WARN, copilot["detail"])
 
     _row(rows, "Atlassian MCP", *check_atlassian(), required=True)
     _row(rows, "Confluence CLI", *check_confluence())
@@ -2517,21 +4220,63 @@ def cmd_doctor(args):
 
 # ----------------------------------------------------------- the role prompt --
 
-AGENT_LABELS = {
-    "claude_work": "Claude: work", "claude_msc": "Claude: msc",
-    "claude_alt": "Claude: alt", "claude_bedrock": "Claude Code: Bedrock",
-    "chatgpt_codex": "ChatGPT/Codex", "gemini": "Gemini",
-    "microsoft_copilot": "Microsoft Copilot",
-}
+# The identity list is the registry, always. It used to be restated here as a
+# literal, which meant an account the operator added was invisible in the very
+# prompt that asks them to choose one — and an account they removed went on
+# being offered. Nothing below names an identity.
 
-IDENTITY_MENU = """Available identities:
-- Claude: work
-- Claude: msc
-- Claude: alt
-- Claude Code: Bedrock
-- ChatGPT/Codex
-- Gemini
-- Microsoft Copilot"""
+
+def agent_labels(agents=None):
+    agents = agents if agents is not None else load_agents()
+    return {aid: a.get("label", aid) for aid, a in (agents.get("agents") or {}).items()}
+
+
+def orchestrator_capable(agents, aid):
+    caps = (agents.get("agents") or {}).get(aid, {}).get("capabilities") or []
+    return "orchestration" in caps
+
+
+def identity_menu(agents=None, *, only_orchestrators=False):
+    """The identities this machine actually has, and their state.
+
+    An identity that is registered but not signed in is listed and labelled,
+    not hidden: hiding it would leave the operator wondering where the account
+    they just added went, and the fix — signing in — is one command away."""
+    agents = agents if agents is not None else load_agents()
+    templates = read_json(PROVIDER_TEMPLATES_FILE) or {}
+    entries = agents.get("agents") or {}
+    ids = sorted(entries)
+    if only_orchestrators:
+        ids = [aid for aid in ids if orchestrator_capable(agents, aid)]
+    if not ids:
+        if entries:
+            return ("No registered identity can orchestrate.\n"
+                    "Add a Claude or Codex account:  fde accounts add "
+                    "--provider claude --name work")
+        return ("No identities are registered.\n"
+                "Add one first:  fde accounts add --provider claude --name work")
+    lines = ["Available identities:" if not only_orchestrators
+             else "Identities that can orchestrate:"]
+    for aid in ids:
+        label = entries[aid].get("label", aid)
+        notes = []
+        available, detail = agent_available(agents, aid)
+        if not available:
+            notes.append(detail)
+        elif templates:
+            logged_in, _source, login_detail = account_login_state(
+                templates, agents, aid)
+            if not logged_in:
+                notes.append(login_detail)
+        suffix = f"   ({'; '.join(notes)})" if notes else ""
+        lines.append(f"- {label}{suffix}")
+    if not only_orchestrators:
+        blocked = [entries[aid].get("label", aid) for aid in sorted(entries)
+                   if not orchestrator_capable(agents, aid)]
+        if blocked:
+            lines += ["", "Cannot orchestrate: " + ", ".join(blocked) + ".",
+                      "Either can still hold research, review or context roles."]
+    return "\n".join(lines)
 
 ROLE_PROMPTS = [
     ("orchestrator", "Orchestrator", False),
@@ -2561,7 +4306,7 @@ ROLE_LINE_SUFFIX = {role: ": assign / none" for role in OPTIONAL_ROLES}
 PROMPT_LABEL = {r: l for r, l, _m in ROLE_PROMPTS}
 
 
-def role_question(run=None, stages=None):
+def role_question(run=None, stages=None, agents=None):
     """The role question, narrowed to the roles this run's plan actually needs.
 
     A research-only run has no implementation agent to assign, and asking for one
@@ -2577,12 +4322,14 @@ def role_question(run=None, stages=None):
             lines += [f"Not doing: {', '.join(STAGE_LABEL[s] for s in skipped)}"]
         lines += [""]
     fixed = run.orchestrator() if run is not None else None
-    lines += [IDENTITY_MENU, "", "Choose:"]
+    agents = agents if agents is not None else load_agents()
+    labels = agent_labels(agents)
+    lines += [identity_menu(agents), "", "Choose:"]
     for role, label, _multi in ROLE_PROMPTS:
         if role not in need:
             continue
         if role == "orchestrator" and fixed:
-            lines.append(f"- {label}: {AGENT_LABELS.get(fixed, fixed)}  (already chosen)")
+            lines.append(f"- {label}: {labels.get(fixed, fixed)}  (already chosen)")
             continue
         lines.append(f"- {label}{ROLE_LINE_SUFFIX.get(role, ':')}")
     lines += [
@@ -2593,20 +4340,28 @@ def role_question(run=None, stages=None):
     return "\n".join(lines)
 
 
-ORCHESTRATOR_QUESTION = """Who orchestrates this run?
+def orchestrator_question(agents=None):
+    """Who orchestrates — asked over the identities that actually exist.
 
-The orchestrator reads your request, proposes what the run should actually do,
-and holds the engagement together. Pick it before you state the ask — it is the
-identity that will interpret the ask.
-
-  Claude: work          Claude: msc          Claude: alt
-  Claude Code: Bedrock  ChatGPT/Codex
-
-Gemini and Microsoft Copilot cannot orchestrate: Gemini is a one-shot headless
-call with no session state, and Copilot is a chat endpoint over the Microsoft
-estate. Either can still hold research, review or context roles.
-
-Nothing is read by choosing. Nothing is read until roles are confirmed."""
+    Which identities can orchestrate is a capability in the registry, not a
+    list in this string: Gemini is a one-shot headless call with no session
+    state and Copilot is a chat endpoint, so neither declares 'orchestration',
+    and any account that does declare it appears here the moment it is added."""
+    agents = agents if agents is not None else load_agents()
+    return "\n".join([
+        "Who orchestrates this run?",
+        "",
+        "The orchestrator reads your request, proposes what the run should actually do,",
+        "and holds the engagement together. Pick it before you state the ask — it is the",
+        "identity that will interpret the ask.",
+        "",
+        identity_menu(agents, only_orchestrators=True),
+        "",
+        "An identity that cannot orchestrate can still hold research, review or",
+        "context roles.",
+        "",
+        "Nothing is read by choosing. Nothing is read until roles are confirmed.",
+    ])
 
 
 PLAN_QUESTION = """What do you want done for this requirement?
@@ -2629,17 +4384,70 @@ and a Jira breakdown", "the full thing". The stages available are:
 
 Nothing is read until roles are confirmed, and roles come after this."""
 
-ALIASES = {
-    "claude: work": "claude_work", "claude work": "claude_work", "work": "claude_work",
-    "claude: msc": "claude_msc", "claude msc": "claude_msc", "msc": "claude_msc",
-    "claude: alt": "claude_alt", "claude alt": "claude_alt", "alt": "claude_alt",
+# The shorthands that are not derivable from a label. These are honoured only
+# when they name an identity that is actually registered, so a machine with no
+# Bedrock account does not accept "bedrock".
+STATIC_ALIASES = {
     "claude code: bedrock": "claude_bedrock", "bedrock": "claude_bedrock",
-    "chatgpt/codex": "chatgpt_codex", "chatgpt": "chatgpt_codex", "codex": "chatgpt_codex",
-    "gemini": "gemini",
-    "microsoft copilot": "microsoft_copilot", "ms copilot": "microsoft_copilot",
-    "copilot": "microsoft_copilot", "m365 copilot": "microsoft_copilot",
+    "chatgpt/codex": "chatgpt_codex", "chatgpt": "chatgpt_codex",
+    "codex": "chatgpt_codex",
+    "ms copilot": "microsoft_copilot", "m365 copilot": "microsoft_copilot",
+    "copilot": "microsoft_copilot",
     "exclude": "none", "include": "microsoft_copilot",
 }
+
+# A word that would name two identities names neither. Two Claude accounts
+# called "Work laptop" and "Work sandbox" both shorten to "work"; answering
+# "work" then has to be refused, because guessing which one the operator meant
+# is the one outcome that cannot be undone by reading the record afterwards.
+AMBIGUOUS = object()
+
+
+def agent_aliases(agents):
+    """Every way of naming a registered identity, derived from the registry.
+
+    An alias that would resolve to more than one identity is kept, marked
+    ambiguous, so it can be refused with both candidates named rather than
+    silently dropped."""
+    table = {}
+
+    def offer(word, aid):
+        word = (word or "").strip().lower()
+        if not word:
+            return
+        current = table.get(word)
+        if current is None:
+            table[word] = aid
+        elif current is not aid and current is not AMBIGUOUS:
+            table[word] = AMBIGUOUS
+
+    entries = agents.get("agents") or {}
+    for aid, agent in entries.items():
+        label = str(agent.get("label") or aid)
+        offer(aid, aid)
+        offer(aid.replace("_", " "), aid)
+        offer(aid.replace("_", "-"), aid)
+        offer(label, aid)
+        offer(label.replace(":", ""), aid)
+        # "Claude: work" is also "work"; "Claude on Bedrock: prod" is also "prod".
+        if ":" in label:
+            offer(label.split(":", 1)[1], aid)
+        account = str(agent.get("account") or agent.get("profile") or "")
+        offer(account, aid)
+        offer(account.replace("-", " "), aid)
+    for word, aid in STATIC_ALIASES.items():
+        if aid == "none":
+            table.setdefault(word, "none")
+        elif aid in entries:
+            # A shorthand that has always meant one identity must not quietly
+            # start meaning another because a new account's label happens to
+            # reduce to the same word. If both claim it, it names neither.
+            current = table.get(word)
+            if current is None:
+                table[word] = aid
+            elif current != aid:
+                table[word] = AMBIGUOUS
+    return table
 
 # Stage names people actually type, mapped to the canonical ones.
 STAGE_ALIASES = {
@@ -2684,14 +4492,27 @@ def resolve_shape(name):
 
 
 def resolve_agent(agents, token):
+    """A typed identity name to a registry key. Never a guess."""
     t = (token or "").strip()
     if t.lower() in ("", "none", "-", "n/a"):
         return None
     if t in agents["agents"]:
         return t
-    a = ALIASES.get(t.lower())
+    table = agent_aliases(agents)
+    a = table.get(t.lower())
     if a == "none":
         return None
+    if a is AMBIGUOUS:
+        # Recomputed from the alias table itself, one identity at a time, so
+        # the candidates named are exactly the ones that made the word
+        # ambiguous — the whole point of the refusal is to say which.
+        candidates = sorted(
+            aid for aid in agents["agents"]
+            if agent_aliases({"agents": {aid: agents["agents"][aid]}}).get(t.lower())
+            == aid)
+        die(f"'{token}' names more than one identity"
+            + (f" ({', '.join(candidates)})" if candidates else "")
+            + ". Use the full identity id.", 2)
     if a:
         return a
     die(f"unknown identity '{token}'. Known: {', '.join(sorted(agents['agents']))}", 2)
@@ -2760,7 +4581,7 @@ def _start(args):
         return _set_orchestrator(run, args.orchestrator, shape=args.shape), run
 
     print("-" * 72)
-    print(ORCHESTRATOR_QUESTION)
+    print(orchestrator_question())
     print("-" * 72)
     print(f"\n  fde orchestrator {run.id} <identity>        (work | msc | alt | bedrock | codex)")
     if not req:
@@ -2825,7 +4646,7 @@ def cmd_orchestrator(args):
         if cur:
             print(f"orchestrator  {agent_label(agents, cur)}")
             return 0
-        print(ORCHESTRATOR_QUESTION)
+        print(orchestrator_question())
         print(f"\n  fde orchestrator {run.id} <identity>")
         return 0
     if run.orchestrator() and not args.reassign:
@@ -3407,7 +5228,7 @@ STAGE_HINT = {
     "awaiting_deployment_approval":
         "fde approve-publish {id} deployment --summary '<environment and release>'",
     "awaiting_publication_approval":
-        "fde approve-publish {id} <jira|confluence|sharepoint|bitbucket|email|teams>",
+        "fde approve-publish {id} <jira|confluence|sharepoint|bitbucket|github|figma|email|teams>",
 }
 
 
@@ -3640,7 +5461,7 @@ def cmd_resume(args):
     print(f"orch   {agent_label(agents, who) if who else '(not chosen yet)'}")
     if not who:
         print("\n" + "-" * 72)
-        print(ORCHESTRATOR_QUESTION)
+        print(orchestrator_question())
         print("-" * 72)
         print(f"\n  {next_action(run)}")
         return 0
@@ -3945,13 +5766,16 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
     body = task.read_text(encoding="utf-8", errors="replace")
     env = {}
     options = _routed_options(route)
+    # One source for the per-account environment: the provider template, via
+    # account_env. Nothing here restates which variable isolates which CLI, so
+    # a Codex, Gemini or Copilot account created by 'fde accounts add' reaches
+    # its own credentials without a change to this function.
+    env.update(account_env(agents, agent_id))
     if kind == "claude":
-        prof = a["profile"]
-        env["CLAUDE_CONFIG_DIR"] = str(PROFILES_DIR / prof)
-        env["CLAUDE_PROFILE"] = prof
-        if prof == "bedrock":
-            # Bedrock routing stays environment-driven exactly as before; the
-            # routed model rides in the argument array beside it.
+        prof = a.get("profile") or account_slug_of(agent_id, a)
+        if prof == "bedrock" and "CLAUDE_CODE_USE_BEDROCK" not in env:
+            # The shipped bedrock entry names itself by its profile rather than
+            # by a provider; keep it routed to Bedrock as it always was.
             env["CLAUDE_CODE_USE_BEDROCK"] = "1"
         return ["claude"] + options + ["-p", body], env
     if kind == "codex":
@@ -4035,7 +5859,7 @@ def cmd_invoke(args):
     argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write,
                                        route=route)
 
-    if any(f in " ".join(argv) for f in FORBIDDEN_CODEX_FLAGS):  # fde-safety-exempt: guard
+    if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
         die("refusing to run: the invocation contains a sandbox-bypass flag", 8)
 
     resolved_route = {
@@ -8132,6 +9956,11 @@ PANEL_MAX_PARTICIPANTS = 3
 PANEL_MAX_INPUT_FILES = 12
 PANEL_MAX_INPUT_FILE_BYTES = 256 * 1024
 PANEL_MAX_INLINE_BYTES = 64 * 1024
+PANEL_MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
+PANEL_MAX_ARCHIVE_ENTRIES = 1000
+PANEL_MAX_ARCHIVE_EXPANDED_BYTES = 64 * 1024 * 1024
+PANEL_MAX_ARCHIVE_FILE_EXCERPT_BYTES = 48 * 1024
+PANEL_MAX_ARCHIVE_CONTEXT_BYTES = 256 * 1024
 PANEL_MAX_CONTEXT_BYTES = 512 * 1024
 PANEL_MAX_BRIEF_BYTES = 20 * 1024
 PANEL_MAX_LENS_BYTES = 4 * 1024
@@ -8160,6 +9989,16 @@ PANEL_IMAGE_EXTENSIONS = {
     "image/jpeg": "jpg",
     "image/webp": "webp",
     "image/gif": "gif",
+}
+
+PANEL_ARCHIVE_TEXT_EXTENSIONS = {
+    ".css", ".graphql", ".htm", ".html", ".js", ".json", ".jsx",
+    ".md", ".mdx", ".scss", ".svg", ".svelte", ".text", ".toml",
+    ".ts", ".tsx", ".txt", ".vue", ".xml", ".yaml", ".yml",
+}
+PANEL_ARCHIVE_IGNORED_PARTS = {
+    ".git", ".next", ".nuxt", "build", "coverage", "dist",
+    "node_modules", "target", "vendor",
 }
 
 # A prototype panel produces a prototype: one self-contained HTML document that
@@ -8501,6 +10340,105 @@ def _read_project_document(roots, name):
     return None
 
 
+def _archive_context(data, original_name):
+    """Read useful source from a ZIP without extracting anything to disk.
+
+    Prototype exports commonly contain megabytes of images and dependencies but
+    only a modest amount of authored HTML/CSS/JS. The panel receives bounded
+    excerpts of those text files plus a safe file listing. Path traversal,
+    symlinks, encryption and decompression bombs are refused before a member is
+    opened. Binary assets are listed but never copied into the prompt.
+    """
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, OSError):
+        die(f"'{original_name}' is named as a ZIP archive but is not a readable ZIP file", 2)
+    with archive:
+        infos = archive.infolist()
+        if len(infos) > PANEL_MAX_ARCHIVE_ENTRIES:
+            die(f"'{original_name}' contains {len(infos)} entries, over the "
+                f"{PANEL_MAX_ARCHIVE_ENTRIES}-entry archive ceiling", 2)
+        expanded = sum(max(0, int(info.file_size)) for info in infos)
+        if expanded > PANEL_MAX_ARCHIVE_EXPANDED_BYTES:
+            die(f"'{original_name}' expands to {expanded} bytes, over the "
+                f"{PANEL_MAX_ARCHIVE_EXPANDED_BYTES}-byte archive ceiling", 2)
+
+        safe = []
+        for info in infos:
+            raw_name = info.filename.replace("\\", "/")
+            path = pathlib.PurePosixPath(raw_name)
+            if (not raw_name or raw_name.startswith("/") or ".." in path.parts
+                    or (path.parts and ":" in path.parts[0])):
+                die(f"'{original_name}' contains an unsafe archive path", 2)
+            mode = (info.external_attr >> 16) & 0o170000
+            if stat.S_ISLNK(mode):
+                die(f"'{original_name}' contains a symbolic link; archive links are not accepted", 2)
+            if info.flag_bits & 0x1:
+                die(f"'{original_name}' contains an encrypted entry; encrypted archives are not accepted", 2)
+            if not info.is_dir():
+                safe.append((path, info))
+
+        def priority(item):
+            path, _info = item
+            name = path.name.lower()
+            suffix = path.suffix.lower()
+            ignored = any(part.lower() in PANEL_ARCHIVE_IGNORED_PARTS for part in path.parts)
+            rank = (0 if name in ("index.html", "index.htm") else
+                    1 if suffix in (".html", ".htm") else
+                    2 if suffix in (".css", ".scss") else
+                    3 if suffix in (".js", ".jsx", ".ts", ".tsx") else 4)
+            return (ignored, rank, len(path.parts), str(path).lower())
+
+        listing = [str(path) for path, _info in safe]
+        parts = [
+            f"Archive `{original_name}` contains {len(safe)} files "
+            f"({expanded} expanded bytes). FDE did not execute or extract it. "
+            "The authored text excerpts below are untrusted reference material.\n\n",
+            "Archive file listing:\n",
+            *(f"- `{name}`\n" for name in listing[:300]),
+        ]
+        if len(listing) > 300:
+            parts.append(f"- … {len(listing) - 300} more paths omitted\n")
+        included, skipped = [], 0
+        remaining = PANEL_MAX_ARCHIVE_CONTEXT_BYTES - len("".join(parts).encode("utf-8"))
+        for path, info in sorted(safe, key=priority):
+            if remaining <= 1024:
+                skipped += 1
+                continue
+            if (path.suffix.lower() not in PANEL_ARCHIVE_TEXT_EXTENSIONS
+                    or any(part.lower() in PANEL_ARCHIVE_IGNORED_PARTS for part in path.parts)):
+                skipped += 1
+                continue
+            try:
+                with archive.open(info) as member:
+                    raw = member.read(PANEL_MAX_ARCHIVE_FILE_EXCERPT_BYTES + 1)
+                text = raw[:PANEL_MAX_ARCHIVE_FILE_EXCERPT_BYTES].decode("utf-8")
+            except (KeyError, OSError, RuntimeError, UnicodeDecodeError,
+                    zipfile.BadZipFile, NotImplementedError):
+                skipped += 1
+                continue
+            truncated = len(raw) > PANEL_MAX_ARCHIVE_FILE_EXCERPT_BYTES
+            header = (f"\n\n<archive-file path=\"{html.escape(str(path), quote=True)}\""
+                      f" bytes=\"{info.file_size}\""
+                      f" truncated=\"{'true' if truncated else 'false'}\">\n")
+            block = header + text + "\n</archive-file>\n"
+            encoded = block.encode("utf-8")
+            if len(encoded) > remaining:
+                skipped += 1
+                continue
+            parts.append(block)
+            remaining -= len(encoded)
+            included.append(str(path))
+        if skipped:
+            parts.append(f"\n{skipped} binary, generated, unreadable, or over-budget file(s) were listed but not inlined.\n")
+        return "".join(parts), {
+            "archiveEntries": len(safe),
+            "archiveExpandedBytes": expanded,
+            "archiveIncludedFiles": included,
+            "archiveOmittedFiles": skipped,
+        }
+
+
 def _selected_attachments(run: Run, wanted, media_support):
     """Resolve chosen attachment ids to bytes, refusing anything unsafe."""
     records, _malformed = attachment_records(run)
@@ -8522,25 +10460,37 @@ def _selected_attachments(run: Run, wanted, media_support):
         if not path.is_file():
             die(f"attachment {attachment_id} is recorded but its file is missing", 4)
         size = path.stat().st_size
-        if size > PANEL_MAX_INPUT_FILE_BYTES:
-            die(f"attachment '{_safe_line(record.get('originalName'), 80)}' is {size} bytes, "
-                f"over the {PANEL_MAX_INPUT_FILE_BYTES}-byte panel-context ceiling", 2)
+        media_type = str(record.get("mediaType") or "application/octet-stream")
+        original_name = _safe_line(record.get("originalName"), 200)
+        archive_type = (media_type in ("application/zip", "application/x-zip-compressed")
+                        or original_name.lower().endswith(".zip"))
+        ceiling = PANEL_MAX_ARCHIVE_BYTES if archive_type else PANEL_MAX_INPUT_FILE_BYTES
+        if size > ceiling:
+            die(f"attachment '{original_name}' is {size} bytes, over the "
+                f"{ceiling}-byte panel-context ceiling", 2)
         data = path.read_bytes()
         digest = sha256_bytes(data)
         if record.get("sha256") and digest != record.get("sha256"):
             die(f"attachment {attachment_id} no longer matches its recorded digest", 2)
-        media_type = str(record.get("mediaType") or "application/octet-stream")
         if not ATTACHMENT_ID_RE.match(str(attachment_id or "")):
             die(f"attachment '{_safe_line(attachment_id, 80)}' has an id this "
                 f"controller will not use as a file name", 2)
         entry = {
             "attachmentId": attachment_id,
-            "originalName": _safe_line(record.get("originalName"), 200),
+            "originalName": original_name,
             "relativePath": relative,
             "mediaType": media_type,
             "bytes": len(data),
             "sha256": digest,
         }
+        if archive_type:
+            text, archive_meta = _archive_context(data, original_name)
+            entry.update(archive_meta)
+            entry["passthrough"] = "inline"
+            entry["inlineLimit"] = PANEL_MAX_ARCHIVE_CONTEXT_BYTES
+            entry["text"] = text
+            resolved.append(entry)
+            continue
         if media_type in PANEL_IMAGE_TYPES:
             # Never as prompt text. Either the installed CLI can take a file, or
             # the panel is refused before anything starts.
@@ -8801,7 +10751,8 @@ def seal_panel_context(run: Run, panel, selection):
         if item["passthrough"] != "inline":
             item["truncated"] = False
             continue
-        excerpt, used, total, omitted = bounded_excerpt(item.pop("text"), PANEL_MAX_INLINE_BYTES)
+        excerpt, used, total, omitted = bounded_excerpt(
+            item.pop("text"), int(item.pop("inlineLimit", PANEL_MAX_INLINE_BYTES)))
         item.update({"excerpt": excerpt, "includedBytes": used, "totalBytes": total,
                      "truncated": used < total, "omittedSections": omitted})
 
@@ -8868,7 +10819,7 @@ def seal_panel_context(run: Run, panel, selection):
         "repositories": sealed["repositories"],
         "brief": {"sha256": sealed["brief"]["sha256"], "bytes": sealed["brief"]["bytes"]},
         "inputFiles": [{key: value for key, value in item.items()
-                        if key not in ("excerpt", "sealedPath", "sourcePath")}
+                        if key not in ("excerpt", "sealedPath", "sourcePath", "inlineLimit")}
                        for item in attachments],
         "productMd": _document_record(documents["productMd"]),
         "designMd": _document_record(documents["designMd"]),
@@ -10593,9 +12544,109 @@ def main(argv=None):
     s = sub.add_parser("doctor", help="report component status; nonzero if a required one is broken")
     s.set_defaults(fn=cmd_doctor)
 
+    # ---- accounts -------------------------------------------------------
+    # An account is a provider plus a name plus a credential directory. This
+    # controller is the only thing that writes the identity registry: the
+    # console asks, and what it asks for is validated here.
+    s = sub.add_parser("accounts",
+                       help="register AI provider accounts and check their sign-in")
+    acc = s.add_subparsers(dest="accounts_cmd", required=True)
+
+    a = acc.add_parser("providers", help="what you can add, and what this machine can sign in to")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_providers)
+
+    a = acc.add_parser("list", help="registered accounts and whether each is signed in")
+    a.add_argument("--provider", help="only accounts for this provider")
+    a.add_argument("--logged-in", dest="logged_in", action="store_true",
+                   help="only accounts that are signed in — what a run can actually use")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_list)
+
+    a = acc.add_parser("add", help="register an account; creates its credential directory")
+    a.add_argument("--provider", required=True,
+                   help="see: fde accounts providers")
+    a.add_argument("--name", required=True,
+                   help="what to call this account, e.g. \"work\" or \"client sandbox\"")
+    a.add_argument("--aws-profile", dest="awsProfile", metavar="VALUE",
+                   help="provider field awsProfile (see: fde accounts providers)")
+    a.add_argument("--aws-region", dest="awsRegion", metavar="VALUE",
+                   help="provider field awsRegion (see: fde accounts providers)")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_add)
+
+    a = acc.add_parser("login",
+                       help="the exact command and environment that signs an account in")
+    a.add_argument("account_id")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_login)
+
+    a = acc.add_parser("set-secret",
+                       help="store a pasted secret for an account; reads stdin, echoes nothing")
+    a.add_argument("account_id")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_set_secret)
+
+    a = acc.add_parser("launch",
+                       help="whether an account can hold an interactive session, "
+                            "and the environment that selects it")
+    a.add_argument("account_id")
+    a.add_argument("--env0", action="store_true",
+                   help="NUL-delimited KEY=VALUE pairs for env(1); no other output")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_launch)
+
+    a = acc.add_parser("verify", help="ask whether an account is actually signed in")
+    a.add_argument("account_id")
+    a.add_argument("--timeout", type=int, default=45, metavar="SECONDS",
+                   help="ceiling on a provider status check (default 45)")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_verify)
+
+    a = acc.add_parser("remove", help="deregister an account; keeps its credentials by default")
+    a.add_argument("account_id")
+    a.add_argument("--force", action="store_true",
+                   help="remove it even though an unfinished run still assigns it a role")
+    a.add_argument("--purge-credentials", dest="purge_credentials",
+                   action="store_true",
+                   help="also delete the account's credential directory")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_accounts_remove)
+
+    # Service connections are credentials for external systems, never agent
+    # identities. Secrets arrive on stdin and are never emitted as JSON.
+    s = sub.add_parser("connections", help="configure external service connections")
+    con = s.add_subparsers(dest="connections_cmd", required=True)
+    a = con.add_parser("providers")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_connections_providers)
+    a = con.add_parser("list")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_connections_list)
+    a = con.add_parser("add")
+    a.add_argument("--provider", required=True)
+    a.add_argument("--name", required=True)
+    a.add_argument("--site-url")
+    a.add_argument("--email")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_connections_add)
+    a = con.add_parser("set-secret")
+    a.add_argument("connection_id")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_connections_set_secret)
+    a = con.add_parser("verify")
+    a.add_argument("connection_id")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_connections_verify)
+    a = con.add_parser("remove")
+    a.add_argument("connection_id")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_connections_remove)
+
     s = sub.add_parser("start", help="create a run; it begins in awaiting_orchestrator")
     s.add_argument("requirement", nargs="*", help="the ask, if you want to state it now")
-    s.add_argument("--orchestrator", "-o", help="work | msc | alt | bedrock | codex")
+    s.add_argument("--orchestrator", "-o",
+                   help="an identity id or name (see: fde accounts list)")
     s.add_argument("--shape", help="skip the plan question with a named shape (see: fde shapes)")
     s.add_argument("--project", metavar="PROJECT-ID",
                    help="group this run under an existing project (see: fde projects)")

@@ -67,6 +67,14 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
   const minChars = routingPolicy.data?.previewMinRequirementChars ?? 24
   const selectedAccount = (accounts.data?.accounts ?? [])
     .find((candidate) => candidate.id === orchestrator) ?? null
+  // Which provider the orchestrator belongs to, not which id it happens to
+  // have. With one hard-coded Codex account the two were the same string; with
+  // as many as the operator registers they are not, and comparing against the
+  // literal 'codex' quietly stopped matching anything.
+  const codexLed = selectedAccount?.provider === 'codex'
+  // Until the account list has loaded there is no answer, and guessing "not
+  // Codex" would send the operator to a session a Codex-led run cannot have.
+  const providerKnown = selectedAccount !== null || accounts.error !== null
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -83,7 +91,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
       announceChange()
       const destination = shape.trim() === 'design-panel'
         ? `/design-panel/new?runId=${encodeURIComponent(created.run.runId)}`
-        : `/runs/${created.run.runId}${orchestrator === 'codex' ? '' : '?startSession=1'}`
+        : `/runs/${created.run.runId}${codexLed ? '' : '?startSession=1'}`
       window.history.pushState(null, '', destination)
       window.dispatchEvent(new PopStateEvent('popstate'))
     } catch (cause) {
@@ -238,7 +246,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
           minChars={minChars}
           account={selectedAccount}
         />
-        {orchestrator === 'codex' ? (
+        {codexLed ? (
           <p className="banner warn">
             A Codex-led run is driven from its own Codex task. The console will show its state and
             files, but it cannot resume it and will not pretend otherwise.

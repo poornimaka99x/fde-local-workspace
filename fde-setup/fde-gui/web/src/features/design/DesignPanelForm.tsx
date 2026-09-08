@@ -36,15 +36,19 @@ interface ParticipantDraft {
 }
 
 const PANEL_CONTEXT_MAX_ATTACHMENT_BYTES = 256 * 1024
+const PANEL_CONTEXT_MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 
-function attachmentProblem(attachment: AttachmentRecord): string | null {
-  const archive = attachment.mediaType === 'application/zip'
+function archiveAttachment(attachment: AttachmentRecord): boolean {
+  return attachment.mediaType === 'application/zip'
     || attachment.mediaType === 'application/x-zip-compressed'
     || attachment.originalName.toLowerCase().endsWith('.zip')
-  if (archive) {
-    return attachment.size > PANEL_CONTEXT_MAX_ATTACHMENT_BYTES
-      ? 'Not selectable: this archive exceeds the 256 KiB per-file context limit. Extract it and attach the relevant text source files.'
-      : 'Not selectable: archives are binary. Extract it and attach the relevant text source files.'
+}
+
+function attachmentProblem(attachment: AttachmentRecord): string | null {
+  if (archiveAttachment(attachment)) {
+    return attachment.size > PANEL_CONTEXT_MAX_ARCHIVE_BYTES
+      ? 'Not selectable: this archive exceeds the 25 MiB design-panel archive limit.'
+      : null
   }
   if (attachment.size > PANEL_CONTEXT_MAX_ATTACHMENT_BYTES) {
     return 'Not selectable: this file exceeds the 256 KiB per-file context limit.'
@@ -427,6 +431,8 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
                     </label>
                     {attachmentProblem(attachment) ? (
                       <div className="muted">{attachmentProblem(attachment)}</div>
+                    ) : archiveAttachment(attachment) ? (
+                      <div className="muted">Safe HTML, CSS, JavaScript and other text files will be read from the ZIP; binary assets and dependencies are listed but not executed.</div>
                     ) : null}
                   </li>
                 ))}

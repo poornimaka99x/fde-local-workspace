@@ -8,7 +8,7 @@
 export type IconName =
   | 'spark' | 'plus' | 'run' | 'chat' | 'project' | 'panel' | 'terminal'
   | 'health' | 'chevron' | 'folder' | 'folderOpen' | 'file' | 'doc'
-  | 'image' | 'code' | 'link' | 'download'
+  | 'image' | 'code' | 'link' | 'download' | 'key'
 
 const PATHS: Record<IconName, string> = {
   spark: 'M8 1.6 9.5 6l4.4 1.5L9.5 9 8 13.4 6.5 9 2.1 7.5 6.5 6 8 1.6Z',
@@ -28,6 +28,7 @@ const PATHS: Record<IconName, string> = {
   code: 'M5.8 5.4 3.2 8l2.6 2.6M10.2 5.4 12.8 8l-2.6 2.6M8.9 3.6 7.1 12.4',
   link: 'M6.6 8.9a2.6 2.6 0 0 0 3.9.3l1.6-1.6a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.4 7.1a2.6 2.6 0 0 0-3.9-.3L3.9 8.4a2.6 2.6 0 0 0 3.7 3.7l.9-.9',
   download: 'M8 2.8v7.4M5.2 7.4 8 10.2l2.8-2.8M3.2 12.4h9.6',
+  key: 'M9.6 3a3.4 3.4 0 1 1-2.5 5.7L6 9.8H4.4v1.6H2.8v1.8h2.6l4-4a3.4 3.4 0 0 1 .2-6.2Z',
 }
 
 const FILLED = new Set<IconName>(['spark'])

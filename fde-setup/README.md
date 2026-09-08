@@ -11,6 +11,23 @@ completed run. `RUNBOOK.md` is the phased setup detail; this file is the design.
 Canonical source: the private repository this directory came from. Clone it,
 run `./install.sh`, and `./install.sh --update` when it changes.
 
+## Configuration console
+
+The console's **Configuration** page keeps two deliberately separate kinds of
+access. **AI accounts** are identities that may be assigned roles in a run;
+Claude and Codex use isolated profile directories, Gemini uses Antigravity's
+single machine Keychain sign-in, and Copilot Studio uses a separately stored
+Direct Line credential. **Service connections** are Atlassian, GitHub,
+Bitbucket and Figma access. They never become role identities and configuring
+one never authorises an external write.
+
+Atlassian, GitHub and Bitbucket tokens are submitted once and stored in macOS
+Keychain under `fde-service-<connection-id>`. The browser and metadata registry
+never receive them back. Figma uses the official remote MCP endpoint
+`https://mcp.figma.com/mcp`; its OAuth credential remains owned by the MCP
+client. Figma is wired only after roles are confirmed, and canvas writes require
+`fde approve-publish <run-id> figma`, like every other publication target.
+
 ## The idea in two sentences
 
 **Identities are not roles.** "Claude: work", "ChatGPT/Codex", "Gemini" and
@@ -21,8 +38,8 @@ is never inherited from the last one.
 **Nothing crosses a boundary without you.** Nothing is read until you approve
 the combined plan and role assignment; Codex writes only under a one-time
 approval bound to the exact bytes of one task file; and anything that leaves
-this machine — Jira, Confluence, SharePoint, GitHub, Bitbucket, deployment,
-email or Teams — needs its own publication approval.
+this machine — Jira, Confluence, SharePoint, GitHub, Bitbucket, Figma,
+deployment, email or Teams — needs its own publication approval.
 
 ## The four layers
 

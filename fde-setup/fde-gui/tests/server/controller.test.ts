@@ -251,6 +251,8 @@ describe('controller boundary', () => {
       'CLAUDE_PROFILES_DIR',
       'CLAUDE_SHARED',
       'FDE_CHATS_DIR',
+      'FDE_CODEX_PROFILES_DIR',
+      'FDE_COPILOT_PROFILES_DIR',
       'FDE_PROJECTS_DIR',
       'FDE_RUNS_DIR',
       'HOME',

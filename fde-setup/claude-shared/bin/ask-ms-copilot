@@ -34,6 +34,12 @@ Credentials — Keychain first, environment second:
   shell file is readable by every process you run, which is exactly the shape
   they warn about — hence the Keychain.
 
+  Per account: the controller sets FDE_COPILOT_KEYCHAIN_SERVICE and
+  FDE_COPILOT_ACCOUNT_DIR from the account's provider template, so several
+  Copilot Studio agents can be registered side by side and each reads only its
+  own credential. With neither set this reads the single fixed service it always
+  has, so an existing setup needs no change.
+
   COPILOT_DIRECTLINE_SECRET   fallback if you have no Keychain (Linux, CI)
   COPILOT_TOKEN_ENDPOINT      use this instead where the tenant exposes only a
                               token endpoint (Channels > Custom website)
@@ -47,14 +53,51 @@ Usage:
 import json, os, shutil, subprocess, sys, time, urllib.error, urllib.request
 
 DL = "https://directline.botframework.com/v3/directline"
-KEYCHAIN_SERVICE = "fde-copilot-directline"
+
+# One Copilot Studio agent per account. The controller sets these two variables
+# from the account's provider template before invoking this script; with neither
+# set, the single fixed service this script has always used is what it reads, so
+# an existing single-account setup is untouched.
+DEFAULT_KEYCHAIN_SERVICE = "fde-copilot-directline"
+KEYCHAIN_SERVICE = (os.environ.get("FDE_COPILOT_KEYCHAIN_SERVICE", "").strip()
+                    or DEFAULT_KEYCHAIN_SERVICE)
+ACCOUNT_DIR = os.environ.get("FDE_COPILOT_ACCOUNT_DIR", "").strip()
+SECRET_FILE = os.path.join(ACCOUNT_DIR, "directline-secret") if ACCOUNT_DIR else ""
 TOKEN_ENDPOINT = os.environ.get("COPILOT_TOKEN_ENDPOINT", "")
 TIMEOUT = int(os.environ.get("COPILOT_TIMEOUT", "90"))
+MAX_SECRET_BYTES = 8192
+
+
+def _secret_from_file():
+    """The per-account secret file, if this account has one.
+
+    'fde accounts set-secret' writes it 0600 inside the account's own directory.
+    It is read here, at call time, and nowhere else — and refused if its mode
+    has since been widened, because a Direct Line secret that any local process
+    can read is the exact shape Microsoft's guidance warns about."""
+    if not SECRET_FILE or not os.path.isfile(SECRET_FILE):
+        return ""
+    try:
+        mode = os.stat(SECRET_FILE).st_mode
+    except OSError:
+        return ""
+    if mode & 0o077:
+        print(f"ask-ms-copilot: refusing to read {SECRET_FILE}: it is readable "
+              f"by other users (mode {oct(mode & 0o777)[2:]}).\n"
+              f"  fix it:  chmod 600 {SECRET_FILE}", file=sys.stderr)
+        return ""
+    try:
+        with open(SECRET_FILE, "rb") as fh:
+            return fh.read(MAX_SECRET_BYTES).decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
 
 
 def directline_secret():
-    """Keychain first. Retrieved at call time, held only in memory, never logged
-    and never echoed — nothing in this script prints it or passes it to a shell."""
+    """Keychain first, then this account's secret file, then the environment.
+
+    Retrieved at call time, held only in memory, never logged and never echoed —
+    nothing in this script prints it or passes it to a shell."""
     if shutil.which("security"):
         try:
             r = subprocess.run(
@@ -65,6 +108,9 @@ def directline_secret():
                 return r.stdout.strip(), "keychain"
         except (OSError, subprocess.SubprocessError):
             pass
+    from_file = _secret_from_file()
+    if from_file:
+        return from_file, "file"
     env = os.environ.get("COPILOT_DIRECTLINE_SECRET", "").strip()
     if env:
         return env, "environment"
@@ -123,6 +169,10 @@ def check():
         print(f"Microsoft Copilot: Direct Line secret present in macOS Keychain "
               f"(service {KEYCHAIN_SERVICE})")
         return 0
+    if src == "file":
+        print("Microsoft Copilot: Direct Line secret present for this account "
+              f"({SECRET_FILE}, mode 600)")
+        return 0
     if src == "environment":
         print("Microsoft Copilot: Direct Line secret present in the environment.")
         print("  Move it to the Keychain — a globally sourced env file is readable")
@@ -130,7 +180,10 @@ def check():
         print(f'    security add-generic-password -a "$USER" -s {KEYCHAIN_SERVICE} -w')
         return 0
     print("Microsoft Copilot: unconfigured.")
-    print(f'  security add-generic-password -a "$USER" -s {KEYCHAIN_SERVICE} -w')
+    if SECRET_FILE:
+        print("  store this account's secret:  fde accounts set-secret <account-id>")
+    print(f'  or the Keychain:  security add-generic-password -a "$USER" '
+          f'-s {KEYCHAIN_SERVICE} -w')
     return 1
 
 

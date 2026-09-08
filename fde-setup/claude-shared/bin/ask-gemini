@@ -1,17 +1,62 @@
 #!/usr/bin/env bash
-# Ask Gemini CLI a question headlessly. Reads extra context from stdin if piped.
+# Ask Gemini a question headlessly, through the Antigravity CLI (agy).
 #   ask-gemini "summarise the auth flow in this repo"
 #   git diff | ask-gemini "what would break in production?"
+#   ask-gemini --check          report whether a sign-in resolves (prints no credential)
+#   ask-gemini --models         the models this sign-in can reach
+#
 # Lane: bulk reading, long context, and web-grounded research (Claude on Bedrock
 # has no WebSearch, so this is the research fallback there).
+#
+# Accounts: Antigravity keeps its token in the operating system's keyring, not in
+# a per-account directory, so this machine has ONE Antigravity sign-in and the
+# controller's registry caps it at one account. Nothing here reads that keyring;
+# `--check` asks agy itself.
+#
+# Antigravity's blanket auto-approval flag is refused here, for the same reason
+# ask-codex refuses Codex's sandbox bypasses: what this toolkit may approve is
+# decided by the controller and the user, not by a caller of this script. The
+# refusal is below; the flag itself appears exactly once, on the line that
+# refuses it, so the repo-wide scan for these strings stays meaningful.
 set -uo pipefail
-command -v gemini >/dev/null || { echo "gemini CLI not installed: npm i -g @google/gemini-cli" >&2; exit 127; }
-model="${GEMINI_MODEL:-flash}"
 
-# The standing brief goes FIRST and byte-identical on every call: both Gemini and
-# Codex do automatic prefix caching, and a prefix that shifts by one byte is a
-# full cache miss. The variable question goes LAST, after the separator, for the
-# same reason. Set FDE_NO_PREAMBLE=1 to send the bare question.
+die() { printf 'ask-gemini: %s\n' "$*" >&2; exit 1; }
+
+AGY="${FDE_AGY_BIN:-agy}"
+missing() {
+  echo "Antigravity CLI not installed: see https://antigravity.google/docs/cli" >&2
+  echo "  the binary is 'agy'; set FDE_AGY_BIN if it lives somewhere unusual" >&2
+  exit 127
+}
+
+gemini_account_check() {
+  # Asks agy which models this sign-in can reach. Sends no prompt, so it costs
+  # nothing, and a signed-out CLI cannot answer it. Prints no credential.
+  local out
+  if out="$("$AGY" models 2>&1)"; then
+    printf 'Gemini (Antigravity): signed in — %s model(s) reachable\n' \
+      "$(printf '%s\n' "$out" | grep -c .)"
+    return 0
+  fi
+  printf 'ask-gemini: Antigravity is not signed in on this machine\n' >&2
+  printf '  sign it in:  fde accounts login <account-id>   (or run: %s)\n' "$AGY" >&2
+  return 1
+}
+
+case "${1:-}" in
+  --check)  command -v "$AGY" >/dev/null || missing; gemini_account_check; exit $? ;;
+  --models) command -v "$AGY" >/dev/null || missing; exec "$AGY" models ;;
+  --dangerously-skip-permissions)  # fde-safety-exempt: refusal, not an invocation
+    die "refusing: '$1' is not available through this toolkit. What may be
+            approved is decided by the controller and the user, not here." ;;
+esac
+
+command -v "$AGY" >/dev/null || missing
+
+# The standing brief goes FIRST and byte-identical on every call: Antigravity,
+# Gemini and Codex all do automatic prefix caching, and a prefix that shifts by
+# one byte is a full cache miss. The variable question goes LAST, after the
+# separator, for the same reason. Set FDE_NO_PREAMBLE=1 to send the bare question.
 compose_prompt() {  # compose_prompt <question>
   local pre="${FDE_SIDECAR_PREAMBLE:-${CLAUDE_SHARED:-$HOME/.claude-shared}/prompts/sidecar-preamble.md}"
   if [[ "${FDE_NO_PREAMBLE:-}" == "1" || ! -r "$pre" ]]; then
@@ -35,12 +80,27 @@ compose_prompt() {  # compose_prompt <question>
 
 prompt="$(compose_prompt "$*")"
 
-if [[ -p /dev/stdin ]]; then
-  gemini -p "$prompt" -m "$model" --approval-mode=default
-else
-  gemini -p "$prompt" -m "$model" --approval-mode=default </dev/null
+# Model and effort are validated and passed as separate argv elements, never
+# interpolated into a string, so a value cannot carry an option with it. Empty
+# leaves agy's own default alone.
+options=()
+model="${GEMINI_MODEL:-}"
+if [[ -n "$model" && "$model" != "default" ]]; then
+  [[ "$model" =~ ^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$ ]] || die "unusable GEMINI_MODEL value"
+  options+=(--model "$model")
 fi
+effort="${GEMINI_EFFORT:-}"
+if [[ -n "$effort" && "$effort" != "auto" ]]; then
+  case "$effort" in
+    low|medium|high) options+=(--effort "$effort") ;;
+    *) die "unusable GEMINI_EFFORT value: $effort (low, medium or high)" ;;
+  esac
+fi
+
+# The prompt is the value of -p and always the last argument, so a question that
+# begins with a dash is text and can never become a flag.
+"$AGY" ${options[@]+"${options[@]}"} --output-format text -p "$prompt"
 rc=$?
-# 0 ok | 1 API error | 42 bad input | 53 turn limit
-[[ $rc -eq 53 ]] && echo "(gemini hit its turn limit — narrow the question)" >&2
+# 0 ok | non-zero: no response, or an error. agy reports the reason itself.
+[[ $rc -ne 0 ]] && echo "(agy exited $rc — run 'ask-gemini --check' if this looks like a sign-in problem)" >&2
 exit $rc

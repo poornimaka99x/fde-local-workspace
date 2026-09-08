@@ -19,6 +19,8 @@ const DesignPanelForm = lazy(() =>
   import('../features/design/DesignPanelForm').then((module) => ({ default: module.DesignPanelForm })))
 const DesignPanelView = lazy(() =>
   import('../features/design/DesignPanelView').then((module) => ({ default: module.DesignPanelView })))
+const ConfigurationView = lazy(() =>
+  import('../features/accounts/ConfigurationView').then((module) => ({ default: module.ConfigurationView })))
 const NewChatForm = lazy(() => import('../features/chats/NewChatForm').then((module) => ({ default: module.NewChatForm })))
 const ChatDetail = lazy(() => import('../features/chats/ChatDetail').then((module) => ({ default: module.ChatDetail })))
 
@@ -68,6 +70,8 @@ export function App(): JSX.Element {
       ? 'chats'
     : path.startsWith('/sessions')
       ? 'sessions'
+    : path.startsWith('/accounts') || path.startsWith('/configuration')
+      ? 'configuration'
       : path.startsWith('/health')
         ? 'health'
         : 'runs'
@@ -152,6 +156,8 @@ export function App(): JSX.Element {
               <ChatsView />
             ) : section === 'sessions' ? (
               <SessionsView />
+            ) : section === 'configuration' ? (
+              <ConfigurationView />
             ) : section === 'health' ? (
               <HealthView />
             ) : (

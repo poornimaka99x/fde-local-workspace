@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "_comment": [
+    "How each provider keeps ONE account's credentials separate from another's.",
+    "",
+    "This is data, not code, for one reason: the mechanism is a fact about someone",
+    "else's CLI, and those change. When a vendor renames its config-directory",
+    "variable, the fix here is one string \u2014 not a patch to the controller, the",
+    "launcher and the console. 'fde accounts verify' runs the probe below on the",
+    "operator's own machine, so a variable that has gone stale reports 'login could",
+    "not be confirmed' instead of silently letting two accounts share one login.",
+    "",
+    "Nothing in this file is a secret and nothing in it may become one. Credentials",
+    "live where the provider's own CLI puts them, inside the per-account directory",
+    "named here; the registry records only the path.",
+    "",
+    "'{account}' expands to the account's slug. '~' expands to $HOME.",
+    "A dirTemplate may name an override variable as ${VAR:fallback}, so a test or a second machine can relocate every account directory without editing this file.",
+    "Sources for each mechanism are recorded in 'source' so a future reader can",
+    "check whether the vendor still documents it.",
+    "",
+    "Backwards compatibility, deliberately explicit. An entry that predates this file carries no 'provider' key, and nothing about it is rewritten. Such an entry keeps exactly the environment it had before accounts existed: 'legacyIsolation' marks the providers that already isolated per account (Claude, via CLAUDE_CONFIG_DIR and the profile name), and for the rest the credential variable is NOT set, so the CLI keeps using its own default location -- named in 'defaultDir' purely so 'verify' knows where to look. 'legacyKeychainService' is the single fixed service the shipped Copilot entry has always used.",
+    "'interactiveSession' marks the providers fde-start can launch a continuous orchestrator conversation as; every other provider carries the sentence explaining why it cannot, so the launcher never has to hold that list itself.",
+    "",
+    "'credential.shared' marks a provider that cannot isolate accounts by directory at all \u2014 Antigravity holds its token in the OS keyring. Such a provider gets no credential variable, no per-account folder, and a 'maxAccounts' ceiling, so the console never claims an isolation that does not exist.",
+    "",
+    "'credential.defaultDir' is where a provider's CLI keeps its own credential when this toolkit is not isolating one \u2014 the location a pre-accounts entry still uses. It is recorded so 'verify' looks in the right place; nothing is ever moved there, and no account directory is created or chmod'd there."
+  ],
+  "providers": {
+    "claude": {
+      "label": "Claude",
+      "kind": "claude",
+      "idPrefix": "claude",
+      "loginMode": "terminal",
+      "summary": "Claude Code signed in with a Claude account. One directory per account.",
+      "credential": {
+        "env": "CLAUDE_CONFIG_DIR",
+        "dirTemplate": "${CLAUDE_PROFILES_DIR:~/.claude-profiles}/{account}",
+        "probeFiles": [
+          ".credentials.json"
+        ],
+        "source": "CLAUDE_CONFIG_DIR is the documented Claude Code config-directory variable; claude-profile-new in this toolkit creates the directory."
+      },
+      "provision": {
+        "argv": [
+          "claude-profile-new",
+          "{account}"
+        ],
+        "note": "Creates the profile directory, links CLAUDE.md and shared, and writes the per-profile settings.json."
+      },
+      "login": {
+        "argv": [
+          "claude",
+          "auth",
+          "login"
+        ],
+        "requires": "claude",
+        "instruction": "Complete the browser sign-in, then close the pane."
+      },
+      "verify": {
+        "mode": "probe"
+      },
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ],
+      "cli": "claude",
+      "requiresDir": true,
+      "legacyIsolation": true,
+      "interactiveSession": true
+    },
+    "claude-bedrock": {
+      "label": "Claude on Bedrock",
+      "kind": "claude",
+      "idPrefix": "bedrock",
+      "loginMode": "none",
+      "summary": "Claude Code against Amazon Bedrock. There is no interactive sign-in: it uses an AWS profile you already have.",
+      "credential": {
+        "env": "CLAUDE_CONFIG_DIR",
+        "dirTemplate": "${CLAUDE_PROFILES_DIR:~/.claude-profiles}/{account}",
+        "probeFiles": [
+          "settings.json"
+        ],
+        "source": "Bedrock access is carried by the AWS credential chain; the profile directory holds only settings.json."
+      },
+      "provision": {
+        "argv": [
+          "claude-profile-new",
+          "{account}",
+          "--bedrock"
+        ],
+        "note": "Writes AWS_PROFILE and AWS_REGION into the profile's settings.json."
+      },
+      "fields": [
+        {
+          "name": "awsProfile",
+          "label": "AWS profile",
+          "required": true,
+          "pattern": "^[A-Za-z0-9_.@=+-]{1,64}$",
+          "default": "bedrock-dev"
+        },
+        {
+          "name": "awsRegion",
+          "label": "AWS region",
+          "required": true,
+          "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$",
+          "default": "eu-west-1"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_USE_BEDROCK": "1"
+      },
+      "verify": {
+        "mode": "argv",
+        "argv": [
+          "aws",
+          "sts",
+          "get-caller-identity",
+          "--profile",
+          "{awsProfile}",
+          "--region",
+          "{awsRegion}",
+          "--output",
+          "json"
+        ],
+        "requires": "aws",
+        "note": "Reports the caller identity only. No model is invoked, so verifying costs nothing."
+      },
+      "note": "No WebSearch on Bedrock. If this identity holds the research role, give it a second researcher or expect local-only evidence.",
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ],
+      "cli": "claude",
+      "requiresDir": true,
+      "legacyIsolation": true,
+      "interactiveSession": true
+    },
+    "codex": {
+      "label": "ChatGPT / Codex",
+      "kind": "codex",
+      "idPrefix": "codex",
+      "loginMode": "terminal",
+      "summary": "The Codex CLI signed in with a ChatGPT account. One CODEX_HOME per account.",
+      "credential": {
+        "env": "CODEX_HOME",
+        "dirTemplate": "${FDE_CODEX_PROFILES_DIR:~/.codex-profiles}/{account}",
+        "probeFiles": [
+          "auth.json"
+        ],
+        "mode": "0700",
+        "source": "CODEX_HOME sets the Codex configuration directory (default ~/.codex); credentials are written to auth.json inside it. https://learn.chatgpt.com/docs/auth",
+        "handling": "auth.json contains access tokens. It is never read, printed, copied or hashed by this toolkit \u2014 only its existence is checked.",
+        "defaultDir": "~/.codex"
+      },
+      "login": {
+        "argv": [
+          "codex",
+          "login"
+        ],
+        "requires": "codex",
+        "instruction": "Complete the browser sign-in, then close the pane."
+      },
+      "verify": {
+        "mode": "probe"
+      },
+      "writeRequiresApproval": true,
+      "surface": "ChatGPT-authenticated Codex CLI (codex exec). This toolkit does not automate the ChatGPT web interface.",
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ],
+      "cli": "codex",
+      "interactiveSessionNote": "Codex may orchestrate, but the continuous two-process chat launcher requires a Claude profile. Use: fde start; fde orchestrator <run-id> <this account>."
+    },
+    "antigravity": {
+      "label": "Gemini (Antigravity)",
+      "kind": "gemini",
+      "idPrefix": "gemini",
+      "cli": "agy",
+      "loginMode": "terminal",
+      "summary": "Gemini through the Antigravity CLI (agy). One sign-in per machine: agy keeps its token in the operating system's keyring, not in a folder, so a directory cannot hold two accounts apart.",
+      "maxAccounts": 1,
+      "maxAccountsReason": "Antigravity keeps one sign-in per machine \u2014 its token lives in the OS keyring, not in a per-account folder \u2014 so a second account would silently share the first one's login.",
+      "credential": {
+        "shared": true,
+        "defaultDir": "~/.gemini/antigravity-cli",
+        "source": "The Antigravity CLI stores its token in the OS native keyring (Apple Keychain, Linux Secret Service, Windows Credential Manager) and its settings in ~/.gemini/antigravity-cli/settings.json. https://antigravity.google/docs/cli/install/",
+        "handling": "The keyring entry is agy's own and is never read, listed or printed by this toolkit. Sign-in is confirmed by running agy's own command, not by inspecting a credential."
+      },
+      "login": {
+        "argv": [
+          "agy"
+        ],
+        "requires": "agy",
+        "instruction": "agy signs in from the keyring if it can, and otherwise opens your browser. If it starts already signed in as the wrong account, type /logout and then /login. Press Ctrl-C to leave the CLI.",
+        "interactiveUi": true
+      },
+      "verify": {
+        "mode": "argv",
+        "argv": [
+          "agy",
+          "models"
+        ],
+        "requires": "agy",
+        "note": "Lists the models this sign-in can reach. It sends no prompt, so verifying costs nothing; a signed-out CLI cannot answer it."
+      },
+      "interactiveSessionNote": "Antigravity is invoked here as a one-shot headless call (agy -p) with no session state, so it cannot hold an interactive orchestrator conversation.",
+      "capabilities": [
+        "product-management",
+        "research",
+        "solutioning",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "test-engineering",
+        "ci-investigation"
+      ]
+    },
+    "copilot-studio": {
+      "label": "Microsoft Copilot",
+      "kind": "copilot-studio",
+      "idPrefix": "copilot",
+      "loginMode": "secret",
+      "summary": "A Copilot Studio agent over Direct Line. Microsoft 365 Copilot has no CLI, so there is nothing to sign in to \u2014 you paste the channel secret for the agent.",
+      "credential": {
+        "dirTemplate": "${FDE_COPILOT_PROFILES_DIR:~/.fde-copilot}/{account}",
+        "mode": "0700",
+        "secretFile": "directline-secret",
+        "secretFileMode": "0600",
+        "keychainService": "fde-copilot-{account}",
+        "envOverride": "COPILOT_DIRECTLINE_SECRET",
+        "serviceEnv": "FDE_COPILOT_KEYCHAIN_SERVICE",
+        "dirEnv": "FDE_COPILOT_ACCOUNT_DIR",
+        "source": "Direct Line secrets are service-side credentials; Microsoft's guidance is to keep them out of anything a client can read.",
+        "handling": "The secret is written once from stdin and never echoed, logged, hashed or returned by any command. Reads happen at call time in ask-ms-copilot only.",
+        "legacyKeychainService": "fde-copilot-directline",
+        "defaultDir": "~/.fde-copilot"
+      },
+      "secret": {
+        "label": "Direct Line secret",
+        "minLength": 20,
+        "instruction": "Copilot Studio > Channels > Direct Line. Paste the secret; it is stored on this machine only."
+      },
+      "verify": {
+        "mode": "argv",
+        "argv": [
+          "ask-ms-copilot",
+          "--check"
+        ],
+        "note": "Reports whether a credential resolves. Prints no secret and sends no message."
+      },
+      "surface": "Microsoft 365 Copilot / Copilot Studio agent over Direct Line. Not GitHub Copilot.",
+      "forbidden": [
+        "source-code-edit",
+        "git",
+        "bitbucket",
+        "jira-write"
+      ],
+      "capabilities": [
+        "microsoft-context",
+        "product-management",
+        "research",
+        "sharepoint",
+        "outlook",
+        "teams",
+        "notebook-context"
+      ],
+      "interactiveSessionNote": "Copilot is a chat endpoint over the Microsoft estate with no local session, so it cannot hold an interactive orchestrator conversation."
+    }
+  }
+}

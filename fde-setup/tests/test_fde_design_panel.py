@@ -14,11 +14,13 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FDE = ROOT / "claude-shared" / "bin" / "fde"
 AGENTS = ROOT / "claude-shared" / "config" / "agents.json"
+TEMPLATES = ROOT / "claude-shared" / "config" / "provider-templates.json"
 TOOLKIT = ROOT / "fde-toolkit" / "plugins" / "fde-core"
 
 PANEL_ANSWER = (
@@ -40,6 +42,7 @@ class PanelTestCase(unittest.TestCase):
         self.shared = self.home / ".claude-shared"
         (self.shared / "config").mkdir(parents=True)
         shutil.copy2(AGENTS, self.shared / "config" / "agents.json")
+        shutil.copy2(TEMPLATES, self.shared / "config" / "provider-templates.json")
         for profile in ("work", "msc", "alt"):
             (self.home / ".claude-profiles" / profile).mkdir(parents=True)
         self.env = dict(os.environ)
@@ -266,7 +269,8 @@ class SealedContext(PanelTestCase):
              / "context-manifest.json").read_text())
         self.assertEqual(manifest["schemaVersion"], 2)
         self.assertEqual(manifest["projectId"], project)
-        self.assertEqual([entry["path"] for entry in manifest["repositories"]], [str(repo)])
+        self.assertEqual([entry["path"] for entry in manifest["repositories"]],
+                         [str(repo.resolve())])
         self.assertIsNone(manifest["repositories"][0]["head"])
         self.assertEqual(len(manifest["brief"]["sha256"]), 64)
         self.assertTrue(manifest["productMd"]["included"])
@@ -361,6 +365,39 @@ class SealedContext(PanelTestCase):
         result = self.create_panel(run_id, "--attachment", attachment["attachmentId"],
                                    expected=2)
         self.assertIn("not UTF-8 text", result.stderr)
+
+    def test_a_prototype_zip_over_the_old_ceiling_is_safely_summarised(self):
+        run_id = self.new_run()
+        source = self.home / "Design-prototype-V5.zip"
+        with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("index.html", "<!doctype html><main>Prototype V5 marker</main>")
+            archive.writestr("src/styles.css", "main { display: grid; }")
+            archive.writestr("assets/preview.bin", os.urandom(2_700_000))
+            archive.writestr("node_modules/pkg/index.js", "must not be inlined")
+        self.assertGreater(source.stat().st_size, 256 * 1024)
+        attachment = self.json_fde("attach", run_id, str(source), "--json")["attachment"]
+        self.create_panel(run_id, "--attachment", attachment["attachmentId"])
+
+        common = (self.run_dir(run_id) / "artifacts" / "design-panel"
+                  / "common-context.md").read_text()
+        self.assertIn("Prototype V5 marker", common)
+        self.assertIn("src/styles.css", common)
+        self.assertNotIn("must not be inlined", common)
+        manifest = json.loads((self.run_dir(run_id) / "artifacts" / "design-panel"
+                               / "context-manifest.json").read_text())
+        record = manifest["inputFiles"][0]
+        self.assertEqual(record["archiveEntries"], 4)
+        self.assertIn("index.html", record["archiveIncludedFiles"])
+
+    def test_a_zip_with_a_traversal_path_is_refused(self):
+        run_id = self.new_run()
+        source = self.home / "unsafe.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("../outside.html", "never")
+        attachment = self.json_fde("attach", run_id, str(source), "--json")["attachment"]
+        result = self.create_panel(run_id, "--attachment", attachment["attachmentId"],
+                                   expected=2)
+        self.assertIn("unsafe archive path", result.stderr)
 
     def test_the_context_is_sealed_once_work_has_started(self):
         run_id = self.ready_panel()

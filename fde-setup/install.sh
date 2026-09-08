@@ -97,6 +97,7 @@ PRESERVE=(
 CONFIRM=(
   "config/agents.json"          # you may add or relabel identities
   "config/routing-policy.json"  # cost weights, tiers and entitlement ceilings are yours
+  "config/provider-templates.json"  # which variable isolates which provider's accounts
   "mcp/mcp-servers.json"        # you edit this by design
   "shared/engineering-standards.md"
   "shared/standards-index.md"       # you may amend it alongside the standards
@@ -280,7 +281,7 @@ fi
 
 # Only the CLIs this ecosystem actually uses. GitHub Copilot is not one of them,
 # so there is nothing to check for and ~/.copilot is never read or written.
-for tool in gemini codex; do
+for tool in agy codex; do
   if command -v "$tool" >/dev/null 2>&1; then note "found $tool CLI"; else note "$tool CLI not installed — skipped"; fi
 done
 

@@ -166,7 +166,10 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
         # The stub lives in a temporary directory: a test that writes into the
         # repository is a test that changes what it is measuring.
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "gemini"
+            # The Antigravity CLI (agy) is what ask-gemini calls now. The stub
+            # echoes back the value of -p, which is the composed prompt, so this
+            # measures composition and nothing else.
+            stub = Path(tmp) / "agy"
             stub.write_text('#!/usr/bin/env bash\n'
                             'while [[ $# -gt 0 ]]; do\n'
                             '  [[ "$1" == "-p" ]] && { printf "%s" "$2"; exit 0; }\n'

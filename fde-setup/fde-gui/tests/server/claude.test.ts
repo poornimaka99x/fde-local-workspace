@@ -29,9 +29,12 @@ describe('Claude accounts and general chats', () => {
       id: 'work', profile: 'work', authState: 'authenticated', authMethod: 'test-subscription',
     })
     expect(account.models.find((item: { id: string }) => item.id === 'haiku').efforts).toEqual(['auto'])
-    const codex = response.json().accounts.find((item: { id: string }) => item.id === 'codex')
+    // Codex accounts come from the registry now, so their id is the registry
+    // key rather than the literal 'codex' this console used to hard-code.
+    const codex = response.json().accounts.find((item: { id: string }) => item.id === 'chatgpt_codex')
     expect(codex).toMatchObject({
-      label: 'ChatGPT / Codex', provider: 'codex', authState: 'authenticated', authMethod: 'ChatGPT',
+      label: 'ChatGPT/Codex', provider: 'codex', identityId: 'chatgpt_codex',
+      authState: 'authenticated', authMethod: 'ChatGPT',
     })
     expect(codex.models.find((item: { id: string }) => item.id === 'gpt-5.6-sol').efforts).toContain('ultra')
     expect(response.payload).not.toContain('.credentials.json')
@@ -40,7 +43,7 @@ describe('Claude accounts and general chats', () => {
 
   it('starts Codex login through the selected ChatGPT account CLI', async () => {
     const response = await harness.app.inject({
-      method: 'POST', url: '/api/claude/accounts/codex/login',
+      method: 'POST', url: '/api/claude/accounts/chatgpt_codex/login',
       headers: mutating(harness.token), payload: {},
     })
     expect(response.statusCode).toBe(201)
@@ -268,7 +271,7 @@ describe('Claude accounts and general chats', () => {
       }
     }
     const chats = new ChatService(harness.config, new AccountService(harness.config), runner)
-    const chat = chats.create({ accountId: 'codex', model: 'gpt-5.6-sol', effort: 'ultra', cwd: harness.root })
+    const chat = chats.create({ accountId: 'chatgpt_codex', model: 'gpt-5.6-sol', effort: 'ultra', cwd: harness.root })
     const first = await chats.send(chat.chatId, 'First')
     await chats.send(chat.chatId, 'Second')
 

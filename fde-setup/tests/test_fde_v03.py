@@ -12,6 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 FDE = ROOT / "claude-shared" / "bin" / "fde"
 AGENTS = ROOT / "claude-shared" / "config" / "agents.json"
+TEMPLATES = ROOT / "claude-shared" / "config" / "provider-templates.json"
 
 
 class FdeV03ControllerTest(unittest.TestCase):
@@ -21,6 +22,7 @@ class FdeV03ControllerTest(unittest.TestCase):
         self.shared = self.home / ".claude-shared"
         (self.shared / "config").mkdir(parents=True)
         shutil.copy2(AGENTS, self.shared / "config" / "agents.json")
+        shutil.copy2(TEMPLATES, self.shared / "config" / "provider-templates.json")
         (self.home / ".claude-profiles" / "work").mkdir(parents=True)
         self.env = dict(os.environ)
         self.env.update({

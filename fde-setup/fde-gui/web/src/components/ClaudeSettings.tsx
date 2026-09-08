@@ -37,13 +37,16 @@ export function ClaudeSettings({
   const selected = availableAccounts.find((account) => account.id === accountId) ?? null
   const models = selected?.models ?? []
   const selectedModel = models.find((option) => option.id === model) ?? models[0] ?? null
-  const managedCodex = includeCodex && accountId === 'codex'
+  // Codex manages its own model and effort. Which account that is comes from
+  // the account's provider — the registry mints a key per Codex account, so
+  // the literal id 'codex' stopped identifying them.
+  const managedCodex = includeCodex && selected?.provider === 'codex'
   const managed = managedCodex || lockModelAndEffort
 
   useEffect(() => {
-    if ((includeCodex && accountId === 'codex') || selected !== null || !availableAccounts[0]) return
+    if (selected !== null || !availableAccounts[0]) return
     onAccount(availableAccounts[0].id)
-  }, [accountId, availableAccounts, includeCodex, onAccount, selected])
+  }, [accountId, availableAccounts, onAccount, selected])
 
   useEffect(() => {
     if (managedCodex) return
@@ -66,9 +69,9 @@ export function ClaudeSettings({
             {availableAccounts.map((account) => (
               <option key={account.id} value={account.id}>{account.label}</option>
             ))}
-            {includeCodex && !availableAccounts.some((account) => account.id === 'codex')
-              ? <option value="codex">ChatGPT / Codex</option>
-              : null}
+            {/* No invented option: an account the server did not list is one
+                this console cannot check, sign in, or hand a run to. The Codex
+                accounts that exist come back in the list like any other. */}
           </select>
         </label>
         <label>

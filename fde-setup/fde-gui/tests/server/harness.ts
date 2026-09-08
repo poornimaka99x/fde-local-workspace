@@ -40,7 +40,13 @@ const flagValue = (name) => {
 }
 const key = positional.join('-').replace(/[^A-Za-z0-9._-]/g, '_')
 
-if (args.includes('--stdin') || args.includes('--brief-stdin') || args.includes('--requirement-stdin')) {
+// 'accounts set-secret' takes its value on stdin and names no flag for it:
+// a secret must not appear in argv, so there is nothing there to key off.
+const readsStdin = args.includes('--stdin') || args.includes('--brief-stdin')
+  || args.includes('--requirement-stdin')
+  || (args[0] === 'accounts' && args[1] === 'set-secret')
+  || (args[0] === 'connections' && args[1] === 'set-secret')
+if (readsStdin) {
   const received = fs.readFileSync(0)
   fs.writeFileSync(path.join(dir, 'stdin-' + key + '.bin'), received)
 }
@@ -153,11 +159,33 @@ export async function makeHarness(
   for (const dir of [path.join(shared, 'bin'), stubDir, runsRoot, path.join(shared, 'projects'), path.join(home, '.claude-profiles', 'work')]) {
     mkdirSync(dir, { recursive: true })
   }
+  // Every install has an identity registry — the controller refuses to run
+  // without one — so the default harness has one too. Without it the console's
+  // Claude profiles have no registry key, and a run cannot be created because
+  // there is no identity to hand the controller.
+  mkdirSync(path.join(shared, 'config'), { recursive: true })
+  const baseCapabilities = ['orchestration', 'research', 'implementation', 'review']
+  writeFileSync(
+    path.join(shared, 'config', 'agents.json'),
+    JSON.stringify({
+      roles: ['orchestrator', 'research'],
+      agents: {
+        claude_work: {
+          label: 'Claude: work', kind: 'claude', profile: 'work',
+          capabilities: baseCapabilities,
+        },
+        chatgpt_codex: {
+          label: 'ChatGPT/Codex', kind: 'codex',
+          capabilities: baseCapabilities, write_requires_approval: true,
+        },
+      },
+      roleCapability: { orchestrator: 'orchestration', research: 'research' },
+    }),
+  )
   if (options.withDesignRegistry === true) {
     // The identity registry the controller ships, reduced to what a panel needs:
     // three Claude accounts that MAY hold the uiUxDesign role, and one that
-    // deliberately may not.
-    mkdirSync(path.join(shared, 'config'), { recursive: true })
+    // deliberately may not. Replaces the default registry above.
     for (const profile of ['msc', 'alt', 'plain']) {
       mkdirSync(path.join(home, '.claude-profiles', profile), { recursive: true })
     }

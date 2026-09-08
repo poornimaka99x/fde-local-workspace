@@ -1,5 +1,5 @@
 {
-  "_comment": "Identities, not roles. Nothing here says who does what — that is decided per run, by the user, in the run's roles.json. Do not add 'role', 'defaultRole' or a preferred agent to this file.",
+  "_comment": "Identities, not roles. Nothing here says who does what \u2014 that is decided per run, by the user, in the run's roles.json. Do not add 'role', 'defaultRole' or a preferred agent to this file.",
   "roles": [
     "orchestrator",
     "productManagement",
@@ -25,45 +25,159 @@
       "label": "Claude: work",
       "kind": "claude",
       "profile": "work",
-      "capabilities": ["orchestration", "product-management", "research", "solutioning", "ui-ux-design", "design-system", "review", "pr-review", "standards-review", "security-review", "delivery-planning", "presentation", "implementation", "test-engineering", "ci-investigation", "release-management", "observability"]
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ]
     },
     "claude_msc": {
       "label": "Claude: msc",
       "kind": "claude",
       "profile": "msc",
-      "capabilities": ["orchestration", "product-management", "research", "solutioning", "ui-ux-design", "design-system", "review", "pr-review", "standards-review", "security-review", "delivery-planning", "presentation", "implementation", "test-engineering", "ci-investigation", "release-management", "observability"]
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ]
     },
     "claude_alt": {
       "label": "Claude: alt",
       "kind": "claude",
       "profile": "alt",
-      "capabilities": ["orchestration", "product-management", "research", "solutioning", "ui-ux-design", "design-system", "review", "pr-review", "standards-review", "security-review", "delivery-planning", "presentation", "implementation", "test-engineering", "ci-investigation", "release-management", "observability"]
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ]
     },
     "claude_bedrock": {
       "label": "Claude Code: Bedrock",
       "kind": "claude",
       "profile": "bedrock",
-      "capabilities": ["orchestration", "product-management", "research", "solutioning", "ui-ux-design", "design-system", "review", "pr-review", "standards-review", "security-review", "delivery-planning", "presentation", "implementation", "test-engineering", "ci-investigation", "release-management", "observability"],
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ],
       "note": "No WebSearch on Bedrock. If this identity holds the research role, give it a second researcher or expect local-only evidence."
     },
     "chatgpt_codex": {
       "label": "ChatGPT/Codex",
       "kind": "codex",
-      "capabilities": ["orchestration", "product-management", "research", "solutioning", "ui-ux-design", "design-system", "review", "pr-review", "standards-review", "security-review", "delivery-planning", "presentation", "implementation", "test-engineering", "ci-investigation", "release-management", "observability"],
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ],
       "write_requires_approval": true,
       "surface": "ChatGPT-authenticated Codex CLI (codex exec). This toolkit does not automate the ChatGPT web interface."
     },
     "gemini": {
       "label": "Gemini",
       "kind": "gemini",
-      "capabilities": ["product-management", "research", "solutioning", "review", "pr-review", "standards-review", "security-review", "test-engineering", "ci-investigation"]
+      "capabilities": [
+        "product-management",
+        "research",
+        "solutioning",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "test-engineering",
+        "ci-investigation"
+      ],
+      "surface": "Gemini through the Antigravity CLI (agy), called headlessly (agy -p). One sign-in per machine: agy keeps its token in the OS keyring, so this identity cannot be split into several accounts."
     },
     "microsoft_copilot": {
       "label": "Microsoft Copilot",
       "kind": "copilot-studio",
-      "capabilities": ["microsoft-context", "product-management", "research", "sharepoint", "outlook", "teams", "notebook-context"],
+      "capabilities": [
+        "microsoft-context",
+        "product-management",
+        "research",
+        "sharepoint",
+        "outlook",
+        "teams",
+        "notebook-context"
+      ],
       "surface": "Microsoft 365 Copilot / Copilot Studio agent over Direct Line. Not GitHub Copilot.",
-      "forbidden": ["source-code-edit", "git", "bitbucket", "jira-write"]
+      "forbidden": [
+        "source-code-edit",
+        "git",
+        "bitbucket",
+        "jira-write"
+      ]
     }
   },
   "roleCapability": {

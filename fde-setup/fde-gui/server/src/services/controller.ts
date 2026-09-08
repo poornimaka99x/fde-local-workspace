@@ -45,11 +45,33 @@ export function looksOutdated(exitCode: number, text: string): boolean {
   return exitCode === 2 && OUTDATED.test(text)
 }
 
+/**
+ * Half a JSON object is not a smaller JSON object.
+ *
+ * A documented refusal is often a typed envelope on stdout — routing's
+ * `{"error":{...}}`, or an account record that verify returns with exit 4 —
+ * and the routes parse it back so the browser sees the controller's own code
+ * instead of a generic failure. Truncating that at 2000 characters turns a
+ * correct answer into a parse error, so a payload that IS valid JSON is kept
+ * whole (still bounded, by the child's own output cap). Prose is truncated as
+ * before, because prose is only ever read by a human.
+ */
+const MAX_PROSE_DETAIL = 2000
+const MAX_JSON_DETAIL = 64_000
+
 function safeDetail(exitCode: number, text: string): string | undefined {
   if (!DOCUMENTED_EXITS.has(exitCode)) return undefined
   const trimmed = text.trim()
   if (trimmed === '' || /Traceback \(most recent call last\)/.test(trimmed)) return undefined
-  return trimmed.slice(0, 2000)
+  if (trimmed.length <= MAX_JSON_DETAIL && trimmed.startsWith('{')) {
+    try {
+      JSON.parse(trimmed)
+      return trimmed
+    } catch {
+      /* Not an envelope. Truncate it like any other message. */
+    }
+  }
+  return trimmed.slice(0, MAX_PROSE_DETAIL)
 }
 
 /** Controller exit codes, mapped to something an HTTP client can act on. */
@@ -87,6 +109,11 @@ export function controllerEnv(config: GuiConfig): NodeJS.ProcessEnv {
     FDE_PROJECTS_DIR: config.projectsRoot,
     FDE_CHATS_DIR: config.chatsRoot,
     CLAUDE_PROFILES_DIR: config.profilesRoot,
+    // The account directories for the providers that gained per-account
+    // isolation. Forwarded explicitly so the controller resolves the same
+    // paths this console shows and the same paths a login writes to.
+    FDE_CODEX_PROFILES_DIR: config.codexProfilesRoot,
+    FDE_COPILOT_PROFILES_DIR: config.copilotProfilesRoot,
     LANG: process.env.LANG ?? 'en_US.UTF-8',
     ...(process.env.PYTHONPATH ? { PYTHONPATH: process.env.PYTHONPATH } : {}),
   }

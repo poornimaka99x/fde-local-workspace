@@ -115,6 +115,18 @@ const BEDROCK_ENV_ALLOWLIST = new Set([
 export interface ClaudeAccount {
   id: string
   label: string
+  /**
+   * The key this account has in the controller's identity registry, or null
+   * for a profile directory with no registry entry.
+   *
+   * `id` is this console's own handle (a Claude profile name, a Codex registry
+   * key), which chats, sessions and design panels are keyed on. The controller
+   * knows identities by registry key, and with several accounts registered the
+   * two are no longer interchangeable: a Codex account named "work" alongside
+   * the shipped `claude_work` makes the bare word "work" ambiguous, and the
+   * controller rightly refuses it. Anything handed to `fde` uses this field.
+   */
+  identityId: string | null
   profile: string
   provider: ChatProvider
   profilePresent: boolean
@@ -133,6 +145,8 @@ interface RegistryAgent {
   label?: unknown
   kind?: unknown
   profile?: unknown
+  provider?: unknown
+  account?: unknown
   capabilities?: unknown
 }
 
@@ -188,30 +202,77 @@ export class AccountService {
       label: string
       provider: Exclude<ChatProvider, 'codex'>
       capabilities: string[]
+      identityId: string | null
+    }>()
+    const codex = new Map<string, {
+      label: string; home: string; capabilities: string[]; registered: boolean
     }>()
     try {
       const raw = JSON.parse(
         readFileSync(path.join(this.config.sharedRoot, 'config', 'agents.json'), 'utf8'),
       ) as { agents?: Record<string, RegistryAgent> }
-      for (const agent of Object.values(raw.agents ?? {})) {
-        if (agent.kind !== 'claude' || typeof agent.profile !== 'string') continue
-        const id = agent.profile
-        if (!ACCOUNT_ID_PATTERN.test(id)) continue
-        found.set(id, {
-          label: typeof agent.label === 'string' ? agent.label : `Claude: ${id}`,
-          provider: id === 'bedrock' ? 'bedrock' : 'anthropic',
-          capabilities: Array.isArray(agent.capabilities)
-            ? agent.capabilities.filter((value): value is string => typeof value === 'string')
-            : [],
-        })
+      for (const [key, agent] of Object.entries(raw.agents ?? {})) {
+        const capabilities = Array.isArray(agent.capabilities)
+          ? agent.capabilities.filter((value): value is string => typeof value === 'string')
+          : []
+        if (agent.kind === 'claude' && typeof agent.profile === 'string') {
+          const id = agent.profile
+          if (!ACCOUNT_ID_PATTERN.test(id)) continue
+          found.set(id, {
+            identityId: key,
+            label: typeof agent.label === 'string' ? agent.label : `Claude: ${id}`,
+            // Bedrock is a provider in the registry now. The old signal — a
+            // profile literally called "bedrock" — is still honoured, so an
+            // installation that predates provider templates keeps working.
+            provider: agent.provider === 'claude-bedrock' || id === 'bedrock'
+              ? 'bedrock'
+              : 'anthropic',
+            capabilities,
+          })
+          continue
+        }
+        if (agent.kind === 'codex') {
+          // Codex used to be a single hard-coded entry here, which meant a
+          // second ChatGPT account was invisible to the console however many
+          // the operator had registered. The registry decides how many there
+          // are, and CODEX_HOME is what keeps their credentials apart.
+          const slug = typeof agent.account === 'string' && agent.account !== ''
+            ? agent.account
+            : typeof agent.profile === 'string' ? agent.profile : key
+          const id = ACCOUNT_ID_PATTERN.test(key) ? key : null
+          if (id === null) continue
+          codex.set(id, {
+            registered: true,
+            label: typeof agent.label === 'string' ? agent.label : `ChatGPT / Codex: ${slug}`,
+            // An entry with no provider key predates accounts and has no
+            // per-account directory: it reads the CLI's own default, exactly
+            // as it did before.
+            home: typeof agent.provider === 'string'
+              ? path.join(this.config.codexProfilesRoot, slug)
+              : path.join(this.config.home, '.codex'),
+            capabilities,
+          })
+        }
       }
     } catch {
       /* A partial installation can still expose profile directories by name. */
+    }
+    if (codex.size === 0) {
+      codex.set('codex', {
+        registered: false,
+        label: 'ChatGPT / Codex',
+        home: path.join(this.config.home, '.codex'),
+        capabilities: [],
+      })
     }
     try {
       for (const entry of readdirSync(this.config.profilesRoot, { withFileTypes: true })) {
         if (!entry.isDirectory() || !ACCOUNT_ID_PATTERN.test(entry.name) || found.has(entry.name)) continue
         found.set(entry.name, {
+          // A profile directory the operator created but never described. It
+          // can be signed in; it is not an identity, so it cannot hold a role
+          // or orchestrate a run until it is registered.
+          identityId: null,
           label: `Claude: ${entry.name}`,
           provider: entry.name === 'bedrock' ? 'bedrock' : 'anthropic',
           // A profile directory with no registry entry is an identity the
@@ -228,6 +289,7 @@ export class AccountService {
       .map(([id, value]) => ({
         id,
         label: value.label,
+        identityId: value.identityId,
         profile: id,
         provider: value.provider,
         profilePresent: existsSync(this.profileDirectory(id)),
@@ -237,19 +299,63 @@ export class AccountService {
       }))
     return [
       ...claudeAccounts,
-      {
-        id: 'codex',
-        label: 'ChatGPT / Codex',
-        profile: 'codex',
-        provider: 'codex' as const,
-        profilePresent: existsSync(path.join(this.config.home, '.codex')),
-        models: CODEX_MODELS.map((model) => ({ ...model, efforts: [...model.efforts] })),
-        capabilities: [],
-        // A design panel is about separately authenticated *Claude* accounts
-        // reading the same sealed context. Codex is not one of them.
-        designPanelEligible: false,
-      },
+      ...[...codex.entries()]
+        .sort((a, b) => a[1].label.localeCompare(b[1].label))
+        .map(([id, value]) => ({
+          id,
+          label: value.label,
+          // Codex accounts are keyed by registry key already, except the
+          // fallback below, which stands for no registry entry at all.
+          identityId: value.registered ? id : null,
+          profile: id,
+          provider: 'codex' as const,
+          profilePresent: existsSync(value.home),
+          models: CODEX_MODELS.map((model) => ({ ...model, efforts: [...model.efforts] })),
+          capabilities: [...value.capabilities],
+          // A design panel is about separately authenticated *Claude* accounts
+          // reading the same sealed context. Codex is not one of them.
+          designPanelEligible: false,
+        })),
     ]
+  }
+
+  /**
+   * The base environment an interactive sign-in starts from.
+   *
+   * The controller's own per-account variables are layered on top of this by
+   * the accounts route, so whichever variable isolates that provider wins over
+   * anything the console happens to hold.
+   */
+  loginEnv(): NodeJS.ProcessEnv {
+    return sessionEnv(this.config)
+  }
+
+  /** Where this account's Codex credentials live, for status and login. */
+  private codexHome(id: string): string | null {
+    const entry = this.configured().find((account) => account.id === id)
+    if (entry === undefined || entry.provider !== 'codex') return null
+    return this.codexHomes().get(id) ?? null
+  }
+
+  private codexHomes(): Map<string, string> {
+    const homes = new Map<string, string>()
+    try {
+      const raw = JSON.parse(
+        readFileSync(path.join(this.config.sharedRoot, 'config', 'agents.json'), 'utf8'),
+      ) as { agents?: Record<string, RegistryAgent> }
+      for (const [key, agent] of Object.entries(raw.agents ?? {})) {
+        if (agent.kind !== 'codex' || !ACCOUNT_ID_PATTERN.test(key)) continue
+        const slug = typeof agent.account === 'string' && agent.account !== ''
+          ? agent.account
+          : key
+        homes.set(key, typeof agent.provider === 'string'
+          ? path.join(this.config.codexProfilesRoot, slug)
+          : path.join(this.config.home, '.codex'))
+      }
+    } catch {
+      /* No registry means no per-account homes; the CLI default applies. */
+    }
+    return homes
   }
 
   async list(refresh = false): Promise<ClaudeAccount[]> {
@@ -382,7 +488,16 @@ export class AccountService {
   profileEnv(id: string): NodeJS.ProcessEnv {
     const account = this.getConfigured(id)
     if (account === null) throw new Error('unknown chat account')
-    if (account.provider === 'codex') return sessionEnv(this.config)
+    if (account.provider === 'codex') {
+      const home = this.codexHome(id)
+      // Set only for an account the controller registered. An entry that
+      // predates accounts gets no CODEX_HOME, so its CLI keeps reading the
+      // directory it is already signed in to.
+      const registered = home !== null && home !== path.join(this.config.home, '.codex')
+      return registered
+        ? { ...sessionEnv(this.config), CODEX_HOME: home }
+        : sessionEnv(this.config)
+    }
     return {
       ...sessionEnv(this.config),
       CLAUDE_CONFIG_DIR: this.profileDirectory(account.profile),

@@ -872,3 +872,149 @@ export interface DesignLensList {
   schemaVersion: number
   lenses: DesignLens[]
 }
+
+// ------------------------------------------------------------- AI accounts --
+
+/**
+ * One provider the console can register an account for, as the controller
+ * describes it. Nothing here is decided in the browser: which providers exist,
+ * how each signs in, what fields it needs and whether its CLI is installed all
+ * come from the controller's provider templates.
+ */
+export interface ProviderTemplate {
+  provider: string
+  label: string
+  kind: string
+  summary?: string | null
+  loginMode: 'terminal' | 'secret' | 'none'
+  loginInstruction?: string | null
+  credentialEnv?: string | null
+  credentialDirTemplate?: string | null
+  cliRequired?: string | null
+  cliInstalled?: boolean | null
+  fields: ProviderField[]
+  secret?: { label: string; minLength?: number; instruction?: string } | null
+  capabilities: string[]
+  /** Null where the provider accepts as many accounts as you like. */
+  maxAccounts?: number | null
+  maxAccountsReason?: string | null
+  /** True where the credential cannot be split per account (an OS keyring). */
+  sharedCredential: boolean
+  multipleAccounts: boolean
+  note?: string | null
+  surface?: string | null
+}
+
+export interface ProviderField {
+  name: string
+  label: string
+  required: boolean
+  default?: string | null
+  pattern?: string | null
+}
+
+/**
+ * One registered account. `loggedIn` is the controller's answer, not a guess:
+ * it asked the filesystem or the provider's own status command. No field here
+ * ever carries a credential — `credentialDir` is a path, not its contents.
+ */
+export interface ProviderAccount {
+  id: string
+  label: string
+  provider: string
+  providerLabel: string
+  kind: string | null
+  account: string
+  loginMode: 'terminal' | 'secret' | 'none'
+  credentialDir: string
+  loggedIn: boolean
+  credentialSource: 'file' | 'keychain' | 'environment' | 'unconfirmed' | 'none'
+  loginDetail: string
+  available: boolean
+  availability: string
+  capabilities: string[]
+  declared: boolean
+  isolated: boolean
+  fields: Record<string, string>
+  note?: string | null
+  surface?: string | null
+  forbidden: string[]
+  writeRequiresApproval: boolean
+  confirmed?: boolean
+  check?: {
+    mode: 'probe' | 'argv'
+    ran: boolean
+    ok: boolean | null
+    detail: string
+    exitCode?: number
+  }
+  provisioning?: {
+    ran: boolean
+    reason?: string
+    exitCode?: number
+    detail?: string | null
+  }
+  nextAction?: string
+}
+
+export interface ProviderListResponse {
+  schemaVersion: number
+  providers: ProviderTemplate[]
+}
+
+export interface AccountListResponse {
+  schemaVersion: number
+  accounts: ProviderAccount[]
+}
+
+export interface AccountDetailResponse {
+  schemaVersion: number
+  account: ProviderAccount
+}
+
+export interface AccountRemovedResponse {
+  schemaVersion: number
+  removed: ProviderAccount
+  credentials: { requested: boolean; removed: boolean; path: string; reason?: string }
+  stillInUse: { runId: string; role: string; state?: string | null }[]
+}
+
+// ------------------------------------------------------- service connections --
+export interface ConnectionProvider {
+  provider: 'atlassian' | 'github' | 'bitbucket' | 'figma'
+  label: string
+  secretLabel: string | null
+  docsUrl: string
+  fields: { name: string; label: string; required: boolean; placeholder?: string }[]
+  note: string
+  oauth?: boolean
+}
+
+export interface ServiceConnection {
+  id: string
+  name: string
+  provider: ConnectionProvider['provider']
+  providerLabel: string
+  fields: Record<string, string>
+  configured: boolean
+  status: string
+  verifiedIdentity?: string | null
+  verifiedAt?: string | null
+  detail?: string | null
+  oauth: boolean
+}
+
+export interface ConnectionProviderListResponse {
+  schemaVersion: 1
+  providers: ConnectionProvider[]
+}
+
+export interface ConnectionListResponse {
+  schemaVersion: 1
+  connections: ServiceConnection[]
+}
+
+export interface ConnectionDetailResponse {
+  schemaVersion: 1
+  connection: ServiceConnection
+}

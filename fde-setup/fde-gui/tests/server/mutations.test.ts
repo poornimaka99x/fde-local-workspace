@@ -252,7 +252,10 @@ describe('safe mutations', () => {
     expect(response.statusCode).toBe(201)
     expect(response.json().run.runId).toBe(RUN)
     expect(harness.calls()[0]).toEqual([
-      'start', '--json', '--orchestrator', 'work',
+      // The registry key, not this console's own handle for the profile: with
+      // several accounts registered a bare profile name can name two
+      // identities, and the controller refuses an ambiguous one.
+      'start', '--json', '--orchestrator', 'claude_work',
       '--model', 'default', '--effort', 'auto',
       '--project', PROJECT, '--shape', 'research',
       '--', 'MAX-1 returns research',

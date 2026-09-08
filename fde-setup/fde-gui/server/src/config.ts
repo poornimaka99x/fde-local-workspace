@@ -21,6 +21,15 @@ export interface GuiConfig {
   projectsRoot: string
   chatsRoot: string
   profilesRoot: string
+  /**
+   * Where per-account credential directories live for the providers that gained
+   * them with AI accounts. These mirror the defaults in the controller's
+   * provider templates, and are overridable by the same variables, so the
+   * console and the CLI never disagree about which directory holds which
+   * account's login.
+   */
+  codexProfilesRoot: string
+  copilotProfilesRoot: string
   webRoot: string
   version: string
   apiVersion: number
@@ -90,6 +99,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
   const profilesRoot = path.resolve(
     env.CLAUDE_PROFILES_DIR?.trim() || path.join(home, '.claude-profiles'),
   )
+  const codexProfilesRoot = path.resolve(
+    env.FDE_CODEX_PROFILES_DIR?.trim() || path.join(home, '.codex-profiles'),
+  )
+  const copilotProfilesRoot = path.resolve(
+    env.FDE_COPILOT_PROFILES_DIR?.trim() || path.join(home, '.fde-copilot'),
+  )
   const fdeBin = path.resolve(env.FDE_CONTROLLER?.trim() || path.join(sharedRoot, 'bin', 'fde'))
   const fdeStartBin = path.resolve(env.FDE_START_BIN?.trim() || path.join(sharedRoot, 'bin', 'fde-start'))
 
@@ -107,6 +122,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
     projectsRoot,
     chatsRoot,
     profilesRoot,
+    codexProfilesRoot,
+    copilotProfilesRoot,
     webRoot: path.join(PACKAGE_ROOT, 'dist', 'web'),
     version: readVersion(),
     apiVersion: 1,

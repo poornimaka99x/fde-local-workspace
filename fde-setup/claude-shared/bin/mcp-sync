@@ -247,33 +247,41 @@ def sync_run(scoped, run_id, dry):
     assignments = roles.get("assignments", {})
 
     out_dir = run_dir / "mcp"
-    written = []
+    # Collect every role-scoped server for an identity before writing its file.
+    # Writing one server at a time would make merge_servers correctly prune the
+    # server written by the previous iteration, leaving only the last binding.
+    bindings = {}
     for name, (s, want_roles) in scoped.items():
         holders = []
         for role in want_roles:
             v = assignments.get(role)
             holders += (v if isinstance(v, list) else [v]) if v else []
         for aid in dict.fromkeys(h for h in holders if h):
-            a = agents.get(aid, {})
-            kind = a.get("kind")
-            target = KIND_TARGET.get(kind)
-            if not target:
-                print(f"  skip   {name} for {aid}: no MCP surface for kind '{kind}'")
-                continue
-            if kind == "claude":
-                p = out_dir / f"claude-{a.get('profile', aid)}.mcp.json"
-                cfg = read_json(p, {})
-                cfg = merge_servers(cfg, "mcpServers", render_claude({name: s}), dry)
-                commit(p, cfg, dry, "run")
-            elif kind == "gemini":
-                p = out_dir / "gemini.json"
-                cfg = read_json(p, {})
-                cfg = merge_servers(cfg, "mcpServers", render_gemini({name: s}), dry)
-                commit(p, cfg, dry, "run")
-            else:
-                p = out_dir / "codex.toml"
-                commit(p, splice_codex(p, render_codex_block({name: s})), dry, "run")
-            written.append(f"{name} -> {aid}")
+            bindings.setdefault(aid, {})[name] = s
+
+    written = []
+    for aid, selected in bindings.items():
+        a = agents.get(aid, {})
+        kind = a.get("kind")
+        target = KIND_TARGET.get(kind)
+        if not target:
+            names = ", ".join(selected)
+            print(f"  skip   {names} for {aid}: no MCP surface for kind '{kind}'")
+            continue
+        if kind == "claude":
+            p = out_dir / f"claude-{a.get('profile', aid)}.mcp.json"
+            cfg = read_json(p, {})
+            cfg = merge_servers(cfg, "mcpServers", render_claude(selected), dry)
+            commit(p, cfg, dry, "run")
+        elif kind == "gemini":
+            p = out_dir / "gemini.json"
+            cfg = read_json(p, {})
+            cfg = merge_servers(cfg, "mcpServers", render_gemini(selected), dry)
+            commit(p, cfg, dry, "run")
+        else:
+            p = out_dir / "codex.toml"
+            commit(p, splice_codex(p, render_codex_block(selected)), dry, "run")
+        written.extend(f"{name} -> {aid}" for name in selected)
 
     if written and not dry:
         commit(out_dir / "README.md",
@@ -287,7 +295,7 @@ def sync_run(scoped, run_id, dry):
                "  claude --mcp-config " + str(out_dir / "claude-<profile>.mcp.json") + "\n"
                "```\n\n"
                "Reads are permitted once roles are confirmed. Writes to Jira, Confluence,\n"
-               "SharePoint, Bitbucket, email or Teams are not — those need\n"
+               "SharePoint, Bitbucket, Figma, email or Teams are not — those need\n"
                "`fde approve-publish <run-id> <target>` first, every time.\n\n"
                "Generated: " + ", ".join(written) + "\n", dry, "run")
     if not written:

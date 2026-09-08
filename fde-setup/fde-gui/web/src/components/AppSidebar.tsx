@@ -228,6 +228,10 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
           <Icon name="terminal" className="rail-icon" />
           <span className="rail-label">Active sessions</span>
         </Link>
+        <Link to="/configuration" className="rail-item" current={path.startsWith('/configuration') || path.startsWith('/accounts')}>
+          <Icon name="key" className="rail-icon" />
+          <span className="rail-label">Configuration</span>
+        </Link>
         <Link to="/health" className="rail-item" current={path === '/health'}>
           <Icon name="health" className="rail-icon" />
           <span className="rail-label">System health</span>
