@@ -117,6 +117,7 @@ class Sandbox:
             "FDE_RUNS_DIR": str(self.shared / "runs"),
             "PATH": f"{self.bindir}:{self.shared / 'bin'}:{os.environ['PATH']}",
             "CODEX_LOG": str(self.codex_log),
+            "FDE_AGY_BIN": str(self.tmp / "missing-agy"),
             "AWS_CONFIG_FILE": str(self.aws_config),
             "AWS_SHARED_CREDENTIALS_FILE": str(self.tmp / "aws-credentials"),
         })
@@ -519,6 +520,15 @@ class TestCodexGate(FDETest):
         self.assertIn("--sandbox read-only", calls)
         self.assertNotIn("--approve-for-me", calls)
 
+    def test_read_only_accepts_only_bounded_mcp_config_overrides(self):
+        value = 'mcp_servers.atlassian.url="https://mcp.atlassian.com/v2/mcp"'
+        result = self.sb.ask_codex("--read-only", "--config-override", value, "hello")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"-c {value}", self.sb.codex_calls())
+        refused = self.sb.ask_codex("--read-only", "--config-override",
+                                    'approval_policy="never"', "hello")
+        self.assertNotEqual(refused.returncode, 0)
+
     def test_write_refuses_without_approval(self):
         """7. Codex write mode refuses to start without approval."""
         run_id, task = self._ready()
@@ -710,18 +720,29 @@ class TestBedrock(unittest.TestCase):
             self.assertEqual(b["env"]["AWS_REGION"], "eu-west-1")
             w = json.loads((tmp / ".claude-profiles/work/settings.json").read_text())
             self.assertNotIn("env", w, "AWS settings leaked into a subscription profile")
+            r = subprocess.run([
+                "bash", str(REPO / "shell/claude-profile-new"), "client-bedrock",
+                "--bedrock", "--aws-profile", "client-admin",
+                "--aws-region", "us-west-2",
+            ], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            custom = json.loads(
+                (tmp / ".claude-profiles/client-bedrock/settings.json").read_text())
+            self.assertEqual(custom["env"], {
+                "AWS_PROFILE": "client-admin", "AWS_REGION": "us-west-2"})
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_doctor_reports_disagreement_as_broken(self):
+    def test_doctor_checks_the_profile_selected_in_the_account_registry(self):
         sb = Sandbox()
         try:
-            (sb.profiles / "bedrock" / "settings.json").write_text(json.dumps(
-                {"env": {"AWS_PROFILE": "maxeda", "AWS_REGION": "eu-central-1"}}))
+            agents = json.loads((sb.shared / "config/agents.json").read_text())
+            agents["agents"]["claude_bedrock"]["awsProfile"] = "not-configured"
+            agents["agents"]["claude_bedrock"]["awsRegion"] = "us-east-2"
+            (sb.shared / "config/agents.json").write_text(json.dumps(agents))
             r = sb.fde("doctor")
             self.assertNotEqual(r.returncode, 0)
-            self.assertIn("expected bedrock-dev", r.stdout)
-            self.assertIn("expected eu-west-1", r.stdout)
+            self.assertIn("aws profile 'not-configured' is not configured", r.stdout)
         finally:
             sb.destroy()
 
@@ -739,7 +760,7 @@ class TestBedrock(unittest.TestCase):
 # -- 14. Atlassian -----------------------------------------------------------
 
 class TestAtlassian(FDETest):
-    ENDPOINT = "https://mcp.atlassian.com/v1/mcp/authv2"
+    ENDPOINT = "https://mcp.atlassian.com/v2/mcp"
 
     def test_current_endpoint_over_http(self):
         """14. Atlassian uses the current endpoint."""
@@ -777,6 +798,20 @@ class TestAtlassian(FDETest):
         others = [p.name for p in mcp_dir.glob("claude-*.mcp.json")]
         self.assertEqual(others, ["claude-alt.mcp.json"])
 
+    def test_specialist_invocations_receive_their_run_scoped_mcp_config(self):
+        run_id = self.sb.start_full()
+        self.assertEqual(self.sb.full_roles(run_id, solutioning="claude_alt").returncode, 0)
+        self.sb.advance_to(run_id, "solutioning")
+        task = self.sb.run_dir(run_id) / "tasks/mcp.md"
+        task.write_text("Read the approved source through MCP")
+        result = self.sb.fde("invoke", run_id, "claude_alt", str(task),
+                             "--stage", "solutioning", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocation = json.loads(result.stdout)
+        self.assertIn("--mcp-config", invocation["argv"])
+        self.assertIn(str(self.sb.run_dir(run_id) / "mcp/claude-alt.mcp.json"),
+                      invocation["argv"])
+
     def test_mcp_sync_merges_rather_than_overwrites(self):
         out = self.sb.shared / "fde-toolkit/plugins/fde-core/.mcp.json"
         out.write_text(json.dumps({"mcpServers": {"handmade": {"type": "http",
@@ -787,6 +822,21 @@ class TestAtlassian(FDETest):
         self.assertIn("handmade", cfg["mcpServers"])
         self.assertIn("context7", cfg["mcpServers"])
         self.assertEqual(cfg["_fdeManaged"], ["context7"])
+
+    def test_mcp_sync_uses_antigravity_actual_mcp_command_when_available(self):
+        agy = self.sb.bindir / "agy-test"
+        log = self.sb.tmp / "agy-mcp.log"
+        agy.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$AGY_LOG\"\n")
+        agy.chmod(0o755)
+        env = self.sb.env(FDE_AGY_BIN=str(agy), AGY_LOG=str(log))
+        result = subprocess.run([
+            sys.executable, str(self.sb.shared / "bin/mcp-sync"), "gemini",
+        ], capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mcp add --type http context7 https://mcp.context7.com/mcp",
+                      log.read_text())
+        managed = json.loads((self.sb.shared / "mcp/agy-managed.json").read_text())
+        self.assertEqual(managed["servers"], ["context7"])
 
     def test_mcp_sync_prunes_what_it_no_longer_manages(self):
         out = self.sb.shared / "fde-toolkit/plugins/fde-core/.mcp.json"
@@ -1311,7 +1361,7 @@ class TestStateMachine(FDETest):
         src.write_text(json.dumps(data))
         r = self.sb.fde("doctor")
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("expected https://mcp.atlassian.com/v1/mcp/authv2", r.stdout)
+        self.assertIn("expected https://mcp.atlassian.com/v2/mcp", r.stdout)
 
 
 # -- plans: the pipeline is a slice, not a march -----------------------------

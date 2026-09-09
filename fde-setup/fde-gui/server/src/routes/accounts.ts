@@ -65,6 +65,12 @@ const createAccountBody = z.object({
     .default({}),
 })
 
+const updateAccountBody = z.object({
+  fields: z
+    .record(z.string().regex(FIELD_NAME_PATTERN), z.string().regex(FIELD_VALUE_PATTERN))
+    .refine((value) => Object.keys(value).length > 0, 'at least one setting is required'),
+})
+
 /**
  * A destructive option is opt-in by its exact word, never by coercion.
  *
@@ -213,6 +219,31 @@ export function registerAccountRoutes(
       if (!outcome.ok) return outcome.sent
       services.watcher.touch()
       return await reply.status(201).send(outcome.value)
+    } finally {
+      release()
+    }
+  })
+
+  app.patch<{ Params: { accountId: string } }>('/api/accounts/:accountId', async (request, reply) => {
+    const params = accountParams.safeParse(request.params)
+    if (!params.success) return problem(reply, 400, 'invalid-account', 'That account id is not valid.')
+    const parsed = updateAccountBody.safeParse(request.body)
+    if (!parsed.success) {
+      return problem(reply, 400, 'invalid-body', 'Those account settings cannot be saved.',
+        describeZod(parsed.error))
+    }
+    const release = services.locks.tryAcquire('accounts')
+    if (release === null) return problem(reply, 409, 'busy', 'Accounts are being changed right now.')
+    try {
+      const args = ['accounts', 'update', params.data.accountId, '--json']
+      for (const [key, value] of Object.entries(parsed.data.fields)) {
+        args.push(`--${key.replace(/([A-Z])/g, (m) => `-${m.toLowerCase()}`)}`, value)
+      }
+      const outcome = await callController(config, reply, args, (raw) =>
+        accountDetailSchema.parse(raw))
+      if (!outcome.ok) return outcome.sent
+      services.watcher.touch()
+      return outcome.value
     } finally {
       release()
     }

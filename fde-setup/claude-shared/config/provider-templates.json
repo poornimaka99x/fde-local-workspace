@@ -106,10 +106,14 @@
         "source": "Bedrock access is carried by the AWS credential chain; the profile directory holds only settings.json."
       },
       "provision": {
-        "argv": [
-          "claude-profile-new",
-          "{account}",
-          "--bedrock"
+      "argv": [
+        "claude-profile-new",
+        "{account}",
+        "--bedrock",
+        "--aws-profile",
+        "{awsProfile}",
+        "--aws-region",
+        "{awsRegion}"
         ],
         "note": "Writes AWS_PROFILE and AWS_REGION into the profile's settings.json."
       },
@@ -117,16 +121,18 @@
         {
           "name": "awsProfile",
           "label": "AWS profile",
-          "required": true,
-          "pattern": "^[A-Za-z0-9_.@=+-]{1,64}$",
-          "default": "bedrock-dev"
+        "required": true,
+        "pattern": "^[A-Za-z0-9_.@=+-]{1,64}$",
+        "default": "bedrock-dev",
+        "env": "AWS_PROFILE"
         },
         {
           "name": "awsRegion",
           "label": "AWS region",
-          "required": true,
-          "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$",
-          "default": "eu-west-1"
+        "required": true,
+        "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$",
+        "default": "eu-west-1",
+        "env": "AWS_REGION"
         }
       ],
       "env": {

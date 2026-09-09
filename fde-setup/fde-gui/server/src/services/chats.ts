@@ -102,6 +102,9 @@ export class ChatBusy extends Error {}
 export class ChatNotFound extends Error {}
 export class InvalidAttachment extends Error {}
 
+interface ChatMcpServer { name: string; url: string }
+interface ChatServiceContext { text: string; mcpServers: ChatMcpServer[] }
+
 const SENSITIVE_SEGMENTS = new Set([
   '.ssh', '.aws', '.gnupg', '.kube', '.git', 'keychains', 'mcp',
   '.claude', '.claude-profiles', '.claude-shared', '.codex', '.gemini', '.copilot',
@@ -340,8 +343,8 @@ export class ChatService {
       `<attached-context>\n${parts.join('\n\n')}\n</attached-context>\n\n`
   }
 
-  private async serviceContext(chat: ChatRecord, prompt: string): Promise<string> {
-    if (chat.serviceConnectionIds.length === 0) return ''
+  private async serviceContext(chat: ChatRecord, prompt: string): Promise<ChatServiceContext> {
+    if (chat.serviceConnectionIds.length === 0) return { text: '', mcpServers: [] }
     const args = ['connections', 'context']
     for (const id of chat.serviceConnectionIds) args.push('--connection', id)
     args.push('--json')
@@ -352,18 +355,44 @@ export class ChatService {
         Readable.from([Buffer.from(prompt, 'utf8')]),
         20_000,
       )
-      if (!raw || typeof raw !== 'object') return ''
+      if (!raw || typeof raw !== 'object') return { text: '', mcpServers: [] }
       const value = raw as Record<string, unknown>
       const context = typeof value.context === 'string' ? value.context : ''
       const warnings = Array.isArray(value.warnings)
         ? value.warnings.filter((item): item is string => typeof item === 'string').slice(0, 12)
         : []
-      return `${context}${warnings.length ? `Service access notes:\n${warnings.map((item) => `- ${item}`).join('\n')}\n\n` : ''}`
+      const mcpServers = Array.isArray(value.mcpServers)
+        ? value.mcpServers.flatMap((item) => {
+          if (!item || typeof item !== 'object') return []
+          const server = item as Record<string, unknown>
+          return typeof server.name === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(server.name) &&
+            typeof server.url === 'string' && /^https:\/\/[A-Za-z0-9.-]+(?:\/[^\s]*)?$/.test(server.url)
+            ? [{ name: server.name, url: server.url }]
+            : []
+        })
+        : []
+      return {
+        text: `${context}${warnings.length ? `Service access notes:\n${warnings.map((item) => `- ${item}`).join('\n')}\n\n` : ''}`,
+        mcpServers,
+      }
     } catch {
       // Provider/controller output can contain private response data. Keep the
       // failure useful but fixed, and still let the conversation continue.
-      return 'Service access note: the selected connection could not read this message\'s linked content. No credential was shared with the chat provider.\n\n'
+      return {
+        text: 'Service access note: the selected connection could not read this message\'s linked content. No credential was shared with the chat provider.\n\n',
+        mcpServers: [],
+      }
     }
+  }
+
+  private writeChatMcpConfig(chatId: string, servers: ChatMcpServer[]): string | null {
+    if (servers.length === 0) return null
+    const target = path.join(this.config.chatsRoot, `${chatId}.mcp.json`)
+    const mcpServers = Object.fromEntries(
+      servers.map((server) => [server.name, { type: 'http', url: server.url }]),
+    )
+    writeFileSync(target, `${JSON.stringify({ mcpServers }, null, 2)}\n`, { mode: 0o600 })
+    return target
   }
 
   async send(chatId: string, prompt: string): Promise<ChatRecord> {
@@ -386,11 +415,11 @@ export class ChatService {
 
     // Keep the common no-service path to one asynchronous boundary. Besides
     // being cheaper, this preserves prompt-launch timing for stop/delete.
-    const serviceContext = chat.serviceConnectionIds.length > 0
+    const service = chat.serviceConnectionIds.length > 0
       ? await this.serviceContext(chat, prompt)
-      : ''
+      : { text: '', mcpServers: [] }
     const attachmentContext = await this.attachmentContext(chat.attachments)
-    const outgoing = `${serviceContext}${attachmentContext}${prompt}`
+    const outgoing = `${service.text}${attachmentContext}${prompt}`
 
     const isCodex = chat.provider === 'codex'
     const isGemini = chat.provider === 'gemini'
@@ -409,6 +438,9 @@ export class ChatService {
         : ['exec', 'resume', ...safety, '-c', 'sandbox_mode="read-only"']
       if (chat.model !== 'default') args.push('--model', chat.model)
       if (chat.effort !== 'auto') args.push('-c', `model_reasoning_effort="${chat.effort}"`)
+      for (const server of service.mcpServers) {
+        args.push('-c', `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`)
+      }
       if (!firstTurn) args.push(chat.claudeSessionId)
       args.push(outgoing)
     } else if (isGemini) {
@@ -436,12 +468,14 @@ export class ChatService {
         '--output-format', 'json',
         '--permission-mode', 'plan',
         '--permission-prompts', 'none',
-        '--tools', '',
+        '--tools', service.mcpServers.length > 0 ? 'default' : '',
         '--restricted',
         '--strict-mcp-config',
         '--no-chrome',
         '--disable-slash-commands',
       ]
+      const mcpConfig = this.writeChatMcpConfig(chat.chatId, service.mcpServers)
+      if (mcpConfig !== null) args.push('--mcp-config', mcpConfig)
       if (firstTurn) args.push('--session-id', chat.claudeSessionId)
       else args.push('--resume', chat.claudeSessionId)
       if (chat.model !== 'default') args.push('--model', chat.model)

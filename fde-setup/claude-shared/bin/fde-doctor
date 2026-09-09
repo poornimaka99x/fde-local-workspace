@@ -182,14 +182,11 @@ def phase1():
         if atlassian:
             ok("atlassian entry present in mcp-servers.json")
             endpoint = atlassian.get("url", "")
-            if endpoint == "https://mcp.atlassian.com/v1/mcp/authv2":
-                ok("Atlassian MCP endpoint verified", "OAuth 2.1 interactive endpoint")
-            elif endpoint == "https://mcp.atlassian.com/v1/mcp":
-                ok("Atlassian MCP endpoint verified", "API-token endpoint")
+            if endpoint == "https://mcp.atlassian.com/v2/mcp":
+                ok("Atlassian MCP endpoint verified", "Rovo MCP v2 OAuth endpoint")
             else:
                 warn(f"unrecognised Atlassian MCP endpoint: {endpoint or '(missing)'}",
-                     "use https://mcp.atlassian.com/v1/mcp/authv2 for interactive OAuth, "
-                     "or https://mcp.atlassian.com/v1/mcp for API-token authentication")
+                     "use https://mcp.atlassian.com/v2/mcp for interactive OAuth")
         else:
             warn("no atlassian entry in mcp-servers.json",
                  "add one and run mcp-sync, or work through the confluence CLI only")

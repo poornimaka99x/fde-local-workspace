@@ -20,8 +20,10 @@ See `docs/FDE-DESIGN-PANEL.md`.
 
 General chats are deliberately separate from FDE runs. A chat stores its own
 metadata and messages under `~/.claude-shared/chats`, resumes one opaque Claude
-conversation, and starts Claude in restricted print mode with all tools disabled,
-permission prompts denied and MCP configuration ignored.
+conversation, and starts Claude in restricted plan mode with permission prompts
+denied. Tools remain disabled unless the user explicitly selects an OAuth MCP
+connection for that chat; selected Rovo/Figma servers are then loaded only for
+that chat. Codex chats receive the same explicit MCP scope in a read-only sandbox.
 Account status comes from `claude auth status`; the Login action opens an
 isolated `claude auth login` terminal for only the selected profile. The GUI
 never receives a password, OAuth token or credential file.
@@ -49,6 +51,9 @@ REST connections can resolve matching Jira, Confluence, GitHub and Bitbucket
 links in a message; tokens stay in the controller and are never written to the
 chat or passed to the AI CLI. Atlassian Rovo is configured separately because
 it uses client-owned OAuth/MCP rather than the Atlassian REST email/token pair.
+Claude and Codex chats load selected OAuth MCP endpoints per chat; Antigravity's
+current CLI has no per-invocation MCP-config option, so Gemini chats do not widen
+machine-global MCP settings.
 
 Approving is still yours. Assigning roles, approving a plan, granting a Codex
 write, deploying and publishing all happen in that conversation, typed by you —

@@ -249,6 +249,75 @@ function AddAccountForm({
   )
 }
 
+function AccountSettingsForm({
+  account,
+  template,
+  onChanged,
+}: {
+  account: ProviderAccount
+  template: ProviderTemplate
+  onChanged: () => void
+}): JSX.Element {
+  const initial = Object.fromEntries(
+    template.fields.map((field) => [field.name, account.fields[field.name] ?? field.default ?? '']),
+  )
+  const [fields, setFields] = useState<Record<string, string>>(initial)
+  const [error, setError] = useState<ApiError | null>(null)
+  const [busy, setBusy] = useState(false)
+  const dirty = template.fields.some(
+    (field) => fields[field.name] !== (account.fields[field.name] ?? field.default ?? ''),
+  )
+
+  const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    setError(null)
+    setBusy(true)
+    try {
+      const supplied = Object.fromEntries(
+        template.fields.map((field) => [field.name, (fields[field.name] ?? '').trim()]),
+      )
+      await apiSend<AccountDetailResponse>(
+        `/api/accounts/${encodeURIComponent(account.id)}`,
+        'PATCH',
+        { fields: supplied },
+      )
+      onChanged()
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not save the settings.'),
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="account-settings" onSubmit={(event) => void submit(event)}>
+      <div className="account-settings-head">
+        <strong>Provider settings</strong>
+        <span className="muted">Used for sign-in checks and every agent launch.</span>
+      </div>
+      {error ? <ErrorState error={error} /> : null}
+      <div className="account-settings-grid">
+        {template.fields.map((field) => (
+          <label key={field.name}>
+            <span>{field.label}</span>
+            <input
+              value={fields[field.name] ?? ''}
+              required={field.required}
+              onChange={(event) =>
+                setFields((current) => ({ ...current, [field.name]: event.target.value }))}
+            />
+          </label>
+        ))}
+        <button className="action" type="submit" disabled={busy || !dirty}>
+          {busy ? 'Saving…' : 'Save settings'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 function AccountCard({
   account,
   template,
@@ -310,6 +379,14 @@ function AccountCard({
           </>
         )}
       </dl>
+      {template && template.fields.length > 0 ? (
+        <AccountSettingsForm
+          key={`${account.id}:${JSON.stringify(account.fields)}`}
+          account={account}
+          template={template}
+          onChanged={onChanged}
+        />
+      ) : null}
       {error ? <ErrorState error={error} /> : null}
       {signingIn ? (
         <AccountLoginPanel

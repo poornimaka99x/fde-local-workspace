@@ -296,6 +296,24 @@ p.lede { color: var(--text-muted); margin: 0 0 18px; max-width: 66ch; }
 .account-card > p { margin-block: 0; }
 .account-card form.stack { display: grid; align-items: stretch; flex-wrap: nowrap; gap: 9px; }
 .account-card form.stack p { margin: 0; }
+.account-settings {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.account-settings-head { display: grid; gap: 2px; }
+.account-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+.account-settings-grid label { display: grid; gap: 6px; min-width: 0; }
+.account-settings-grid label > span { color: var(--text-subtle); font-size: 12px; }
+.account-settings-grid input { width: 100%; }
 .connection-add {
   grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end;
 }
@@ -317,7 +335,7 @@ p.lede { color: var(--text-muted); margin: 0 0 18px; max-width: 66ch; }
 @media (max-width: 760px) {
   .settings-tabs { gap: 16px; }
   .settings-tabs button { min-width: 0; flex: 1 1 0; }
-  .settings-section-head, .settings-hero, .settings-form-grid,
+  .settings-section-head, .settings-hero, .settings-form-grid, .account-settings-grid,
   .connection-add, .account-grid { grid-template-columns: 1fr; }
   .settings-form-head, .settings-form-actions { align-items: stretch; flex-direction: column; }
   .settings-form-head > p { text-align: left; }

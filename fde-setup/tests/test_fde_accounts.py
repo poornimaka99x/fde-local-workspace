@@ -204,6 +204,36 @@ class TestAdd(AccountsBase):
         self.assertEqual(answer["account"]["fields"],
                          {"awsProfile": "bedrock-dev", "awsRegion": "eu-west-1"})
 
+    def test_legacy_bedrock_account_gets_effective_defaults_and_launch_env(self):
+        listed = self.json_fde("accounts", "list")
+        account = next(item for item in listed["accounts"]
+                       if item["id"] == "claude_bedrock")
+        self.assertEqual(account["fields"],
+                         {"awsProfile": "bedrock-dev", "awsRegion": "eu-west-1"})
+        launched = self.json_fde("accounts", "launch", "claude_bedrock")
+        self.assertEqual(launched["launch"]["env"]["AWS_PROFILE"], "bedrock-dev")
+        self.assertEqual(launched["launch"]["env"]["AWS_REGION"], "eu-west-1")
+
+    def test_bedrock_profile_and_region_can_be_updated_without_editing_registry(self):
+        answer = self.json_fde("accounts", "update", "claude_bedrock",
+                               "--aws-profile", "sandbox-admin",
+                               "--aws-region", "us-east-2")
+        self.assertEqual(answer["account"]["fields"], {
+            "awsProfile": "sandbox-admin", "awsRegion": "us-east-2"})
+        launched = self.json_fde("accounts", "launch", "claude_bedrock")
+        self.assertEqual(launched["launch"]["env"]["AWS_PROFILE"], "sandbox-admin")
+        self.assertEqual(launched["launch"]["env"]["AWS_REGION"], "us-east-2")
+        settings = json.loads((self.profiles / "bedrock/settings.json").read_text())
+        self.assertEqual(settings["env"], {
+            "AWS_PROFILE": "sandbox-admin", "AWS_REGION": "us-east-2"})
+
+    def test_invalid_bedrock_update_is_refused_without_changing_the_account(self):
+        before = self.registry()["agents"]["claude_bedrock"]["awsRegion"]
+        answer = self.json_fde("accounts", "update", "claude_bedrock",
+                               "--aws-region", "not-a-region", expected=2)
+        self.assertEqual(answer["error"]["code"], "field_invalid")
+        self.assertEqual(self.registry()["agents"]["claude_bedrock"]["awsRegion"], before)
+
     def test_a_name_that_reduces_to_nothing_usable_is_refused(self):
         for name in ("!!!", "---", " "):
             with self.subTest(name=name):

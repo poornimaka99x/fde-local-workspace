@@ -153,7 +153,7 @@ export function ChatDetail({ chatId }: { chatId: string }): JSX.Element {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Service access</h3>
-        <p className="muted">Read-only and deny-by-default. FDE resolves linked content without sharing the connection credential with {assistantName}.</p>
+        <p className="muted">Deny-by-default. REST links are resolved without sharing their token with {assistantName}; selected Rovo/Figma OAuth servers are scoped to Claude and Codex chats through MCP.</p>
         {serviceError ? <ErrorState error={serviceError} /> : null}
         {(connections.data?.connections ?? []).filter((connection) => connection.configured).length === 0 ?
           <p className="muted" style={{ marginBottom: 0 }}>No configured connections are available.</p> :

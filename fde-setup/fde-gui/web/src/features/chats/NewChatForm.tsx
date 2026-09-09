@@ -86,7 +86,7 @@ export function NewChatForm(): JSX.Element {
             </div>}
         </fieldset>
         <p className="banner warn">
-          Claude chats have tools disabled. Codex chats run read-only without approvals. Gemini chats run Antigravity in plan mode and a restricted sandbox. Selected REST services resolve only links you include in a message; Rovo and Figma OAuth remain separate MCP connections.
+          Claude tools stay disabled unless you select Rovo or Figma; those OAuth MCP servers are then scoped to this chat. Codex chats run read-only and receive the same selected MCP scope. Gemini chats run Antigravity in plan mode and a restricted sandbox, but its current CLI cannot load per-chat MCP configuration. REST services resolve only links included in your message.
         </p>
         <div className="stack">
           <button className="action primary" type="submit" disabled={saving || accountId === ''}>{saving ? 'Creating…' : 'Create chat'}</button>

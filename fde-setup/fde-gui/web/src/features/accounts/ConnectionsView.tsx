@@ -45,7 +45,7 @@ function ConnectionCard({ connection, provider, reload }: {
     {error ? <ErrorState error={error} /> : null}
     {connection.oauth ? <div className="banner">
       {connection.provider === 'atlassian-rovo' ? <>
-        Rovo uses its own Atlassian OAuth sign-in at <code>https://mcp.atlassian.com/v1/mcp/authv2</code>. It is separate from the Atlassian REST API token.
+        Rovo uses its own Atlassian OAuth sign-in at <code>https://mcp.atlassian.com/v2/mcp</code>. It is separate from the Atlassian REST API token.
       </> : <>
         Figma uses OAuth in the assigned MCP client at <code>https://mcp.figma.com/mcp</code>.
       </>} FDE never receives that OAuth token.

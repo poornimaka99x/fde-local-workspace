@@ -10,9 +10,9 @@
     },
     "atlassian": {
       "transport": "http",
-      "url": "https://mcp.atlassian.com/v1/mcp/authv2",
+      "url": "https://mcp.atlassian.com/v2/mcp",
       "targets": ["role:orchestrator"],
-      "note": "Jira, Confluence and — under an API token with the right scopes and the site linked to your organisation — Bitbucket Cloud. Current Rovo MCP endpoint, HTTP transport; the older /v1/sse entry is legacy. Deliberately not global: there is no permanently privileged orchestrator account, so this reaches whichever identity the user made orchestrator for the run, and only after roles are confirmed. Reads are allowed then; Jira/Confluence/Bitbucket writes still need fde approve-publish. Local git stays the primary interface to Bitbucket repositories."
+      "note": "Jira and Confluence through Atlassian Rovo MCP v2. Deliberately not global: there is no permanently privileged orchestrator account, so this reaches whichever identity the user made orchestrator for the run, and only after roles are confirmed. Reads are allowed then; writes still need fde approve-publish. Bitbucket remains a separate REST or local-git connection."
     },
     "figma": {
       "transport": "http",

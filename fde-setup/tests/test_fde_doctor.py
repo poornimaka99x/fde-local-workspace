@@ -43,7 +43,7 @@ class AtlassianDoctorTest(unittest.TestCase):
             "servers": {
                 "atlassian": {
                     "transport": "http",
-                    "url": "https://mcp.atlassian.com/v1/mcp/authv2",
+                    "url": "https://mcp.atlassian.com/v2/mcp",
                     "targets": targets,
                 }
             }

@@ -86,11 +86,10 @@ cc-which                    what exists, what's active
 fde doctor                  what is configured, what is broken
 ```
 
-**Bedrock has one source of truth:** `~/.claude-profiles/bedrock/settings.json`,
-carrying `AWS_PROFILE=bedrock-dev` and `AWS_REGION=eu-west-1`. The `cc-bedrock`
-wrapper sets the provider flag and nothing else. It used to export AWS variables
-from the shell, which silently overrode the profile with an AWS profile that did
-not exist — that is why the wrapper is now three lines.
+**Bedrock account settings live in the FDE account registry.** Choose the AWS
+profile and region when adding the account, or change them later under
+Configuration → AI accounts. FDE exports those values for verification and every
+launch; the profile's `settings.json` retains a compatible copy for direct CLI use.
 
 ## Running a piece of work
 
@@ -225,6 +224,10 @@ Atlassian is
 role-scoped for exactly this reason: there is no permanently privileged
 orchestrator account, because there is no permanent orchestrator.
 
+Claude orchestrators and Claude/Codex specialist invocations load the generated
+run-scoped MCP configuration. Antigravity currently exposes only machine-global
+MCP management, so FDE does not temporarily widen it with role-scoped servers.
+
 Merging is real. Servers this tool manages are listed in `_fdeManaged`, so a
 server you added by hand survives an update, and one that is no longer targeted
 is removed rather than left behind.
@@ -287,7 +290,7 @@ python-docx; `fde doctor` says which you have.
 
 ## Atlassian
 
-The Rovo MCP endpoint is `https://mcp.atlassian.com/v1/mcp/authv2` over HTTP; the
+The Rovo MCP endpoint is `https://mcp.atlassian.com/v2/mcp` over HTTP; the
 older `/v1/sse` entry is legacy. Bitbucket Cloud is supported under an API token
 with the right scopes and the site linked to your organisation — but **local git
 stays the primary interface to repositories**. The connector is for work items

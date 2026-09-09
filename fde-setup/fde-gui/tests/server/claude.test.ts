@@ -219,6 +219,7 @@ describe('Claude accounts and general chats', () => {
       schemaVersion: 1,
       context: '<service-context>\nTitle: Internal FAQ\nSafe page text\n</service-context>\n\n',
       warnings: [],
+      mcpServers: [],
     })
     const created = await harness.app.inject({
       method: 'POST', url: '/api/chats', headers: mutating(harness.token), payload: {
@@ -243,6 +244,38 @@ describe('Claude accounts and general chats', () => {
     })
     expect(revoked.statusCode).toBe(200)
     expect(revoked.json().chat.serviceConnectionIds).toEqual([])
+  })
+
+  it('loads explicitly selected OAuth MCP servers into a Claude chat only', async () => {
+    harness.fixture('connections-context', {
+      schemaVersion: 1,
+      context: '',
+      warnings: [],
+      mcpServers: [{ name: 'atlassian-rovo-work', url: 'https://mcp.atlassian.com/v2/mcp' }],
+    })
+    const calls: Parameters<ChatCommandRunner>[0][] = []
+    const runner: ChatCommandRunner = (options) => {
+      calls.push(options)
+      return {
+        completed: Promise.resolve({ code: 0, stdout: JSON.stringify({ result: 'MCP ready' }) }),
+        kill: () => undefined,
+      }
+    }
+    const chats = new ChatService(harness.config, new AccountService(harness.config), runner)
+    const chat = chats.create({
+      accountId: 'work', model: 'sonnet', effort: 'high', cwd: harness.root,
+      serviceConnectionIds: ['atlassian-rovo-work'],
+    })
+    await chats.send(chat.chatId, 'Read my Jira issue')
+
+    expect(calls[0]?.args).toContain('--mcp-config')
+    expect(calls[0]?.args).toEqual(expect.arrayContaining(['--tools', 'default']))
+    const configPath = calls[0]?.args[(calls[0]?.args.indexOf('--mcp-config') ?? -1) + 1] as string
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+      mcpServers: {
+        'atlassian-rovo-work': { type: 'http', url: 'https://mcp.atlassian.com/v2/mcp' },
+      },
+    })
   })
 
   it('rejects unknown or unconfigured service access at chat creation', async () => {

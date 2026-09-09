@@ -56,22 +56,18 @@ contexts, intake, run history, credentials and profile settings alone.
 
 ## Phase 1 — Bedrock, properly (10 min)
 
-There is one source of truth: `~/.claude-profiles/bedrock/settings.json`.
-
-```json
-{ "env": { "AWS_PROFILE": "bedrock-dev", "AWS_REGION": "eu-west-1" } }
-```
-
-`cc-bedrock` sets `CLAUDE_CODE_USE_BEDROCK=1` and nothing else. If you need a
-different account or region, change that file — not the shell, not `env.sh`.
+Choose the AWS profile and region in Configuration → AI accounts when adding or
+editing the Claude on Bedrock account. The controller validates and exports both
+values for verification and every launch; no hand edit of `agents.json`, the
+shell, or `env.sh` is needed.
 
 ```bash
 aws configure list-profiles | grep bedrock-dev
 fde doctor | grep -i bedrock
 ```
 
-`fde doctor` fails if the profile settings and the wrapper disagree, if the AWS
-profile is not configured, or if the region is unset. It prints no credentials.
+`fde accounts verify claude_bedrock` asks AWS STS using the selected profile and
+region. It prints no credentials.
 
 **Check:** `cc-bedrock` starts and the session banner names Bedrock, eu-west-1.
 
@@ -97,7 +93,7 @@ If this fails, fix it before going further — a REST failure is a credentials
 problem you can debug in minutes.
 
 **2.3 The MCP server.** The endpoint is
-`https://mcp.atlassian.com/v1/mcp/authv2` over HTTP. It is deliberately **not**
+`https://mcp.atlassian.com/v2/mcp` over HTTP. It is deliberately **not**
 in anyone's global config: it is role-scoped, so it reaches whichever identity
 you make orchestrator for a run, written by `mcp-sync --run <run-id>` when you
 approve the combined plan and roles. There is no permanently privileged account

@@ -98,6 +98,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FDE="$here/fde"; [[ -x "$FDE" ]] || FDE="$(command -v fde || true)"
 
 mode=""; run=""; stage=""; task_file=""; prompt=""; model=""; effort=""
+config_options=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -108,6 +109,11 @@ while [[ $# -gt 0 ]]; do
     --task-file) task_file="${2:-}"; shift 2 ;;
     --model)     model="${2:-}"; shift 2 ;;
     --effort)    effort="${2:-}"; shift 2 ;;
+    --config-override)
+      value="${2:-}"
+      [[ "$value" =~ ^mcp_servers\.[A-Za-z0-9_-]{1,64}\.(url|command|args|bearer_token_env_var|env\.[A-Za-z_][A-Za-z0-9_]*)= ]] ||
+        die "refusing an invalid MCP config override"
+      config_options+=(-c "$value"); shift 2 ;;
     --yolo|--dangerously-bypass-approvals-and-sandbox|--sandbox) # fde-safety-exempt: refusal, not an invocation
       die "refusing: '$1' is not available through this toolkit. Sandbox and approval
             policy are decided here, not by the caller." ;;
@@ -152,6 +158,7 @@ if [[ "$mode" == "read" ]]; then
     --sandbox read-only \
     --skip-git-repo-check \
     ${model_options[@]+"${model_options[@]}"} \
+    ${config_options[@]+"${config_options[@]}"} \
     "$(compose_prompt "$prompt")"
 fi
 
@@ -200,4 +207,5 @@ exec codex exec \
   --sandbox workspace-write \
   --skip-git-repo-check \
   ${model_options[@]+"${model_options[@]}"} \
+  ${config_options[@]+"${config_options[@]}"} \
   "$(cat "$task_file")"

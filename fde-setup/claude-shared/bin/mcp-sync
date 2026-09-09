@@ -35,6 +35,8 @@ import argparse
 import json
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 
 HOME = pathlib.Path(os.environ.get("HOME", pathlib.Path.home()))
@@ -201,23 +203,59 @@ def sync_global(servers, only, dry):
         wrote += 1
 
     if not only or "gemini" in only:
-        out = HOME / ".gemini/settings.json"
-        if not out.parent.exists():
-            print("  skip   gemini   (not installed — no ~/.gemini)")
-        else:
-            sel = for_target(servers, "gemini")
-            cfg = read_json(out)
-            cfg = merge_servers(cfg, "mcpServers", render_gemini(sel), dry)
-            ctx = cfg.setdefault("context", {})
-            names = ctx.get("fileName") or []
-            if isinstance(names, str):
-                names = [names]
-            for n in ("AGENTS.md", "GEMINI.md"):
-                if n not in names:
-                    names.append(n)
-            ctx["fileName"] = names
-            commit(out, cfg, dry, "gemini")
+        agy = shutil.which(os.environ.get("FDE_AGY_BIN", "agy"))
+        if agy:
+            selected = for_target(servers, "gemini")
+            state_path = SHARED / "mcp" / "agy-managed.json"
+            previous = set(read_json(state_path, {"servers": []}).get("servers", []))
+            manageable = {
+                name: server for name, server in selected.items()
+                if not server.get("headers") and not server.get("env")
+            }
+            skipped = sorted(set(selected) - set(manageable))
+            for name in skipped:
+                print(f"  skip   gemini   {name} carries headers/env; refusing to put credentials in argv")
+            if dry:
+                for name in sorted(previous - set(manageable)):
+                    print(f"  would remove gemini   {name}")
+                for name in sorted(manageable):
+                    print(f"  would write  gemini   {name} through agy mcp")
+            else:
+                for name in sorted(previous - set(manageable)):
+                    subprocess.run([agy, "mcp", "remove", name], capture_output=True, text=True)
+                installed = []
+                for name, server in sorted(manageable.items()):
+                    if is_http(server):
+                        argv = [agy, "mcp", "add", "--type", "http", name, server["url"]]
+                    else:
+                        argv = [agy, "mcp", "add", name, server["command"],
+                                *[str(value) for value in server.get("args", [])]]
+                    result = subprocess.run(argv, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        installed.append(name)
+                        print(f"  wrote  gemini   {name} through agy mcp")
+                    else:
+                        print(f"  skip   gemini   agy refused {name}: exit {result.returncode}")
+                commit(state_path, {"servers": installed}, False, "gemini")
             wrote += 1
+        else:
+            out = HOME / ".gemini/settings.json"
+            if not out.parent.exists():
+                print("  skip   gemini   (neither agy nor legacy ~/.gemini is installed)")
+            else:
+                sel = for_target(servers, "gemini")
+                cfg = read_json(out)
+                cfg = merge_servers(cfg, "mcpServers", render_gemini(sel), dry)
+                ctx = cfg.setdefault("context", {})
+                names = ctx.get("fileName") or []
+                if isinstance(names, str):
+                    names = [names]
+                for n in ("AGENTS.md", "GEMINI.md"):
+                    if n not in names:
+                        names.append(n)
+                ctx["fileName"] = names
+                commit(out, cfg, dry, "gemini")
+                wrote += 1
 
     if not only or "codex" in only:
         out = HOME / ".codex/config.toml"

@@ -30,15 +30,10 @@ cc-msc()  { _claude_profile msc     claude "$@"; }
 cc-alt()  { _claude_profile alt     claude "$@"; }
 
 # --- Bedrock profile --------------------------------------------------------
-# One source of truth: ~/.claude-profiles/bedrock/settings.json, which carries
-#     env.AWS_PROFILE = bedrock-dev
-#     env.AWS_REGION  = eu-west-1
-# and whatever model pins /setup-bedrock wrote. This wrapper deliberately sets
-# nothing but the provider flag. It used to export AWS_PROFILE and AWS_REGION
-# from MAXEDA_* shell variables, which silently overrode the profile's own
-# settings with a `maxeda` AWS profile that does not exist — a wrong region and
-# a missing profile, discovered only when a long run failed to authenticate.
-# If you need to change the account or region, change settings.json.
+# Direct shell use reads AWS values from this profile's settings.json. FDE-run
+# launches export the validated profile and region selected for the account in
+# the Configuration panel. This wrapper deliberately sets nothing but the
+# provider flag, so stale shell variables cannot override the selected account.
 cc-bedrock() {
   _claude_profile bedrock env \
     CLAUDE_CODE_USE_BEDROCK=1 \

@@ -64,6 +64,16 @@ class Connections(unittest.TestCase):
         refused = self.fde("set-secret", "atlassian-rovo-rovo", stdin="not-a-real-token", code=2)
         self.assertEqual(refused["error"]["code"], "oauth_connection")
 
+    def test_selected_oauth_connections_return_bounded_mcp_configuration(self):
+        self.fde("add", "--provider", "atlassian-rovo", "--name", "Rovo")
+        self.fde("add", "--provider", "figma", "--name", "Design")
+        answer = self.fde("context", "--connection", "atlassian-rovo-rovo",
+                          "--connection", "figma-design", stdin="Use the configured tools")
+        self.assertEqual(answer["mcpServers"], [
+            {"name": "atlassian-rovo-rovo", "url": "https://mcp.atlassian.com/v2/mcp"},
+            {"name": "figma-design", "url": "https://mcp.figma.com/mcp"},
+        ])
+
     def test_chat_context_requires_explicit_connection_and_never_emits_token(self):
         self.fde("add", "--provider", "github", "--name", "Work")
         secret = "ghp_unmistakable_secret_value"

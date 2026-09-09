@@ -68,6 +68,7 @@ describe('AI accounts', () => {
     harness.fixture('accounts-providers', { schemaVersion: 1, providers: [provider] })
     harness.fixture('accounts-list', { schemaVersion: 1, accounts: [codexAccount] })
     harness.fixture('accounts-add', { schemaVersion: 1, account: codexAccount })
+    harness.fixture('accounts-update-codex_work', { schemaVersion: 1, account: codexAccount })
     harness.fixture('accounts-login-codex_work', {
       schemaVersion: 1,
       login: {
@@ -146,6 +147,20 @@ describe('AI accounts', () => {
     const call = harness.calls().find((c) => c[0] === 'accounts' && c[1] === 'add')
     expect(call).toContain('--aws-profile')
     expect(call).toContain('bedrock-dev')
+  })
+
+  it('updates provider settings through the controller', async () => {
+    const response = await harness.app.inject({
+      method: 'PATCH',
+      url: '/api/accounts/codex_work',
+      headers: mutating(harness.token),
+      payload: { fields: { awsProfile: 'sandbox-admin', awsRegion: 'us-east-2' } },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(harness.calls()).toContainEqual([
+      'accounts', 'update', 'codex_work', '--json',
+      '--aws-profile', 'sandbox-admin', '--aws-region', 'us-east-2',
+    ])
   })
 
   it('rejects a field value that could carry an option with it', async () => {

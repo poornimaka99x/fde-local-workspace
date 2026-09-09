@@ -170,6 +170,11 @@ describe('AI accounts panel', () => {
       if (url.endsWith('/secret')) {
         return jsonResponse({ schemaVersion: 1, account: accounts[0] })
       }
+      if (url.startsWith('/api/accounts/') && method === 'PATCH') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { fields: Record<string, string> } : { fields: {} }
+        accounts = accounts.map((item) => url.endsWith(item.id) ? { ...item, fields: body.fields } : item)
+        return jsonResponse({ schemaVersion: 1, account: accounts[0] })
+      }
       if (url.startsWith('/api/accounts/') && method === 'DELETE') {
         return jsonResponse({
           schemaVersion: 1,
@@ -290,6 +295,30 @@ describe('AI accounts panel', () => {
     const card = (await screen.findByRole('heading', { name: 'Claude on Bedrock: prod' })).closest('article')
     expect(within(card as HTMLElement).queryByRole('button', { name: /Sign in/ })).toBeNull()
     expect(within(card as HTMLElement).getByText(/no interactive sign-in/)).toBeInTheDocument()
+  })
+
+  it('lets an existing Bedrock account change AWS profile and region', async () => {
+    accounts = [account({
+      id: 'claude_bedrock', label: 'Claude on Bedrock', provider: 'claude-bedrock',
+      providerLabel: 'Claude on Bedrock', loginMode: 'none',
+      fields: { awsProfile: 'bedrock-dev', awsRegion: 'eu-west-1' },
+    })]
+    render(<AccountsView />)
+    const card = (await screen.findByRole('heading', { name: 'Claude on Bedrock' })).closest('article')
+    expect(card).not.toBeNull()
+    const profile = within(card as HTMLElement).getByLabelText('AWS profile')
+    const region = within(card as HTMLElement).getByLabelText('AWS region')
+    await userEvent.clear(profile)
+    await userEvent.type(profile, 'sandbox-admin')
+    await userEvent.clear(region)
+    await userEvent.type(region, 'us-east-2')
+    await userEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Save settings' }))
+    await waitFor(() => {
+      expect(sent).toContainEqual({
+        url: '/api/accounts/claude_bedrock', method: 'PATCH',
+        body: { fields: { awsProfile: 'sandbox-admin', awsRegion: 'us-east-2' } },
+      })
+    })
   })
 
   it('posts a pasted secret once and keeps it out of the rendered page', async () => {
