@@ -97,6 +97,8 @@
       "label": "Claude Code: Bedrock",
       "kind": "claude",
       "profile": "bedrock",
+      "awsProfile": "bedrock-dev",
+      "awsRegion": "eu-west-1",
       "capabilities": [
         "orchestration",
         "product-management",
