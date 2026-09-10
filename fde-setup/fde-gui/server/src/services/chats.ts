@@ -111,6 +111,17 @@ interface ChatMcpServer {
   headerName?: string
   oauthClientId?: string
   oauthResource?: string
+  /**
+   * What the server's own `tools/list` said, recorded when the connection was
+   * verified — not what its description claims. `readOnly` means every tool it
+   * offers is annotated read-only; `allowedTools` is the subset that is.
+   *
+   * Codex can be given that subset (`enabled_tools`), so a partly-writing server
+   * is still usable there. Claude and Gemini chats have no per-tool scope to
+   * hand them, so they get a connection only when the whole tool set reads.
+   */
+  readOnly?: boolean
+  allowedTools?: string[]
 }
 interface ChatServiceContext { text: string; mcpServers: ChatMcpServer[]; env: NodeJS.ProcessEnv }
 
@@ -383,15 +394,31 @@ export class ChatService {
             ? server.secretEnvVar : undefined
           const headerName = typeof server.headerName === 'string' && /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/.test(server.headerName)
             ? server.headerName : undefined
+          const allowedTools = Array.isArray(server.allowedTools)
+            ? server.allowedTools
+              .filter((tool): tool is string => typeof tool === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(tool))
+              .slice(0, 200)
+            : undefined
           return [{ name: server.name, url: server.url, authMethod, secretEnvVar, headerName,
+            readOnly: server.readOnly === true, allowedTools,
             oauthClientId: typeof server.oauthClientId === 'string' ? server.oauthClientId.slice(0, 300) : undefined,
             oauthResource: typeof server.oauthResource === 'string' && this.safeMcpUrl(server.oauthResource) ? server.oauthResource : undefined }]
         })
         : []
-      const env = await this.mcpEnvironment(chat.serviceConnectionIds, mcpServers)
+      // A chat is a conversation, not a governed run: there is no plan, no role
+      // and no approval behind it. So a connection is offered only when this
+      // provider can actually be told which of its tools may be called — and
+      // saying "read-only" in the prompt is not that.
+      const scoped: ChatMcpServer[] = []
+      for (const server of mcpServers) {
+        const decision = this.scopeForChat(server, chat.provider)
+        if (decision.allowed) scoped.push(decision.server)
+        else warnings.push(decision.reason)
+      }
+      const env = await this.mcpEnvironment(chat.serviceConnectionIds, scoped)
       return {
         text: `${context}${warnings.length ? `Service access notes:\n${warnings.map((item) => `- ${item}`).join('\n')}\n\n` : ''}`,
-        mcpServers,
+        mcpServers: scoped,
         env,
       }
     } catch {
@@ -403,6 +430,30 @@ export class ChatService {
         env: {},
       }
     }
+  }
+
+  /**
+   * Whether this connection may join a general chat on this provider, and why not.
+   *
+   * Codex accepts an `enabled_tools` allowlist per server, so a server whose
+   * verified tool list has a read-only subset can be admitted with exactly that
+   * subset. Claude and Gemini have no per-chat tool scope to hand, so they get a
+   * connection only when every tool it offers reads. An unverified server is
+   * never admitted anywhere: FDE cannot describe as read-only something it has
+   * not asked.
+   */
+  private scopeForChat(server: ChatMcpServer, provider: ChatProvider):
+  { allowed: true, server: ChatMcpServer } | { allowed: false, reason: string } {
+    const readable = server.allowedTools ?? []
+    if (server.readOnly === true) return { allowed: true, server }
+    if (server.allowedTools === undefined) {
+      return { allowed: false, reason: `${server.name} has not been verified, so FDE cannot tell which of its tools only read. Test the connection under Configuration, then try again.` }
+    }
+    if (readable.length === 0) {
+      return { allowed: false, reason: `${server.name} exposes no tool that is known to only read, so it was not enabled for this chat. A connection that can change things belongs in a run, behind an approval.` }
+    }
+    if (provider === 'codex') return { allowed: true, server: { ...server, allowedTools: readable } }
+    return { allowed: false, reason: `${server.name} has tools that can change things, and a ${provider === 'gemini' ? 'Gemini' : 'Claude'} chat has no way to allow only the read ones. It was not enabled here; use it inside a run, where the tool scope is enforced.` }
   }
 
   private safeMcpUrl(value: string): boolean {
@@ -496,6 +547,10 @@ export class ChatService {
       if (chat.effort !== 'auto') args.push('-c', `model_reasoning_effort="${chat.effort}"`)
       for (const server of service.mcpServers) {
         args.push('-c', `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`)
+        // Not decoration: without this the server arrives with every tool it has.
+        if (server.readOnly !== true && server.allowedTools !== undefined) {
+          args.push('-c', `mcp_servers.${server.name}.enabled_tools=[${server.allowedTools.map((tool) => JSON.stringify(tool)).join(', ')}]`)
+        }
         if (server.authMethod === 'bearer' && server.secretEnvVar) {
           args.push('-c', `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.secretEnvVar)}`)
         } else if ((server.authMethod === 'header' || server.authMethod === 'basic') && server.secretEnvVar) {

@@ -117,6 +117,53 @@ first; the run tabs move with the arrow keys, Home and End.
 
 ![The light theme](screenshots/runs-light.png)
 
+## MCP servers
+
+**Configuration → MCP servers** is the catalogue: every server FDE knows how to
+run, what state it is in, and what it would still need. Four words on that page
+mean four different things, and they are not interchangeable:
+
+| | |
+|---|---|
+| **catalogue** | FDE knows how to run this server. Nothing more. |
+| **configured** | you supplied the settings and credentials it declares |
+| **ready** | also installed on this machine, and a bounded verification succeeded |
+| **active** | in a specific run's or chat's effective set — never a property of the catalogue |
+
+Each card shows the state, the reason, the pinned package version, and one line
+saying what the server can do to the world once active. **Verify** is the only
+button that starts anything: it performs an initialize and a tool listing, never
+a business operation, and it is what turns "read-only" from a claim into a fact —
+the tool names it collects become the allowlist each client is given.
+
+The **Profile** selector narrows the list to one kind of work — coding,
+frontend testing, Maxeda delivery, data, observability. It never widens it: role,
+stage and readiness still all have to agree before a run sees a server.
+
+Three banners are worth reading rather than dismissing:
+
+- *Not installed on this machine* — FDE will not install anything for you. The
+  card shows the exact command.
+- *Held back on purpose* — the server can change things and offers no verifiable
+  read-only subset, so it stays inactive. That is the control working.
+- *FDE cannot scope this provider's tools* — Atlassian and Figma sign in inside
+  the MCP client, so there is no tool list to build an allowlist from. They reach
+  a session with every tool they offer, and their writes are stopped only at
+  publication. Pin the read tool names in that card's settings to close it.
+
+**Service connections and MCP servers are different things** and stay on separate
+tabs. A connection is a credential for a system; an MCP server is a governed
+capability with a lifecycle, a profile and a tool scope.
+
+## Service access in a chat
+
+A chat has no plan, no roles and no approvals behind it, so the console offers a
+connection only where the tool scope can actually be enforced: a Codex chat gets
+an explicit allowlist of the tools that only read, and a Claude chat gets a
+connection only when every tool it offers reads. A connection that has never been
+verified is listed as withheld, with the reason — FDE will not describe as
+read-only something it has not asked.
+
 ## When something looks wrong
 
 | What you see | What it means | What to do |
@@ -128,6 +175,9 @@ first; the run tabs move with the arrow keys, Home and End.
 | *This run is busy* | another change is in flight for it | refresh and try again |
 | *N things in this data could not be read cleanly* | a malformed or half-written record | the rest of the run still renders; the file on disk is untouched |
 | A red banner across every screen | the console cannot talk to the controller at all | check System health for the path it is using |
+| An MCP server stuck at *not configured* with nothing missing | its tool list has not been verified, so no allowlist exists yet | press **Verify** on its card |
+| An MCP server at *blocked* | no verifiable read-only subset — it is inactive by design | leave it; use it inside a run behind an approval, or pin an allowlist |
+| A run sees no MCP servers | roles are not confirmed, or the plan's stages do not call for any | `fde mcp effective --run <id>` names the reason per server |
 
 ## Where things live
 

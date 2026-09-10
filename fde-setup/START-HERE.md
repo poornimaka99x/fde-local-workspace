@@ -281,7 +281,23 @@ ask-codex --read-only "..."         second opinion, cannot write
 ask-ms-copilot "..."                SharePoint, Outlook, Teams
 ms-intake - --title "..."           paste a Notebook/recap in by hand
 mcp-sync                            regenerate MCP config from one file
+mcp-sync --dry-run                  show changes; write and download nothing
+
+                                    the governed MCP catalogue
+fde mcp list                        every server, with its lifecycle state
+fde mcp status <server>             one server, in detail
+fde mcp configure <s> --set k=v     its non-secret settings
+fde mcp set-secret <s> <field>      reads stdin, echoes nothing
+fde mcp verify <server>             bounded initialize + tool listing
+fde mcp effective --run <run-id>    what this run may actually reach
+fde mcp gateway                     Docker routing preview; changes nothing
 ```
+
+An entry in that catalogue is not access. A server has to be **configured** (you
+supplied what it needs), **ready** (installed and verified) and then **active**
+(this run's approved stages, roles and profile call for it) before anything can
+reach it — and `fde mcp effective --run <id>` will tell you which of those is
+missing. See `docs/MCP-GOVERNANCE.md`.
 
 Everything for a run lives in `~/.claude-shared/runs/<run-id>/` — the artifacts,
 the approval ledger (`approvals.jsonl`) and the full log (`events.jsonl`). That

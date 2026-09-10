@@ -19,6 +19,18 @@ class Connections(unittest.TestCase):
 
     def tearDown(self): self.tmp.cleanup()
 
+    def record_tools(self, cid, tools):
+        """Stand in for `fde connections verify` having listed a server's tools.
+
+        Verification talks to a real endpoint, which a test must not; what it
+        leaves behind is this record, and that is what governs a chat."""
+        path = Path(self.env["FDE_CONNECTIONS_FILE"])
+        data = json.loads(path.read_text())
+        item = data["connections"][cid]
+        item["tools"] = tools
+        item["readOnly"] = all(tool["readOnlyHint"] for tool in tools)
+        path.write_text(json.dumps(data))
+
     def fde(self, *args, stdin=None, code=0):
         result = subprocess.run([str(FDE), "connections", *args, "--json"],
                                 input=stdin, text=True, capture_output=True, env=self.env)
@@ -86,10 +98,23 @@ class Connections(unittest.TestCase):
         self.assertFalse(created["connection"]["configured"])
         secret = "mcp-secret-that-never-enters-metadata"
         self.fde("set-secret", "custom-mcp-knowledge", stdin=secret)
+
+        # Unverified, this server is withheld rather than described optimistically:
+        # FDE has not asked it which of its tools only read, so it cannot say.
+        unverified = self.fde("context", "--connection", "custom-mcp-knowledge",
+                              stdin="Use the knowledge server")
+        self.assertEqual(unverified["mcpServers"], [])
+        self.assertTrue(any("has not been verified" in w for w in unverified["warnings"]))
+
+        self.record_tools("custom-mcp-knowledge",
+                          [{"name": "search_docs", "readOnlyHint": True},
+                           {"name": "publish_doc", "readOnlyHint": False}])
         context = self.fde("context", "--connection", "custom-mcp-knowledge",
                            stdin="Use the knowledge server")
         server = context["mcpServers"][0]
         self.assertEqual(server["authMethod"], "bearer")
+        self.assertFalse(server["readOnly"])
+        self.assertEqual(server["allowedTools"], ["search_docs"])
         self.assertRegex(server["secretEnvVar"], r"^FDE_MCP_SECRET_[A-F0-9]{16}$")
         self.assertNotIn(secret, json.dumps(context))
         metadata = Path(self.env["FDE_CONNECTIONS_FILE"]).read_text()

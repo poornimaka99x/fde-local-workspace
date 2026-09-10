@@ -225,12 +225,54 @@ role-scoped for exactly this reason: there is no permanently privileged
 orchestrator account, because there is no permanent orchestrator.
 
 Claude orchestrators and Claude/Codex specialist invocations load the generated
-run-scoped MCP configuration. Antigravity currently exposes only machine-global
-MCP management, so FDE does not temporarily widen it with role-scoped servers.
+run-scoped MCP configuration. For Claude two files travel together — `--mcp-config`
+says which servers exist, `--settings` says which of their tools may be called —
+and a config without its settings withholds the servers rather than widening
+access. Antigravity currently exposes only machine-global MCP management, so FDE
+does not temporarily widen it with role-scoped servers.
 
 Merging is real. Servers this tool manages are listed in `_fdeManaged`, so a
 server you added by hand survives an update, and one that is no longer targeted
 is removed rather than left behind.
+
+**Being in the catalogue is not access.** Four words, four different things:
+
+| | |
+| --- | --- |
+| **catalogue** | FDE knows how to run this server |
+| **configured** | you supplied the settings and credentials it declares |
+| **ready** | also installed, and a bounded verification succeeded |
+| **active** | in a specific run's or chat's effective set, because that run's approved stages, roles and profile call for it |
+
+`fde mcp list` shows every entry's state — `unavailable`, `not_configured`,
+`authentication_required`, `ready`, `active`, `unhealthy` or `blocked` — with the
+reason and the exact next action. `fde mcp effective --run <id>` shows what one
+run may actually reach, and why anything else may not. The combined plan approval
+prints the same set before you type the phrase, so access is never widened
+silently.
+
+**Read-only is enforced or it is not claimed.** A prompt is not a control. Each
+client gets the scope in its own mechanism — Claude permission rules
+(`mcp__server__tool`, exact names, no wildcards), Codex `enabled_tools`, Gemini
+`includeTools` — built from the tool list the server actually reported. Where a
+provider offers no verifiable read-only subset, the server stays inactive and
+reports `blocked` with the reason instead of being described as safe. Atlassian
+and Figma are the honest exception: their OAuth token belongs to the MCP client,
+so FDE cannot enumerate their tools, and every surface says so — their writes are
+gated at publication by `fde approve-publish`, and you can pin a real allowlist
+with `fde mcp configure atlassian --set allowTools=…`.
+
+**Profiles** name a slice of the catalogue for a kind of work — `coding`,
+`frontend-testing`, `maxeda-delivery`, `data`, `observability`. Selecting one
+narrows the effective set; it never widens it.
+
+Ten servers ship in the catalogue: Context7 and Serena for code, Playwright and
+Chrome DevTools for the browser, Atlassian and Figma for delivery and design,
+DBHub, AWS, Azure and Langfuse for data, cloud and observability. Versions are
+pinned, nothing installs itself, and neither `npx` nor `uvx` runs because you
+opened a page. `docs/MCP-GOVERNANCE.md` is the full reference: per-server setup,
+credentials, read/write boundaries, the Docker-optional gateway, and
+troubleshooting.
 
 **Delegation.** Gemini cannot be exposed as an MCP server, so the bridge is
 headless invocation:

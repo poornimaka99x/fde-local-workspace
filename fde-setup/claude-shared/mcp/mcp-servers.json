@@ -1,24 +1,446 @@
 {
-  "_comment": "Single source of truth for MCP servers across Claude Code, Gemini CLI and Codex CLI. Edit here, then run: mcp-sync. Each tool stores MCP config in a different file and a different schema; mcp-sync translates. GitHub Copilot is not part of this ecosystem and is never written to.",
-  "_targets": "Every server declares who gets it. 'claude' | 'gemini' | 'codex' are global targets, written into each CLI's user-level config. 'role:<role>' is a run-scoped target: the server is NOT placed in anyone's global config, and mcp-sync --run <run-id> writes it only for the identity that holds that role in that run.",
+  "schemaVersion": 2,
+  "_comment": "Single source of truth for MCP servers across Claude Code, Codex CLI and Gemini/Antigravity. Edit here, then run: mcp-sync. Each tool stores MCP config in a different file and a different schema; mcp-sync translates. GitHub Copilot is not part of this ecosystem and is never written to. Being listed here is NOT a grant: an entry says how FDE would run a server, never that anyone may. Readiness, profile, stage and role decide that, and `fde mcp status` shows the result.",
+  "_targets": "Every server declares who gets it. 'claude' | 'gemini' | 'codex' are global targets, written into each CLI's user-level config. 'role:<role>' is a run-scoped target: the server is NOT placed in anyone's global config, and mcp-sync --run <run-id> writes it only for the identity that holds that role in that run. A server is one or the other, never both.",
+  "_secrets": "No credential is ever written here. A userConfig field with \"secret\": true names an environment variable; the value lives in ~/.claude-shared/secrets/mcp/<server>/<field> with mode 0600 and is injected only into the child process that needs it.",
+
+  "profiles": {
+    "coding": {
+      "label": "Coding",
+      "description": "Repository work: semantic navigation and version-accurate library documentation.",
+      "servers": ["context7", "serena"],
+      "docker": "coding"
+    },
+    "frontend-testing": {
+      "label": "Frontend testing",
+      "description": "Browser workflows, accessibility evidence and front-end root-cause analysis.",
+      "servers": ["context7", "playwright", "chrome-devtools"],
+      "docker": "frontend-testing"
+    },
+    "maxeda-delivery": {
+      "label": "Maxeda delivery",
+      "description": "Requirements, delivery traceability and design context for client engagements.",
+      "servers": ["context7", "atlassian", "figma"],
+      "docker": "maxeda-delivery"
+    },
+    "data": {
+      "label": "Data",
+      "description": "Schema discovery and bounded read-only SQL against an explicitly selected database.",
+      "servers": ["context7", "dbhub"],
+      "docker": "data"
+    },
+    "observability": {
+      "label": "Observability",
+      "description": "Traces, prompts, evaluations and cloud operational evidence.",
+      "servers": ["context7", "langfuse", "aws", "azure"],
+      "docker": "observability"
+    }
+  },
+
   "servers": {
     "context7": {
+      "enabled": true,
       "transport": "http",
       "url": "https://mcp.context7.com/mcp",
       "targets": ["claude", "gemini", "codex"],
-      "note": "up-to-date library and framework docs. Read-only, no tenant data, safe for every identity."
+      "profiles": ["coding", "frontend-testing", "maxeda-delivery", "data", "observability"],
+      "auth": "none",
+      "classification": "public-documentation",
+      "mutation": "read-only",
+      "readOnlyPolicy": "server-flag",
+      "verify": { "method": "tools/list", "timeoutSeconds": 20 },
+      "useWhen": "You need version-specific external documentation: a framework, dependency, SDK or public API whose behaviour changes between releases.",
+      "preferOver": ["documentation recalled from training", "a web search for API signatures"],
+      "doNotUseWhen": "The question is about this repository, its conventions or its own code — read the repository instead.",
+      "gateway": { "docker": "coding" },
+      "note": "Up-to-date library and framework docs. Read-only, no tenant data, safe for every identity. When it is active it is the source for version-sensitive API facts; recalled documentation is not."
     },
+
+    "serena": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "serena",
+      "args": ["start-mcp-server", "--context", "claude-code", "--project-from-cwd"],
+      "startupTimeoutSeconds": 120,
+      "clients": {
+        "codex": {
+          "args": ["start-mcp-server", "--context", "codex", "--project-from-cwd"],
+          "toolTimeoutSeconds": 120
+        }
+      },
+      "targets": [
+        "role:research", "role:solutioning", "role:implementation", "role:review",
+        "role:testEngineering", "role:ciInvestigation", "role:standardsReview",
+        "role:securityReview"
+      ],
+      "stages": ["research", "solutioning", "review", "implementation", "verification"],
+      "profiles": ["coding"],
+      "requires": {
+        "executables": ["serena"],
+        "setup": "uv tool install -p 3.13 serena-agent",
+        "docsUrl": "https://github.com/oraios/serena"
+      },
+      "package": { "manager": "uv", "name": "serena-agent", "version": "1.7.0", "install": "uv tool install -p 3.13 serena-agent", "update": "uv tool upgrade serena-agent" },
+      "auth": "none",
+      "classification": "repository-local",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^find_symbol$", "^get_symbols_overview$", "^find_referencing_symbols$",
+        "^search_for_pattern$", "^list_dir$", "^find_file$", "^read_file$",
+        "^read_memory$", "^list_memories$", "^get_current_config$",
+        "^check_onboarding_performed$", "^activate_project$", "^think_about_"
+      ],
+      "denyTools": [
+        "^replace_", "^insert_", "^create_", "^delete_", "^write_", "^rename_",
+        "^move_", "^execute_shell_command$"
+      ],
+      "mutationApproval": {
+        "gate": "implementation-write",
+        "note": "Serena's edits would land in the repository, not outside this machine, so they belong behind the run's existing one-time Codex write approval — not behind a publication approval. Until such a scope is authorised, its editing tools are simply absent."
+      },
+      "verify": { "method": "tools/list", "timeoutSeconds": 120 },
+      "useWhen": "Symbol lookup, finding references, dependency-aware navigation of unfamiliar code, and semantic refactoring targets.",
+      "preferOver": ["grep for a symbol name", "reading a whole file to find one definition"],
+      "doNotUseWhen": "A small, direct read of a known file, or a generated / non-code file — the ordinary filesystem tools are cheaper and clearer there.",
+      "gateway": { "docker": "coding" },
+      "note": "Semantic code navigation over LSP. FDE never installs it: it is detected, and the exact setup command is shown when it is absent. Its editing tools are denied here; an implementation write still goes through the run's own approval, not through this server."
+    },
+
+    "playwright": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.80", "--headless", "--isolated"],
+      "optionalArgs": [
+        { "field": "allowedOrigins", "args": ["--allowed-origins", "{{config.allowedOrigins}}"] },
+        { "field": "blockedOrigins", "args": ["--blocked-origins", "{{config.blockedOrigins}}"] },
+        { "field": "browserChannel", "args": ["--browser", "{{config.browserChannel}}"] },
+        { "field": "viewportSize", "args": ["--viewport-size", "{{config.viewportSize}}"] },
+        { "field": "outputDir", "args": ["--output-dir", "{{config.outputDir}}"] }
+      ],
+      "startupTimeoutSeconds": 120,
+      "clients": { "codex": { "toolTimeoutSeconds": 180 } },
+      "targets": [
+        "role:uiUxDesign", "role:implementation", "role:testEngineering",
+        "role:ciInvestigation"
+      ],
+      "stages": ["implementation", "verification"],
+      "profiles": ["frontend-testing"],
+      "requires": {
+        "executables": ["npx"],
+        "setup": "Node.js provides npx. The pinned package is fetched on first use, never when a page is opened.",
+        "docsUrl": "https://github.com/microsoft/playwright-mcp"
+      },
+      "package": { "manager": "npm", "name": "@playwright/mcp", "version": "0.0.80", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "userConfig": [
+        { "name": "allowedOrigins", "label": "Allowed origins (semicolon separated)", "required": false, "type": "text", "placeholder": "http://localhost:3000;https://staging.example.com" },
+        { "name": "blockedOrigins", "label": "Blocked origins (semicolon separated)", "required": false, "type": "text" },
+        { "name": "browserChannel", "label": "Browser", "required": false, "type": "select", "options": [{ "value": "", "label": "default (bundled Chromium)" }, { "value": "chrome", "label": "chrome" }, { "value": "msedge", "label": "msedge" }, { "value": "firefox", "label": "firefox" }, { "value": "webkit", "label": "webkit" }] },
+        { "name": "viewportSize", "label": "Viewport", "required": false, "type": "text", "placeholder": "1280x720" },
+        { "name": "outputDir", "label": "Output directory", "required": false, "type": "text", "placeholder": "leave blank for a temporary directory" }
+      ],
+      "auth": "none",
+      "classification": "browser-session",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^browser_navigate$", "^browser_navigate_back$", "^browser_snapshot$",
+        "^browser_take_screenshot$", "^browser_click$", "^browser_type$",
+        "^browser_press_key$", "^browser_hover$", "^browser_select_option$",
+        "^browser_drag$", "^browser_fill_form$", "^browser_wait_for$",
+        "^browser_resize$", "^browser_tabs$", "^browser_close$",
+        "^browser_console_messages$", "^browser_network_requests$",
+        "^browser_handle_dialog$"
+      ],
+      "denyTools": [
+        "^browser_evaluate$", "^browser_install$", "^browser_file_upload$",
+        "^browser_pdf_save$", "^browser_start_tracing$", "^browser_stop_tracing$"
+      ],
+      "mutationApproval": { "targets": ["jira", "confluence", "sharepoint", "bitbucket", "github", "email", "teams", "figma", "deployment"] },
+      "verify": { "method": "tools/list", "timeoutSeconds": 120 },
+      "useWhen": "Browser workflows, accessibility-tree interaction, responsive behaviour and end-to-end verification of a UI you are building.",
+      "preferOver": ["screenshot-only descriptions of a page", "hand-written DOM guesses"],
+      "doNotUseWhen": "A repeatable acceptance check belongs in the repository's own Playwright tests — write the test rather than driving the browser once. Do not activate it alongside Chrome DevTools unless the task needs both.",
+      "gateway": { "docker": "frontend-testing" },
+      "note": "Isolated, headless sessions by default: no profile is saved to disk and no signed-in browser is reused. Arbitrary script evaluation, file upload and installation tools are denied. A browser action that submits, publishes, purchases, sends or otherwise mutates an external authenticated service is an external mutation and needs the matching fde approve-publish first."
+    },
+
+    "chrome-devtools": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@1.9.0", "--headless", "--isolated"],
+      "optionalArgs": [
+        { "field": "slim", "equals": "true", "args": ["--slim"] },
+        { "field": "channel", "args": ["--channel", "{{config.channel}}"] },
+        { "field": "viewport", "args": ["--viewport", "{{config.viewport}}"] },
+        { "field": "browserUrl", "args": ["--browserUrl", "{{config.browserUrl}}"] }
+      ],
+      "startupTimeoutSeconds": 120,
+      "clients": { "codex": { "toolTimeoutSeconds": 180 } },
+      "targets": ["role:implementation", "role:testEngineering", "role:ciInvestigation"],
+      "stages": ["implementation", "verification"],
+      "profiles": ["frontend-testing"],
+      "requires": {
+        "executables": ["npx"],
+        "setup": "Node.js provides npx. The pinned package is fetched on first use, never when a page is opened.",
+        "docsUrl": "https://github.com/ChromeDevTools/chrome-devtools-mcp"
+      },
+      "package": { "manager": "npm", "name": "chrome-devtools-mcp", "version": "1.9.0", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "userConfig": [
+        { "name": "slim", "label": "Slim mode (three basic tools only)", "required": false, "type": "select", "defaultValue": "false", "options": [{ "value": "false", "label": "off — the diagnostic tools" }, { "value": "true", "label": "on — evaluate, navigate, screenshot only" }], "help": "Verified against 1.9.0: --slim exposes only evaluate, navigate and screenshot, so the console, network and performance tools this server exists for are absent. FDE therefore runs it non-slim by default and controls scope with a verified tool allowlist instead, which is a stricter limit than --slim, not a looser one." },
+        { "name": "channel", "label": "Chrome channel", "required": false, "type": "select", "options": [{ "value": "", "label": "default" }, { "value": "stable", "label": "stable" }, { "value": "beta", "label": "beta" }, { "value": "dev", "label": "dev" }, { "value": "canary", "label": "canary" }] },
+        { "name": "viewport", "label": "Viewport", "required": false, "type": "text", "placeholder": "1280x720" },
+        { "name": "browserUrl", "label": "Attach to an already running browser (advanced)", "required": false, "type": "text", "placeholder": "leave blank — see the warning below", "warning": "Attaching gives this server your live browser session, including anything you are signed in to. FDE never does this on its own; set it only for a debugging session you are watching, and clear it afterwards." }
+      ],
+      "auth": "none",
+      "classification": "browser-session",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^list_pages$", "^select_page$", "^new_page$", "^close_page$",
+        "^navigate_page$", "^take_snapshot$", "^take_screenshot$", "^wait_for$",
+        "^list_console_messages$", "^get_console_message$",
+        "^list_network_requests$", "^get_network_request$",
+        "^performance_start_trace$", "^performance_stop_trace$",
+        "^performance_analyze_insight$", "^lighthouse_audit$",
+        "^take_heapsnapshot$", "^resize_page$", "^emulate$"
+      ],
+      "denyTools": [
+        "^evaluate_script$", "^upload_file$", "^fill$", "^fill_form$", "^click$",
+        "^hover$", "^drag$", "^handle_dialog$", "^press_key$", "^type_text$"
+      ],
+      "mutationApproval": {
+        "gate": "denied",
+        "note": "This server's interaction and script-evaluation tools are denied outright in this phase, by any approval. Driving a page is Playwright's job, under Playwright's own origin restrictions."
+      },
+      "verify": { "method": "tools/list", "timeoutSeconds": 120 },
+      "useWhen": "Front-end debugging: console errors, network waterfalls and failed requests, runtime state and performance traces — the root cause behind a symptom.",
+      "preferOver": ["guessing at a cause from a stack trace alone", "adding console.log to production code"],
+      "doNotUseWhen": "You need to drive a user flow — that is Playwright's job. Do not activate both unless the task genuinely needs interaction and deep diagnostics.",
+      "gateway": { "docker": "frontend-testing" },
+      "note": "Runs headless and isolated. It never attaches to your normal signed-in Chrome profile automatically; connecting to an existing browser is an explicit, warned, operator-set option. Its interaction tools are denied so the Playwright/DevTools division of labour is enforced, not merely suggested."
+    },
+
     "atlassian": {
+      "enabled": true,
       "transport": "http",
       "url": "https://mcp.atlassian.com/v2/mcp",
       "targets": ["role:orchestrator"],
+      "stages": ["intake", "research", "planning", "publication"],
+      "profiles": ["maxeda-delivery"],
+      "auth": "oauth",
+      "classification": "tenant-data",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "client-credential",
+      "userConfig": [
+        { "name": "allowTools", "label": "Pin a read-only tool allowlist (comma separated)", "required": false, "type": "text", "placeholder": "leave blank until you know this provider's read tool names", "help": "FDE cannot ask this server what tools it has, because the OAuth token belongs to the MCP client. Until you pin a list here, the server reaches a session with every tool it offers and its writes are governed by fde approve-publish alone. Pinning turns this into an enforced allowlist." }
+      ],
+      "mutationApproval": { "targets": ["jira", "confluence"] },
+      "verify": { "method": "tools/list", "timeoutSeconds": 30 },
+      "useWhen": "Requirements, Jira issues, Confluence pages and delivery traceability, after the combined plan and roles are approved.",
+      "preferOver": ["asking the operator to paste an issue description", "guessing at a ticket's current state"],
+      "doNotUseWhen": "Before plan approval, or for repository files — Rovo does not provide unrestricted Bitbucket repository operations; use local git or the Bitbucket REST connection.",
+      "gateway": { "docker": "maxeda-delivery" },
       "note": "Jira and Confluence through Atlassian Rovo MCP v2. Deliberately not global: there is no permanently privileged orchestrator account, so this reaches whichever identity the user made orchestrator for the run, and only after roles are confirmed. Reads are allowed then; writes still need fde approve-publish. Bitbucket remains a separate REST or local-git connection."
     },
+
     "figma": {
+      "enabled": true,
       "transport": "http",
       "url": "https://mcp.figma.com/mcp",
       "targets": ["role:uiUxDesign", "role:orchestrator"],
+      "stages": ["solutioning", "presentation", "implementation"],
+      "profiles": ["maxeda-delivery"],
+      "auth": "oauth",
+      "classification": "tenant-data",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "client-credential",
+      "userConfig": [
+        { "name": "allowTools", "label": "Pin a read-only tool allowlist (comma separated)", "required": false, "type": "text", "placeholder": "leave blank until you know this provider's read tool names", "help": "FDE cannot ask this server what tools it has, because the OAuth token belongs to the MCP client. Until you pin a list here, the server reaches a session with every tool it offers and its writes are governed by fde approve-publish alone. Pinning turns this into an enforced allowlist." }
+      ],
+      "mutationApproval": { "targets": ["figma"] },
+      "verify": { "method": "tools/list", "timeoutSeconds": 30 },
+      "useWhen": "A design stage needs the real design context: variables, components, tokens and frame structure for design-to-code.",
+      "preferOver": ["reimplementing spacing and colour from a screenshot"],
+      "doNotUseWhen": "The run has no design stage, or the question is answerable from the design system documentation already in the repository.",
+      "gateway": { "docker": "maxeda-delivery" },
       "note": "Official remote Figma MCP server. Run-scoped to the selected UI/UX designer after plan approval; OAuth remains in that provider's MCP client. Reading is allowed within the approved plan. Any canvas write or transfer of a reconciled design requires fde approve-publish <run-id> figma. The isolated design-panel runner still disables tools, so panel participants produce governed proposals rather than racing on one canvas."
+    },
+
+    "dbhub": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@bytebase/dbhub@1.2.3", "--transport", "stdio", "--config", "{{config.generatedConfigPath}}"],
+      "startupTimeoutSeconds": 60,
+      "clients": {},
+      "targets": ["role:research", "role:solutioning", "role:implementation"],
+      "stages": ["research", "solutioning", "implementation"],
+      "profiles": ["data"],
+      "requires": {
+        "executables": ["npx"],
+        "setup": "Node.js provides npx. Configure a dedicated read-only database account first; FDE will not create one.",
+        "docsUrl": "https://dbhub.ai/"
+      },
+      "package": { "manager": "npm", "name": "@bytebase/dbhub", "version": "1.2.3", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "userConfig": [
+        { "name": "connectionMode", "label": "Connection", "required": true, "type": "select", "defaultValue": "dsn", "options": [{ "value": "dsn", "label": "A single read-only DSN" }, { "value": "parts", "label": "Separate host / port / database / user" }] },
+        { "name": "dsn", "label": "Read-only PostgreSQL DSN", "required": true, "secret": true, "type": "password", "envVar": "FDE_MCP_DBHUB_DSN", "placeholder": "postgres://readonly-account@host:5432/db?sslmode=require", "showWhen": { "field": "connectionMode", "equals": "dsn" } },
+        { "name": "host", "label": "Host", "required": true, "type": "text", "showWhen": { "field": "connectionMode", "equals": "parts" } },
+        { "name": "port", "label": "Port", "required": false, "type": "text", "defaultValue": "5432", "showWhen": { "field": "connectionMode", "equals": "parts" } },
+        { "name": "database", "label": "Database", "required": true, "type": "text", "showWhen": { "field": "connectionMode", "equals": "parts" } },
+        { "name": "username", "label": "Read-only username", "required": true, "type": "text", "showWhen": { "field": "connectionMode", "equals": "parts" } },
+        { "name": "sslMode", "label": "SSL mode", "required": false, "type": "select", "defaultValue": "require", "options": [{ "value": "require", "label": "require" }, { "value": "verify-full", "label": "verify-full" }, { "value": "prefer", "label": "prefer" }, { "value": "disable", "label": "disable (localhost only)" }], "showWhen": { "field": "connectionMode", "equals": "parts" } },
+        { "name": "password", "label": "Read-only account password", "required": true, "secret": true, "type": "password", "envVar": "FDE_MCP_DBHUB_DSN", "compose": "postgres-dsn", "composeFrom": { "host": "host", "port": "port", "database": "database", "username": "username", "sslMode": "sslMode" }, "showWhen": { "field": "connectionMode", "equals": "parts" } },
+        { "name": "maxRows", "label": "Maximum rows per query", "required": true, "type": "text", "defaultValue": "1000" },
+        { "name": "queryTimeoutSeconds", "label": "Query timeout (seconds)", "required": true, "type": "text", "defaultValue": "30" },
+        { "name": "readOnlyAccount", "label": "The database account itself is read-only", "required": true, "type": "select", "options": [{ "value": "", "label": "— confirm before activating —" }, { "value": "yes", "label": "Yes — it has SELECT only" }], "help": "DBHub's read-only mode is one of two layers. FDE will not activate this server until you confirm the database account cannot write either." },
+        { "name": "generatedConfigPath", "label": "Generated DBHub configuration", "required": false, "type": "generated", "generatedFrom": "dbhub.toml" }
+      ],
+      "generatedFiles": [
+        {
+          "path": "dbhub.toml",
+          "mode": "0600",
+          "template": "# Generated by FDE. Do not edit: rewritten by `fde mcp configure dbhub`.\n# The DSN is an environment reference, never a value. DBHub interpolates\n# ${VAR} at startup from the environment FDE injects into its child process.\n\n[[sources]]\nid = \"default\"\ndsn = \"${FDE_MCP_DBHUB_DSN}\"\n\n[[tools]]\nname = \"execute_sql\"\nsource = \"default\"\nreadonly = true\nmax_rows = {{config.maxRows}}\nquery_timeout_seconds = {{config.queryTimeoutSeconds}}\n"
+        }
+      ],
+      "auth": "none",
+      "classification": "customer-data",
+      "mutation": "read-only",
+      "readOnlyPolicy": "server-flag",
+      "verify": { "method": "tools/list", "timeoutSeconds": 60 },
+      "useWhen": "Schema discovery, table and index metadata, query planning, and bounded SELECT statements against a database the operator explicitly selected.",
+      "preferOver": ["guessing a schema from ORM models", "asking the operator to paste a table definition"],
+      "doNotUseWhen": "The run has not selected the data profile, or the question is about application code rather than stored data. Write SQL is not implemented in this phase at all.",
+      "gateway": { "docker": "data" },
+      "note": "PostgreSQL only for now. Read-only is enforced twice: DBHub's own execute_sql readonly mode in the generated TOML, and a database account that has SELECT and nothing else — FDE refuses to activate until you confirm the second. Rows are capped at the configured maximum and queries at the configured timeout."
+    },
+
+    "aws": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws-cli==1.6.6",
+        "https://aws-mcp.{{config.endpointRegion}}.api.aws/mcp",
+        "--profile", "{{config.awsProfile}}",
+        "--region", "{{config.operationRegion}}",
+        "--read-only"
+      ],
+      "mutationRemovesArgs": ["--read-only"],
+      "startupTimeoutSeconds": 120,
+      "clients": {},
+      "targets": [
+        "role:solutioning", "role:releaseManagement", "role:observability", "role:research"
+      ],
+      "stages": ["research", "solutioning", "deployment", "observability"],
+      "profiles": ["observability"],
+      "requires": {
+        "executables": ["uvx", "aws"],
+        "setup": "Install the AWS CLI and sign in with `aws sso login --profile <profile>` (or configure credentials). FDE never copies AWS credentials into its own metadata.",
+        "docsUrl": "https://github.com/aws/mcp-proxy-for-aws"
+      },
+      "package": { "manager": "uv", "name": "mcp-proxy-for-aws-cli", "version": "1.6.6", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "userConfig": [
+        { "name": "awsProfile", "label": "AWS profile", "required": true, "type": "text", "placeholder": "the name in ~/.aws/config" },
+        { "name": "endpointRegion", "label": "Managed MCP endpoint region", "required": true, "type": "text", "defaultValue": "us-east-1" },
+        { "name": "operationRegion", "label": "Default operation region", "required": true, "type": "text", "placeholder": "eu-west-1" },
+        { "name": "expectedAccountId", "label": "Expected account id (optional)", "required": false, "type": "text", "placeholder": "verification fails loudly if the caller is someone else" },
+        { "name": "expectedRoleName", "label": "Expected role (optional)", "required": false, "type": "text" }
+      ],
+      "auth": "local-credential-chain",
+      "classification": "cloud-control-plane",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "server-flag",
+      "mutationApproval": { "targets": ["deployment"] },
+      "verify": { "method": "tools/list", "timeoutSeconds": 120 },
+      "useWhen": "Cloud architecture questions, inventory and discovery, release evidence and operational investigation on AWS.",
+      "preferOver": ["shelling out to the aws CLI ad hoc", "describing an architecture from memory"],
+      "doNotUseWhen": "The run is not doing solutioning, release management, observability or AWS-specific research. Do not reach for a specialised AWS Labs server until a concrete run needs that capability.",
+      "gateway": { "docker": "observability" },
+      "note": "Runs the official proxy with --read-only, so write tools are absent from the process rather than merely discouraged. Authentication uses the local AWS credential chain; FDE stores no AWS credential and shows account, role and region without exposing one. Creating, modifying, deleting or deploying anything, or any cost-bearing action, requires fde approve-publish <run-id> deployment and is recorded."
+    },
+
+    "azure": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y", "@azure/mcp@3.0.0-beta.42", "server", "start",
+        "--mode", "namespace",
+        "--read-only"
+      ],
+      "optionalArgs": [
+        { "field": "namespaces", "args": ["--namespace", "{{config.namespaces}}"] }
+      ],
+      "mutationRemovesArgs": ["--read-only"],
+      "env": {
+        "AZURE_SUBSCRIPTION_ID": "{{config.subscriptionId}}",
+        "AZURE_TENANT_ID": "{{config.tenantId}}",
+        "AZURE_MCP_COLLECT_TELEMETRY": "false"
+      },
+      "startupTimeoutSeconds": 120,
+      "clients": {},
+      "targets": ["role:solutioning", "role:releaseManagement", "role:observability"],
+      "stages": ["solutioning", "deployment", "observability"],
+      "profiles": ["observability"],
+      "requires": {
+        "executables": ["npx", "az"],
+        "setup": "Install the Azure CLI (`brew install azure-cli`) and run `az login`. FDE never installs it and never stores an Azure credential.",
+        "docsUrl": "https://github.com/microsoft/mcp/tree/main/servers/Azure.Mcp.Server"
+      },
+      "package": { "manager": "npm", "name": "@azure/mcp", "version": "3.0.0-beta.42", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "userConfig": [
+        { "name": "tenantId", "label": "Tenant id", "required": true, "type": "text" },
+        { "name": "subscriptionId", "label": "Subscription id", "required": true, "type": "text" },
+        { "name": "cloud", "label": "Cloud", "required": false, "type": "select", "defaultValue": "AzureCloud", "options": [{ "value": "AzureCloud", "label": "AzureCloud" }, { "value": "AzureUSGovernment", "label": "AzureUSGovernment" }, { "value": "AzureChinaCloud", "label": "AzureChinaCloud" }] },
+        { "name": "namespaces", "label": "Allowed namespaces (comma separated)", "required": true, "type": "text", "defaultValue": "subscription,group,monitor", "help": "Start narrow. Every namespace you add multiplies the tool count the model has to reason about." }
+      ],
+      "auth": "local-credential-chain",
+      "classification": "cloud-control-plane",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "server-flag",
+      "mutationApproval": { "targets": ["deployment"] },
+      "verify": { "method": "tools/list", "timeoutSeconds": 120 },
+      "useWhen": "Azure and Foundry tasks: resource inventory, monitor queries, architecture and operational evidence.",
+      "preferOver": ["reciting Azure resource names from memory"],
+      "doNotUseWhen": "The task is not Azure-specific. Do not widen the namespace list to explore.",
+      "gateway": { "docker": "observability" },
+      "note": "The maintained microsoft/mcp Azure server, not the archived Azure/azure-mcp. Starts in namespace mode with only the namespaces you allow, and with --read-only. Authentication is the local Azure CLI identity. Resource changes and deployments require fde approve-publish <run-id> deployment."
+    },
+
+    "langfuse": {
+      "enabled": true,
+      "transport": "http",
+      "url": "{{config.endpoint}}",
+      "httpHeaders": { "Authorization": { "envVar": "FDE_MCP_LANGFUSE_AUTH" } },
+      "targets": ["role:observability", "role:research", "role:review"],
+      "stages": ["research", "review", "verification", "observability"],
+      "profiles": ["observability"],
+      "requires": {
+        "docsUrl": "https://langfuse.com/docs/api-and-data-platform/features/mcp-server",
+        "setup": "Create a project API key pair in Langfuse, then paste the public and secret keys here. FDE composes the Basic credential at launch and never stores the composed header."
+      },
+      "userConfig": [
+        { "name": "region", "label": "Langfuse deployment", "required": true, "type": "select", "options": [{ "value": "", "label": "— choose —" }, { "value": "eu", "label": "Cloud — EU (cloud.langfuse.com)" }, { "value": "us", "label": "Cloud — US (us.cloud.langfuse.com)" }, { "value": "jp", "label": "Cloud — Japan (jp.cloud.langfuse.com)" }, { "value": "hipaa", "label": "Cloud — HIPAA (hipaa.cloud.langfuse.com)" }, { "value": "self-hosted", "label": "Self-hosted (HTTPS)" }, { "value": "localhost", "label": "Local development" }] },
+        { "name": "endpoint", "label": "MCP endpoint", "required": true, "type": "url", "placeholder": "https://cloud.langfuse.com/api/public/mcp", "help": "Cloud: https://<region host>/api/public/mcp. Self-hosted: your own HTTPS host with the same path. Local development may use http://localhost:3000/api/public/mcp." },
+        { "name": "projectName", "label": "Project (for your own reference)", "required": false, "type": "text" },
+        { "name": "publicKey", "label": "Public key", "required": true, "secret": true, "type": "password", "envVar": "FDE_MCP_LANGFUSE_PUBLIC_KEY" },
+        { "name": "secretKey", "label": "Secret key", "required": true, "secret": true, "type": "password", "envVar": "FDE_MCP_LANGFUSE_AUTH", "compose": "basic", "composeWith": "publicKey" }
+      ],
+      "auth": "basic",
+      "classification": "tenant-data",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "annotations",
+      "mutationApproval": { "targets": ["confluence", "jira", "deployment"] },
+      "verify": { "method": "tools/list", "timeoutSeconds": 45 },
+      "useWhen": "Agent observability: traces, sessions, prompt versions, evaluation results and scores when investigating how a run or an agent actually behaved.",
+      "preferOver": ["reasoning about an agent failure from its final output alone"],
+      "doNotUseWhen": "The project does not use Langfuse, or the question is about local FDE run events — those are in the run's own events.jsonl.",
+      "gateway": { "docker": "observability" },
+      "note": "Langfuse exposes prompt-creation and other write tools by default, so this entry is activated only once `fde mcp verify langfuse` has listed its tools and an enforceable read-only subset exists. If none does, the server stays blocked and says so rather than being described as read-only. Keys are project-scoped; the composed Authorization header exists only in the child process."
     }
   }
 }

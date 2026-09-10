@@ -47,6 +47,7 @@ const readsStdin = args.includes('--stdin') || args.includes('--brief-stdin')
   || (args[0] === 'accounts' && args[1] === 'set-secret')
   || (args[0] === 'connections' && args[1] === 'set-secret')
   || (args[0] === 'connections' && args[1] === 'context')
+  || (args[0] === 'mcp' && args[1] === 'set-secret')
 if (readsStdin) {
   const received = fs.readFileSync(0)
   fs.writeFileSync(path.join(dir, 'stdin-' + key + '.bin'), received)

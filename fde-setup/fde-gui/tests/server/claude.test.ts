@@ -246,22 +246,27 @@ describe('Claude accounts and general chats', () => {
     expect(revoked.json().chat.serviceConnectionIds).toEqual([])
   })
 
-  it('loads explicitly selected OAuth MCP servers into a Claude chat only', async () => {
+  const chatRunner = (calls: Parameters<ChatCommandRunner>[0][]): ChatCommandRunner => (options) => {
+    calls.push(options)
+    return {
+      completed: Promise.resolve({ code: 0, stdout: JSON.stringify({ result: 'MCP ready' }) }),
+      kill: () => undefined,
+    }
+  }
+
+  it('loads a verified read-only MCP server into a Claude chat only', async () => {
     harness.fixture('connections-context', {
       schemaVersion: 1,
       context: '',
       warnings: [],
-      mcpServers: [{ name: 'atlassian-rovo-work', url: 'https://mcp.atlassian.com/v2/mcp' }],
+      mcpServers: [{
+        name: 'atlassian-rovo-work', url: 'https://mcp.atlassian.com/v2/mcp',
+        readOnly: true, allowedTools: ['getJiraIssue'],
+      }],
     })
     const calls: Parameters<ChatCommandRunner>[0][] = []
-    const runner: ChatCommandRunner = (options) => {
-      calls.push(options)
-      return {
-        completed: Promise.resolve({ code: 0, stdout: JSON.stringify({ result: 'MCP ready' }) }),
-        kill: () => undefined,
-      }
-    }
-    const chats = new ChatService(harness.config, new AccountService(harness.config), runner)
+    const chats = new ChatService(harness.config, new AccountService(harness.config),
+      chatRunner(calls))
     const chat = chats.create({
       accountId: 'work', model: 'sonnet', effort: 'high', cwd: harness.root,
       serviceConnectionIds: ['atlassian-rovo-work'],
@@ -276,6 +281,67 @@ describe('Claude accounts and general chats', () => {
         'atlassian-rovo-work': { type: 'http', url: 'https://mcp.atlassian.com/v2/mcp' },
       },
     })
+  })
+
+  it('withholds a connection whose tools have never been listed, and says why', async () => {
+    // A chat has no plan, roles or approvals behind it. "Read-only" therefore
+    // has to be something FDE asked the server, not something the label claims.
+    harness.fixture('connections-context', {
+      schemaVersion: 1,
+      context: '',
+      warnings: [],
+      mcpServers: [{ name: 'custom-mcp-unknown', url: 'https://mcp.example.com/mcp' }],
+    })
+    const calls: Parameters<ChatCommandRunner>[0][] = []
+    const chats = new ChatService(harness.config, new AccountService(harness.config),
+      chatRunner(calls))
+    const chat = chats.create({
+      accountId: 'work', model: 'sonnet', effort: 'high', cwd: harness.root,
+      serviceConnectionIds: ['custom-mcp-unknown'],
+    })
+    await chats.send(chat.chatId, 'Use the knowledge server')
+
+    expect(calls[0]?.args).not.toContain('--mcp-config')
+    expect(calls[0]?.args).toEqual(expect.arrayContaining(['--tools', '']))
+    const prompt = calls[0]?.args[(calls[0]?.args.indexOf('--print') ?? -1) + 1] as string
+    expect(prompt).toContain('has not been verified')
+  })
+
+  it('refuses a Claude chat a server that can change things, and offers Codex the read subset', async () => {
+    harness.fixture('connections-context', {
+      schemaVersion: 1,
+      context: '',
+      warnings: [],
+      mcpServers: [{
+        name: 'custom-mcp-mixed', url: 'https://mcp.example.com/mcp',
+        readOnly: false, allowedTools: ['search_docs'],
+      }],
+    })
+    const claudeCalls: Parameters<ChatCommandRunner>[0][] = []
+    const claudeChats = new ChatService(harness.config, new AccountService(harness.config),
+      chatRunner(claudeCalls))
+    const claudeChat = claudeChats.create({
+      accountId: 'work', model: 'sonnet', effort: 'high', cwd: harness.root,
+      serviceConnectionIds: ['custom-mcp-mixed'],
+    })
+    await claudeChats.send(claudeChat.chatId, 'Search the docs')
+    expect(claudeCalls[0]?.args).not.toContain('--mcp-config')
+    const prompt = claudeCalls[0]?.args[(claudeCalls[0]?.args.indexOf('--print') ?? -1) + 1] as string
+    expect(prompt).toContain('no way to allow only the read ones')
+
+    // Codex takes an explicit per-server allowlist, so the same connection is
+    // usable there — with exactly the tools that only read.
+    const codexCalls: Parameters<ChatCommandRunner>[0][] = []
+    const codexChats = new ChatService(harness.config, new AccountService(harness.config),
+      chatRunner(codexCalls))
+    const codexChat = codexChats.create({
+      accountId: 'chatgpt_codex', model: 'default', effort: 'auto', cwd: harness.root,
+      serviceConnectionIds: ['custom-mcp-mixed'],
+    })
+    await codexChats.send(codexChat.chatId, 'Search the docs')
+    expect(codexCalls[0]?.args).toEqual(expect.arrayContaining([
+      'mcp_servers.custom-mcp-mixed.enabled_tools=["search_docs"]',
+    ]))
   })
 
   it('rejects unknown or unconfigured service access at chat creation', async () => {

@@ -45,6 +45,26 @@ import urllib.parse
 import urllib.request
 import zipfile
 
+# The MCP catalogue, its lifecycle and its three client renderings live beside
+# this controller rather than inside it, because mcp-sync and fde-doctor have to
+# answer "is this server usable, for whom, with which tools" identically. One
+# implementation, three callers.
+_here = pathlib.Path(__file__).resolve().parent
+for _lib in (_here.parent / "lib",
+             pathlib.Path(os.environ.get("CLAUDE_SHARED",
+                                         pathlib.Path.home() / ".claude-shared")) / "lib",
+             _here.parent.parent / "claude-shared" / "lib"):
+    if (_lib / "fde_mcp.py").is_file():
+        sys.path.insert(0, str(_lib))
+        break
+try:
+    import fde_mcp  # noqa: E402
+    import fde_mcp_commands  # noqa: E402
+except ImportError as _exc:  # pragma: no cover — an install missing half of itself
+    sys.exit(f"fde: the MCP catalogue library is missing ({_exc}).\n"
+             f"       It belongs at {_here.parent / 'lib' / 'fde_mcp.py'}.\n"
+             f"       Re-run install.sh, or set CLAUDE_SHARED to a complete install.")
+
 # ---------------------------------------------------------------- locations --
 
 HOME = pathlib.Path(os.environ.get("HOME", pathlib.Path.home()))
@@ -2175,6 +2195,12 @@ def public_connection(cid, item):
         "detail": item.get("detail"),
         "oauth": auth_method == "oauth",
         "authMethod": auth_method,
+        # Presence of a verified tool list, and whether all of it only reads.
+        # The console uses these to distinguish read-only from mutation-capable
+        # rather than assuming the former.
+        "verifiedTools": len(item.get("tools") or []) or None,
+        "readOnly": (all(t.get("readOnlyHint") for t in item["tools"])
+                     if item.get("tools") else None),
     }
 
 
@@ -2361,11 +2387,40 @@ def _verify_mcp(item, secret):
     try:
         with urllib.request.build_opener(NoRedirect).open(req, timeout=12) as response:
             response.read(256 * 1024)
-            return response.status
+            status = response.status
     except urllib.error.HTTPError as exc:
-        return exc.code
+        return exc.code, []
     except (OSError, urllib.error.URLError, TimeoutError) as exc:
         raise AccountError("verification_network", "MCP connection verification failed", str(exc)[:240], 4)
+    if not 200 <= status < 300:
+        return status, []
+    listing = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+                          "params": {}}).encode()
+    tools_request = urllib.request.Request(item["fields"]["url"], data=listing,
+                                           headers=headers, method="POST")
+    try:
+        with urllib.request.build_opener(NoRedirect).open(tools_request, timeout=12) as response:
+            raw = response.read(256 * 1024)
+    except (urllib.error.HTTPError, OSError, urllib.error.URLError, TimeoutError):
+        return status, []
+    message = {}
+    for line in raw.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if line.startswith("{"):
+            try:
+                message = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    tools = []
+    for tool in ((message.get("result") or {}).get("tools") or [])[:200]:
+        if isinstance(tool, dict) and isinstance(tool.get("name"), str):
+            tools.append({"name": tool["name"][:120],
+                          "readOnlyHint": bool((tool.get("annotations") or {})
+                                               .get("readOnlyHint"))})
+    return status, tools
 
 
 @account_command
@@ -2385,8 +2440,14 @@ def cmd_connections_verify(args):
         if custom_auth != "none" and not secret:
             raise AccountError("not_configured", "this connection has no stored token", exit_code=4)
         if provider == "custom-mcp":
-            code = _verify_mcp(item, secret)
+            code, tools = _verify_mcp(item, secret)
             body, identity = {}, urllib.parse.urlparse(item["fields"]["url"]).hostname
+            # A remote MCP server's own description of itself is not a control.
+            # What it answered to tools/list is, so that is what is recorded —
+            # and it is what decides whether a chat may call this connection
+            # read-only.
+            item["tools"] = tools
+            item["readOnly"] = bool(tools) and all(t.get("readOnlyHint") for t in tools)
         elif provider == "github":
             code, body = _verify_http("https://api.github.com/user", {
                 "Authorization": f"Bearer {secret}", "Accept": "application/vnd.github+json"})
@@ -2556,7 +2617,21 @@ def cmd_connections_context(args):
             if method in ("bearer", "header", "basic") and not connection_secret_exists(cid):
                 warnings.append(f"{item.get('name', cid)} has no stored credential.")
                 continue
-            server = {"name": cid, "url": fields["url"], "authMethod": method}
+            # A label is not a control. A custom MCP server is offered to a chat
+            # as read-only only when its own verified tool list says every tool
+            # is read-only; otherwise the chat is told what is missing and the
+            # server is withheld rather than described optimistically.
+            tools = item.get("tools") or []
+            read_only = bool(tools) and all(t.get("readOnlyHint") for t in tools)
+            if not tools:
+                warnings.append(
+                    f"{item.get('name', cid)} has not been verified, so FDE cannot tell "
+                    f"which of its tools only read. Test the connection first.")
+                continue
+            server = {"name": cid, "url": fields["url"], "authMethod": method,
+                      "readOnly": read_only,
+                      "allowedTools": sorted(t["name"] for t in tools
+                                             if t.get("readOnlyHint"))}
             if method in ("bearer", "header", "basic"):
                 server["secretEnvVar"] = _connection_env_name(cid)
             if method == "header": server["headerName"] = fields["headerName"]
@@ -2567,7 +2642,13 @@ def cmd_connections_context(args):
         if CONNECTION_PROVIDERS[provider].get("oauth"):
             endpoint = (ATLASSIAN_MCP_URL if provider == "atlassian-rovo"
                         else "https://mcp.figma.com/mcp")
-            mcp_servers.append({"name": cid, "url": endpoint})
+            tools = item.get("tools") or []
+            entry = {"name": cid, "url": endpoint}
+            if tools:
+                entry["readOnly"] = all(t.get("readOnlyHint") for t in tools)
+                entry["allowedTools"] = sorted(t["name"] for t in tools
+                                               if t.get("readOnlyHint"))
+            mcp_servers.append(entry)
             continue
         secret = read_connection_secret(cid)
         if not secret:
@@ -4652,6 +4733,13 @@ def cmd_doctor(args):
     _row(rows, "Agent harness audit", *check_harness_config(), required=True)
     _row(rows, "Vendored design sources", *check_design_sources())
 
+    # The whole MCP lifecycle, per server, in the order an operator works through
+    # it: is it installed, is it configured, is it signed in, did it answer, and
+    # can its write surface be closed. No stored credential is read to answer any
+    # of that — only whether one is present.
+    for name, status, detail, required in fde_mcp_commands.doctor_rows():
+        _row(rows, name, status, detail, required)
+
     if shutil.which("copilot"):
         _row(rows, "GitHub Copilot CLI", WARN,
              "installed but NOT part of this ecosystem — nothing here calls it")
@@ -5418,7 +5506,12 @@ def _missing_required_roles(run, assignments):
 
 
 def _sync_run_mcp(run):
-    """Generate role-scoped connector config only after combined approval."""
+    """Generate role-scoped connector config only after combined approval.
+
+    The generated files are the grant, so what they contain is recorded: one
+    event per server that became active, one per server that was refused and
+    why. "What could the agents actually reach" then has an answer that does not
+    depend on re-deriving it later."""
     sync = SHARED / "bin" / "mcp-sync"
     if not sync.exists():
         return
@@ -5426,11 +5519,24 @@ def _sync_run_mcp(run):
         [sys.executable, str(sync), "--run", run.id],
         capture_output=True, text=True,
     )
-    if result.returncode == 0:
-        run.event("mcp.run-scoped", detail=result.stdout.strip()[:400])
-    else:
+    if result.returncode != 0:
         print(f"  (run-scoped MCP config not written: "
-              f"{result.stderr.strip()[:200]})", file=sys.stderr)
+              f"{fde_mcp.redact(result.stderr.strip())[:200]})", file=sys.stderr)
+        run.event("mcp.server.unavailable",
+                  detail=fde_mcp.redact(result.stderr.strip())[:400])
+        return
+    run.event("mcp.run-scoped", detail=fde_mcp.redact(result.stdout.strip())[:400])
+    effective = read_json(run.dir / "mcp" / "effective.json", {})
+    for name, item in sorted((effective.get("servers") or {}).items()):
+        allowed = item.get("allowedTools")
+        run.event("mcp.server.activated", server=name,
+                  identities=item.get("identities", []),
+                  classification=item.get("classification"),
+                  mutation=item.get("mutation"),
+                  toolScope=("all tools" if allowed is None else f"{len(allowed)} read tool(s)"))
+    for name, item in sorted((effective.get("refused") or {}).items()):
+        run.event("mcp.server.unavailable", server=name, state=item.get("state"),
+                  reason=item.get("reason"))
 
 
 def cmd_roles(args):
@@ -5632,6 +5738,34 @@ def cmd_approve_plan(args):
         print("\n  route")
         print_routing_matrix(routing_doc, indent="    ")
         print(f"\n    decision  {routing_doc.get('decisionHash')}")
+
+    # Material access changes belong in the approval, not in a file discovered
+    # afterwards. If this proposal differs from what a previous approval covered,
+    # the operator sees the difference here, before typing the phrase.
+    _catalog, _user, _health, proposed, refused = run_mcp_effective(run)
+    print("\n  connectors")
+    if not proposed:
+        print("    (none — no MCP server is ready for these roles and stages)")
+    for name in sorted(proposed):
+        server = proposed[name]
+        tools = fde_mcp.enforceable_tools(name, server,
+                                          fde_mcp.server_settings(_user, name), _health)
+        scope = ("every tool it offers" if tools is None
+                 else f"{len(tools)} verified read tool(s)" if tools else "no tool")
+        print(f"    {name:<16} {server['mutation']:<17} {server['classification']:<22} {scope}")
+        if server["readOnlyPolicy"] == "client-credential" and tools is None:
+            print(f"      unscoped — this provider's tools cannot be filtered from here; "
+                  f"its writes are gated only at publication")
+    actionable = {n: (s, r) for n, (s, r) in refused.items()
+                  if s in (fde_mcp.UNHEALTHY, fde_mcp.BLOCKED)}
+    for name, (state, reason) in sorted(actionable.items())[:5]:
+        print(f"    {name:<16} {state:<17} {fde_mcp.redact(reason)[:70]}")
+    previous = set((read_json(run.dir / "mcp" / "effective.json", {}).get("servers") or {}))
+    added, removed = set(proposed) - previous, previous - set(proposed)
+    if previous and (added or removed):
+        print("    change  "
+              + (f"gains {', '.join(sorted(added))}. " if added else "")
+              + (f"loses {', '.join(sorted(removed))}." if removed else ""))
 
     print("\n  Approval unlocks planned local work and role-scoped configured read access.")
     print("  Codex writes, deployments and external publication keep their own gates.")
@@ -6164,7 +6298,14 @@ def cmd_approve_publish(args):
         "expiresAt": iso(expires),
         "consumed": False,
     })
-    run.event("approval.publish.granted", approvalId=approval_id, target=target)
+    _catalog, _user, _health, active, _refused = run_mcp_effective(run)
+    covered = sorted(name for name, server in active.items()
+                     if target in fde_mcp.mutation_targets(server))
+    run.event("approval.publish.granted", approvalId=approval_id, target=target,
+              mcpServers=covered)
+    if covered:
+        print(f"connectors {', '.join(covered)} may perform this one {target} write "
+              f"while the approval stands")
 
     manifest_path = run.dir / "publication-manifest.json"
     man = read_json(manifest_path, {"runId": run.id, "entries": []})
@@ -6213,43 +6354,102 @@ def _routed_options(route):
     return options
 
 
+def run_mcp_effective(run: Run, agent_id=None):
+    """(catalogue, user config, health, chosen, refused) for this run.
+
+    One computation, used by the invocation path, the approval summary and the
+    status view, so a person can never be shown one answer and an agent handed
+    another."""
+    try:
+        catalog = fde_mcp.Catalog.load(MCP_SRC)
+    except fde_mcp.CatalogError:
+        return None, {}, {}, {}, {}
+    user_doc, health = fde_mcp.load_user_config(), fde_mcp.load_health()
+    roles = set(run.role_of(agent_id)) if agent_id else set(
+        role for role, value in ((run.roles() or {}).get("assignments") or {}).items()
+        if value)
+    chosen, refused = fde_mcp.effective_servers(
+        catalog, roles=roles, stages=run.stages(),
+        profile=(run.plan() or {}).get("mcpProfile"),
+        user_doc=user_doc, health=health, include_global=False)
+    return catalog, user_doc, health, chosen, refused
+
+
+def _run_mcp_env(run: Run, agent_id: str) -> dict:
+    """Credentials for exactly the servers this identity may reach in this run.
+
+    Composed here and handed to one child process. Nothing is written to a file,
+    an argument list, an event or a log on the way."""
+    _catalog, user_doc, _health, chosen, _refused = run_mcp_effective(run, agent_id)
+    env = {}
+    for name, server in chosen.items():
+        env.update(fde_mcp.child_environment(
+            name, server, settings=fde_mcp.server_settings(user_doc, name)))
+    return env
+
+
 def _run_mcp_options(run: Run, agent_id: str, agent: dict) -> list[str]:
-    """CLI arguments that expose only this identity's approved run MCP scope."""
+    """CLI arguments that expose only this identity's approved run MCP scope.
+
+    For Claude two files travel together: --mcp-config says which servers exist,
+    --settings says which of their tools may be called. Loading the first without
+    the second would hand the session tools this run never approved, so a missing
+    settings file withholds the servers too rather than widening access."""
     kind = agent.get("kind")
     if kind == "claude":
         profile = agent.get("profile") or account_slug_of(agent_id, agent)
         config = run.dir / "mcp" / f"claude-{profile}.mcp.json"
-        return ["--mcp-config", str(config)] if config.is_file() else []
+        settings = run.dir / "mcp" / f"claude-{profile}.settings.json"
+        if not config.is_file():
+            return []
+        if not settings.is_file():
+            print(f"  (MCP servers withheld: {settings.name} was not generated, so this "
+                  f"run's tool scope cannot be enforced — run: mcp-sync --run {run.id})",
+                  file=sys.stderr)
+            run.event("mcp.server.deactivated", reason="tool scope could not be enforced",
+                      agent=agent_id)
+            return []
+        return ["--mcp-config", str(config), "--settings", str(settings)]
     if kind != "codex":
         # Antigravity currently has only machine-global `agy mcp` management and
         # no per-invocation config option. A role-scoped server must therefore
         # remain absent rather than being enabled globally for a short window.
         return []
-    source = read_json(MCP_SRC, {}) or {}
-    roles = set(run.role_of(agent_id))
+    _catalog, user_doc, health, chosen, _refused = run_mcp_effective(run, agent_id)
     options = []
-    for name, server in (source.get("servers") or {}).items():
+    for name, server in sorted(chosen.items()):
         if not re.match(r"^[A-Za-z0-9_-]{1,64}$", str(name)):
             continue
-        targets = set(server.get("targets") or [])
-        if not any(f"role:{role}" in targets for role in roles):
-            continue
+        view = fde_mcp.client_view(name, server, "codex",
+                                   settings=fde_mcp.server_settings(user_doc, name),
+                                   health=health)
         base = f"mcp_servers.{name}"
-        if server.get("transport", "stdio") in ("http", "sse"):
-            values = {"url": server.get("url")}
-            if server.get("bearer_token_env_var"):
-                values["bearer_token_env_var"] = server["bearer_token_env_var"]
+        values = {}
+        if view["transport"] in ("http", "sse"):
+            values["url"] = view["url"]
         else:
-            values = {"command": server.get("command")}
-            if server.get("args"):
-                values["args"] = server["args"]
+            values["command"] = view["command"]
+            if view["args"]:
+                values["args"] = list(view["args"])
+        if view.get("startupTimeoutSeconds"):
+            values["startup_timeout_sec"] = int(view["startupTimeoutSeconds"])
+        if view.get("toolTimeoutSeconds"):
+            values["tool_timeout_sec"] = int(view["toolTimeoutSeconds"])
+        # The allowlist is the whole point: absent it, a mutation-capable server
+        # would arrive with every tool it has.
+        if view["allowedTools"] is not None:
+            values["enabled_tools"] = list(view["allowedTools"])
         for key, value in values.items():
             if value is not None:
                 options += ["--config-override", f"{base}.{key}={json.dumps(value)}"]
-        for key, value in (server.get("env") or {}).items():
+        for key, value in (view["env"] or {}).items():
             if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(key)):
                 options += ["--config-override",
                             f"{base}.env.{key}={json.dumps(str(value))}"]
+        for header, spec in (view.get("httpHeaders") or {}).items():
+            options += ["--config-override",
+                        f"{base}.env_http_headers.{json.dumps(header)}="
+                        f"{json.dumps(spec['envVar'])}"]
     return options
 
 
@@ -6271,9 +6471,16 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
             # The shipped bedrock entry names itself by its profile rather than
             # by a provider; keep it routed to Bedrock as it always was.
             env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        return ["claude"] + options + _run_mcp_options(run, agent_id, a) + ["-p", body], env
+        claude_options = _run_mcp_options(run, agent_id, a)
+        if claude_options:
+            env.update(_run_mcp_env(run, agent_id))
+            _catalog, _user, _health, chosen, _refused = run_mcp_effective(run, agent_id)
+            env.update(fde_mcp.claude_launch_env(chosen))
+        return ["claude"] + options + claude_options + ["-p", body], env
     if kind == "codex":
         mcp_options = _run_mcp_options(run, agent_id, a)
+        if mcp_options:
+            env.update(_run_mcp_env(run, agent_id))
         if write:
             return [_bin("ask-codex"), "--write", "--run", run.id,
                     "--stage", stage, "--task-file", str(task)] + options + mcp_options, env
@@ -13032,12 +13239,28 @@ def cmd_design_panel_lenses(args):
 # --------------------------------------------------------------------- main --
 
 
+def _mcp_event(kind, **fields):
+    """Catalogue changes happen outside any run, so they get their own record.
+
+    Arguments and results are never written here — only the server, the outcome,
+    the classification and a redacted summary."""
+    append_jsonl(SHARED / "mcp" / "events.jsonl",
+                 {"at": iso(), "event": kind, **fde_mcp.redact(fields)})
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="fde", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("doctor", help="report component status; nonzero if a required one is broken")
     s.set_defaults(fn=cmd_doctor)
+
+    # ---- the governed MCP catalogue -------------------------------------
+    # Catalogue, configuration, readiness and effective activation. The commands
+    # live in the shared library so `mcp-sync` and `fde-doctor` cannot drift
+    # into a second, more generous opinion of what a run may reach.
+    fde_mcp_commands.EVENT_HOOK = _mcp_event
+    fde_mcp_commands.register(sub)
 
     # ---- accounts -------------------------------------------------------
     # An account is a provider plus a name plus a credential directory. This

@@ -1011,6 +1011,15 @@ export interface ServiceConnection {
   detail?: string | null
   oauth: boolean
   authMethod?: string
+  /**
+   * What the last verification learned about this connection's MCP tools.
+   *
+   * `readOnly === null` means "never asked", which is not the same as "safe":
+   * the console must offer such a connection nowhere that claims read-only,
+   * because nothing would be enforcing it.
+   */
+  verifiedTools?: number | null
+  readOnly?: boolean | null
 }
 
 export interface ConnectionProviderListResponse {

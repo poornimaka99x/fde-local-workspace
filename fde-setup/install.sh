@@ -93,6 +93,12 @@ PRESERVE=(
   "runs/*"                      # run history: manifests, approvals, artifacts
   ".backups/*"
   "shared/clients/*"            # client engagement context
+  "config/mcp-user-config.json" # your per-server MCP settings
+  "secrets/*"                   # owner-only credentials; never read, never replaced
+  "mcp/generated/*"             # server config FDE generates from your settings
+  "mcp/health.json"             # what verification last learned about each server
+  "mcp/events.jsonl"            # the catalogue's own append-only record
+  "mcp/agy-managed.json"
 )
 CONFIRM=(
   "config/agents.json"          # you may add or relabel identities

@@ -30,6 +30,11 @@ class FdeStartTest(unittest.TestCase):
         (self.profiles / "work").mkdir(parents=True)
         (self.profiles / "work" / ".credentials.json").write_text("{}")
         shutil.copy2(MCP_SYNC, self.shared / "bin/mcp-sync")
+        # mcp-sync reads the catalogue through the shared library; a sandbox
+        # without it is a broken install, not a smaller one.
+        shutil.copytree(ROOT / "claude-shared" / "lib", self.shared / "lib",
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(
             ROOT / "claude-shared/config/agents.json",
             self.shared / "config/agents.json",

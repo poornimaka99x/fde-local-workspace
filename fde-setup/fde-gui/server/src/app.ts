@@ -24,6 +24,7 @@ import { registerSessionRoutes } from './routes/sessions'
 import { registerClaudeRoutes } from './routes/claude'
 import { registerAccountRoutes } from './routes/accounts'
 import { registerConnectionRoutes } from './routes/connections'
+import { registerMcpRoutes } from './routes/mcp'
 import { AccountService } from './services/accounts'
 import { ChatService } from './services/chats'
 import { DesignPanelService } from './services/design-panel'
@@ -112,6 +113,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     registerClaudeRoutes(instance, config, resolved)
     registerAccountRoutes(instance, config, resolved)
     registerConnectionRoutes(instance, config, resolved)
+    registerMcpRoutes(instance, config, resolved)
   })
 
   app.addHook('onClose', async () => {

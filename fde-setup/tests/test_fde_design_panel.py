@@ -41,6 +41,9 @@ class PanelTestCase(unittest.TestCase):
         self.home = Path(self.tmp.name)
         self.shared = self.home / ".claude-shared"
         (self.shared / "config").mkdir(parents=True)
+        shutil.copytree(ROOT / "claude-shared" / "lib", self.shared / "lib",
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(AGENTS, self.shared / "config" / "agents.json")
         shutil.copy2(TEMPLATES, self.shared / "config" / "provider-templates.json")
         for profile in ("work", "msc", "alt"):

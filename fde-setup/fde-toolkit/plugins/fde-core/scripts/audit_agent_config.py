@@ -31,6 +31,39 @@ def frontmatter(text):
     return out
 
 
+def audit_mcp_catalogue(shared_root, document):
+    """Validate the MCP catalogue through the shared library, when it is present.
+
+    A toolkit checked out without `claude-shared/lib` is an incomplete install,
+    not a licence to skip the check — so that case is reported rather than
+    silently passing."""
+    if not document:
+        return []
+    library = shared_root / "lib"
+    if not (library / "fde_mcp.py").is_file():
+        return [f"cannot validate the MCP catalogue: {library / 'fde_mcp.py'} is missing"]
+    sys.path.insert(0, str(library))
+    try:
+        import fde_mcp
+    except ImportError as exc:
+        return [f"cannot validate the MCP catalogue: {exc}"]
+    finally:
+        sys.path.pop(0)
+    try:
+        migrated = fde_mcp.migrate(document)
+    except fde_mcp.CatalogError as exc:
+        return [f"MCP catalogue: {exc.message}"]
+    problems = fde_mcp.validate(migrated)
+    unscoped = [
+        name for name, raw in (migrated.get("servers") or {}).items()
+        if fde_mcp.with_defaults(raw)["mutation"] == "mutation-capable"
+        and fde_mcp.with_defaults(raw)["readOnlyPolicy"] == "none"
+    ]
+    problems += [f"MCP server '{name}' can write and declares no way to prove a "
+                 f"read-only subset; it will stay blocked" for name in unscoped]
+    return [f"MCP catalogue: {problem}" for problem in problems]
+
+
 def audit(plugin_root: Path, shared_root: Path | None):
     errors, warnings = [], []
     json_files = [
@@ -91,6 +124,11 @@ def audit(plugin_root: Path, shared_root: Path | None):
         atlassian = (mcp.get("servers") or {}).get("atlassian", {})
         if "role:orchestrator" not in atlassian.get("targets", []):
             errors.append("Atlassian MCP is not restricted to the run orchestrator role")
+        # The catalogue is the thing that decides what a run can reach, so an
+        # invalid one is an error here rather than a surprise at sync time. The
+        # audit borrows the controller's own validator: a second, laxer opinion
+        # about what counts as a safe entry would be worse than no opinion.
+        errors.extend(audit_mcp_catalogue(shared_root, mcp))
         agents = parsed.get(str(shared_root / "config" / "agents.json"), {})
         for identity, cfg in (agents.get("agents") or {}).items():
             for forbidden in ("role", "defaultRole", "preferred", "default"):

@@ -25,6 +25,11 @@ export const connectionSchema = z.object({
   verifiedIdentity: z.string().nullable().optional(),
   verifiedAt: z.string().nullable().optional(),
   detail: z.string().nullable().optional(), oauth: z.boolean(), authMethod: z.string().optional(),
+  // How many tools the last verification found, and whether all of them only
+  // read. `null` means "not verified", which the console must not render as
+  // read-only — that distinction is the whole point of these two fields.
+  verifiedTools: z.number().nullable().optional(),
+  readOnly: z.boolean().nullable().optional(),
 })
 
 export const connectionProvidersResponseSchema = z.object({

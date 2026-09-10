@@ -99,6 +99,22 @@ you make orchestrator for a run, written by `mcp-sync --run <run-id>` when you
 approve the combined plan and roles. There is no permanently privileged account
 because there is no permanent orchestrator.
 
+Rovo's OAuth token belongs to the MCP client, not to FDE, which has a consequence
+worth knowing before you rely on it: FDE cannot ask the server what tools it has,
+so it cannot hand the client a read-only allowlist for it. Atlassian therefore
+reaches an approved run with every tool it offers, and its writes are stopped at
+publication by `fde approve-publish <run-id> jira|confluence` rather than at the
+tool call. `fde mcp status atlassian` says exactly this, and so does the run's own
+`mcp/README.md`. If you know the read tool names your tenant exposes, close the
+gap once:
+
+```bash
+fde mcp configure atlassian --set allowTools=getJiraIssue,searchConfluencePages
+```
+
+From then on the allowlist is enforced in each client's own mechanism, like every
+other governed server.
+
 To use it, start the interactive workflow and approve its combined proposal:
 
 ```bash

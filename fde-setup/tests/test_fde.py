@@ -75,6 +75,11 @@ class Sandbox:
             dst = self.shared / "bin" / name
             shutil.copy2(SRC_SHARED / "bin" / name, dst)
             dst.chmod(0o755)
+        # The controller, mcp-sync and fde-doctor share one implementation of the
+        # MCP catalogue. A sandbox without it is not a smaller install, it is a
+        # broken one — so the library travels with the binaries.
+        shutil.copytree(SRC_SHARED / "lib", self.shared / "lib", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(SRC_SHARED / "config/agents.json", self.shared / "config/agents.json")
         shutil.copy2(SRC_SHARED / "config/provider-templates.json",
                      self.shared / "config/provider-templates.json")
