@@ -6,7 +6,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { GuiConfig } from '../config'
 import type { AccountService, ChatProvider, Effort } from './accounts'
-import { runControllerWithStdin } from './controller'
+import { runController, runControllerWithStdin } from './controller'
 
 export const CHAT_ID_PATTERN = /^chat-[0-9]{8}-[a-f0-9]{8}$/
 
@@ -102,8 +102,17 @@ export class ChatBusy extends Error {}
 export class ChatNotFound extends Error {}
 export class InvalidAttachment extends Error {}
 
-interface ChatMcpServer { name: string; url: string }
-interface ChatServiceContext { text: string; mcpServers: ChatMcpServer[] }
+type ChatMcpAuth = 'oauth' | 'bearer' | 'header' | 'basic' | 'none'
+interface ChatMcpServer {
+  name: string
+  url: string
+  authMethod: ChatMcpAuth
+  secretEnvVar?: string
+  headerName?: string
+  oauthClientId?: string
+  oauthResource?: string
+}
+interface ChatServiceContext { text: string; mcpServers: ChatMcpServer[]; env: NodeJS.ProcessEnv }
 
 const SENSITIVE_SEGMENTS = new Set([
   '.ssh', '.aws', '.gnupg', '.kube', '.git', 'keychains', 'mcp',
@@ -344,7 +353,7 @@ export class ChatService {
   }
 
   private async serviceContext(chat: ChatRecord, prompt: string): Promise<ChatServiceContext> {
-    if (chat.serviceConnectionIds.length === 0) return { text: '', mcpServers: [] }
+    if (chat.serviceConnectionIds.length === 0) return { text: '', mcpServers: [], env: {} }
     const args = ['connections', 'context']
     for (const id of chat.serviceConnectionIds) args.push('--connection', id)
     args.push('--json')
@@ -355,7 +364,7 @@ export class ChatService {
         Readable.from([Buffer.from(prompt, 'utf8')]),
         20_000,
       )
-      if (!raw || typeof raw !== 'object') return { text: '', mcpServers: [] }
+      if (!raw || typeof raw !== 'object') return { text: '', mcpServers: [], env: {} }
       const value = raw as Record<string, unknown>
       const context = typeof value.context === 'string' ? value.context : ''
       const warnings = Array.isArray(value.warnings)
@@ -365,15 +374,25 @@ export class ChatService {
         ? value.mcpServers.flatMap((item) => {
           if (!item || typeof item !== 'object') return []
           const server = item as Record<string, unknown>
-          return typeof server.name === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(server.name) &&
-            typeof server.url === 'string' && /^https:\/\/[A-Za-z0-9.-]+(?:\/[^\s]*)?$/.test(server.url)
-            ? [{ name: server.name, url: server.url }]
-            : []
+          if (typeof server.name !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/.test(server.name) ||
+              typeof server.url !== 'string' || !this.safeMcpUrl(server.url)) return []
+          const authMethod = ['oauth', 'bearer', 'header', 'basic', 'none'].includes(String(server.authMethod))
+            ? server.authMethod as ChatMcpAuth
+            : 'oauth'
+          const secretEnvVar = typeof server.secretEnvVar === 'string' && /^FDE_MCP_SECRET_[A-F0-9]{16}$/.test(server.secretEnvVar)
+            ? server.secretEnvVar : undefined
+          const headerName = typeof server.headerName === 'string' && /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/.test(server.headerName)
+            ? server.headerName : undefined
+          return [{ name: server.name, url: server.url, authMethod, secretEnvVar, headerName,
+            oauthClientId: typeof server.oauthClientId === 'string' ? server.oauthClientId.slice(0, 300) : undefined,
+            oauthResource: typeof server.oauthResource === 'string' && this.safeMcpUrl(server.oauthResource) ? server.oauthResource : undefined }]
         })
         : []
+      const env = await this.mcpEnvironment(chat.serviceConnectionIds, mcpServers)
       return {
         text: `${context}${warnings.length ? `Service access notes:\n${warnings.map((item) => `- ${item}`).join('\n')}\n\n` : ''}`,
         mcpServers,
+        env,
       }
     } catch {
       // Provider/controller output can contain private response data. Keep the
@@ -381,16 +400,53 @@ export class ChatService {
       return {
         text: 'Service access note: the selected connection could not read this message\'s linked content. No credential was shared with the chat provider.\n\n',
         mcpServers: [],
+        env: {},
       }
     }
+  }
+
+  private safeMcpUrl(value: string): boolean {
+    try {
+      const parsed = new URL(value)
+      return parsed.username === '' && parsed.password === '' && parsed.hash === '' &&
+        (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)))
+    } catch { return false }
+  }
+
+  private async mcpEnvironment(ids: string[], servers: ChatMcpServer[]): Promise<NodeJS.ProcessEnv> {
+    if (!servers.some((server) => server.secretEnvVar)) return {}
+    const args = ['connections', 'env']
+    for (const id of ids) args.push('--connection', id)
+    const { stdout } = await runController(this.config, args)
+    const values = stdout.split('\0')
+    if (values.at(-1) === '') values.pop()
+    if (values.length % 2 !== 0) throw new Error('invalid MCP credential environment')
+    const allowed = new Set(servers.flatMap((server) => server.secretEnvVar ? [server.secretEnvVar] : []))
+    const env: NodeJS.ProcessEnv = {}
+    for (let index = 0; index < values.length; index += 2) {
+      const name = values[index]
+      const value = values[index + 1]
+      if (name === undefined || value === undefined || !allowed.has(name)) {
+        throw new Error('unexpected MCP credential environment')
+      }
+      env[name] = value
+    }
+    return env
   }
 
   private writeChatMcpConfig(chatId: string, servers: ChatMcpServer[]): string | null {
     if (servers.length === 0) return null
     const target = path.join(this.config.chatsRoot, `${chatId}.mcp.json`)
-    const mcpServers = Object.fromEntries(
-      servers.map((server) => [server.name, { type: 'http', url: server.url }]),
-    )
+    const mcpServers = Object.fromEntries(servers.map((server) => {
+      const config: Record<string, unknown> = { type: 'http', url: server.url }
+      if (server.authMethod === 'bearer' && server.secretEnvVar) {
+        config.headers = { Authorization: `Bearer \${${server.secretEnvVar}}` }
+      } else if ((server.authMethod === 'header' || server.authMethod === 'basic') && server.secretEnvVar) {
+        config.headers = { [server.authMethod === 'header' ? server.headerName ?? 'X-API-Key' : 'Authorization']: `\${${server.secretEnvVar}}` }
+      }
+      if (server.authMethod === 'oauth' && server.oauthClientId) config.oauth = { clientId: server.oauthClientId }
+      return [server.name, config]
+    }))
     writeFileSync(target, `${JSON.stringify({ mcpServers }, null, 2)}\n`, { mode: 0o600 })
     return target
   }
@@ -417,7 +473,7 @@ export class ChatService {
     // being cheaper, this preserves prompt-launch timing for stop/delete.
     const service = chat.serviceConnectionIds.length > 0
       ? await this.serviceContext(chat, prompt)
-      : { text: '', mcpServers: [] }
+      : { text: '', mcpServers: [], env: {} }
     const attachmentContext = await this.attachmentContext(chat.attachments)
     const outgoing = `${service.text}${attachmentContext}${prompt}`
 
@@ -440,6 +496,18 @@ export class ChatService {
       if (chat.effort !== 'auto') args.push('-c', `model_reasoning_effort="${chat.effort}"`)
       for (const server of service.mcpServers) {
         args.push('-c', `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`)
+        if (server.authMethod === 'bearer' && server.secretEnvVar) {
+          args.push('-c', `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.secretEnvVar)}`)
+        } else if ((server.authMethod === 'header' || server.authMethod === 'basic') && server.secretEnvVar) {
+          const header = server.authMethod === 'header' ? server.headerName ?? 'X-API-Key' : 'Authorization'
+          args.push('-c', `mcp_servers.${server.name}.env_http_headers={ ${JSON.stringify(header)} = ${JSON.stringify(server.secretEnvVar)} }`)
+        }
+        if (server.authMethod === 'oauth' && server.oauthClientId) {
+          args.push('-c', `mcp_servers.${server.name}.oauth.client_id=${JSON.stringify(server.oauthClientId)}`)
+        }
+        if (server.authMethod === 'oauth' && server.oauthResource) {
+          args.push('-c', `mcp_servers.${server.name}.oauth_resource=${JSON.stringify(server.oauthResource)}`)
+        }
       }
       if (!firstTurn) args.push(chat.claudeSessionId)
       args.push(outgoing)
@@ -486,7 +554,9 @@ export class ChatService {
       file: isCodex ? this.config.codexBin : isGemini ? this.config.agyBin : this.config.claudeBin,
       args,
       cwd: chat.cwd,
-      env: this.accounts.profileEnv(chat.accountId),
+      env: isGemini ? this.accounts.profileEnv(chat.accountId) : {
+        ...this.accounts.profileEnv(chat.accountId), ...service.env,
+      },
     })
     this.active.set(chatId, command)
     try {

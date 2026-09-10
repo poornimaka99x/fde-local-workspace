@@ -74,6 +74,51 @@ class Connections(unittest.TestCase):
             {"name": "figma-design", "url": "https://mcp.figma.com/mcp"},
         ])
 
+    def test_custom_mcp_authentication_is_validated_and_secret_stays_out_of_config(self):
+        providers = {item["provider"]: item for item in self.fde("providers")["providers"]}
+        auth = next(field for field in providers["custom-mcp"]["fields"]
+                    if field["name"] == "authMethod")
+        self.assertEqual({option["value"] for option in auth["options"]},
+                         {"oauth", "bearer", "header", "basic", "none"})
+        created = self.fde("add", "--provider", "custom-mcp", "--name", "Knowledge",
+                           "--field", "url=https://mcp.example.com/mcp",
+                           "--field", "authMethod=bearer")
+        self.assertFalse(created["connection"]["configured"])
+        secret = "mcp-secret-that-never-enters-metadata"
+        self.fde("set-secret", "custom-mcp-knowledge", stdin=secret)
+        context = self.fde("context", "--connection", "custom-mcp-knowledge",
+                           stdin="Use the knowledge server")
+        server = context["mcpServers"][0]
+        self.assertEqual(server["authMethod"], "bearer")
+        self.assertRegex(server["secretEnvVar"], r"^FDE_MCP_SECRET_[A-F0-9]{16}$")
+        self.assertNotIn(secret, json.dumps(context))
+        metadata = Path(self.env["FDE_CONNECTIONS_FILE"]).read_text()
+        self.assertNotIn(secret, metadata)
+
+        raw = subprocess.run(
+            [str(FDE), "connections", "env", "--connection", "custom-mcp-knowledge"],
+            capture_output=True, env=self.env, check=True).stdout
+        parts = raw.rstrip(b"\0").split(b"\0")
+        self.assertEqual(parts, [server["secretEnvVar"].encode(), secret.encode()])
+
+    def test_custom_mcp_rejects_insecure_remote_urls_and_invalid_headers(self):
+        bad_url = self.fde("add", "--provider", "custom-mcp", "--name", "Bad",
+                           "--field", "url=http://example.com/mcp",
+                           "--field", "authMethod=none", code=2)
+        self.assertEqual(bad_url["error"]["code"], "field_invalid")
+        bad_header = self.fde("add", "--provider", "custom-mcp", "--name", "Bad header",
+                              "--field", "url=https://example.com/mcp",
+                              "--field", "authMethod=header",
+                              "--field", "headerName=Host", code=2)
+        self.assertEqual(bad_header["error"]["code"], "field_invalid")
+
+    def test_custom_mcp_none_needs_no_secret(self):
+        answer = self.fde("add", "--provider", "custom-mcp", "--name", "Local",
+                          "--field", "url=http://127.0.0.1:8765/mcp",
+                          "--field", "authMethod=none")
+        self.assertTrue(answer["connection"]["configured"])
+        self.assertEqual(answer["connection"]["status"], "configured")
+
     def test_chat_context_requires_explicit_connection_and_never_emits_token(self):
         self.fde("add", "--provider", "github", "--name", "Work")
         secret = "ghp_unmistakable_secret_value"

@@ -73,7 +73,7 @@ export function NewChatForm(): JSX.Element {
           <p className="muted">Allow this chat to read linked content through specific configured connections. Credentials stay in FDE and are never sent to the AI provider.</p>
           {connections.error ? <ErrorState error={connections.error} /> : null}
           {(connections.data?.connections ?? []).filter((connection) => connection.configured).length === 0 ?
-            <p className="banner">No configured service connections are available. Add Atlassian REST, Rovo, GitHub, Bitbucket or Figma under Configuration.</p> :
+            <p className="banner">No configured service connections are available. Add a built-in service or custom MCP server under Configuration.</p> :
             <div className="service-choice-grid">
               {(connections.data?.connections ?? []).filter((connection) => connection.configured).map((connection) => {
                 const checked = serviceConnectionIds.includes(connection.id)
@@ -86,7 +86,7 @@ export function NewChatForm(): JSX.Element {
             </div>}
         </fieldset>
         <p className="banner warn">
-          Claude tools stay disabled unless you select Rovo or Figma; those OAuth MCP servers are then scoped to this chat. Codex chats run read-only and receive the same selected MCP scope. Gemini chats run Antigravity in plan mode and a restricted sandbox, but its current CLI cannot load per-chat MCP configuration. REST services resolve only links included in your message.
+          Selected MCP servers are scoped to this chat. Claude and Codex receive their URL and authentication configuration; stored credentials enter only the local client process environment. Gemini chats run Antigravity in plan mode and a restricted sandbox, but its current CLI cannot load per-chat MCP configuration. REST services resolve only links included in your message.
         </p>
         <div className="stack">
           <button className="action primary" type="submit" disabled={saving || accountId === ''}>{saving ? 'Creating…' : 'Create chat'}</button>

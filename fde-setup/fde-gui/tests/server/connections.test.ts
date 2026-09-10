@@ -28,6 +28,20 @@ describe('service connections', () => {
     expect(h.calls()).toContainEqual(['connections', 'add', '--provider', 'github', '--name', 'Work', '--json'])
   })
 
+  it('passes custom MCP metadata as bounded fields, never as credentials', async () => {
+    h.fixture('connections-add', { schemaVersion: 1, connection })
+    const response = await h.app.inject({ method: 'POST', url: '/api/connections', headers: headers(h.token),
+      payload: { provider: 'custom-mcp', name: 'Knowledge', fields: {
+        url: 'https://mcp.example.com/mcp', authMethod: 'header', headerName: 'X-API-Key',
+      } } })
+    expect(response.statusCode).toBe(201)
+    expect(h.calls()).toContainEqual([
+      'connections', 'add', '--provider', 'custom-mcp', '--name', 'Knowledge',
+      '--field', 'url=https://mcp.example.com/mcp', '--field', 'authMethod=header',
+      '--field', 'headerName=X-API-Key', '--json',
+    ])
+  })
+
   it('passes a token on stdin and never argv or response', async () => {
     const secret = 'ghp_unmistakable_secret_value'
     const response = await h.app.inject({ method: 'POST', url: '/api/connections/github-work/secret',

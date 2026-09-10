@@ -1,12 +1,17 @@
 import { z } from 'zod'
 
+export const connectionProviderIdSchema = z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma', 'custom-mcp'])
+
 export const connectionProviderSchema = z.object({
-  provider: z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma']),
+  provider: connectionProviderIdSchema,
   label: z.string(),
   secretLabel: z.string().nullable(),
   docsUrl: z.string().url(),
   fields: z.array(z.object({
     name: z.string(), label: z.string(), required: z.boolean(), placeholder: z.string().optional(),
+    type: z.enum(['text', 'url', 'select']).optional(), defaultValue: z.string().optional(),
+    options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+    showWhen: z.object({ field: z.string(), equals: z.string() }).optional(),
   })),
   note: z.string(),
   oauth: z.boolean().optional(),
@@ -14,12 +19,12 @@ export const connectionProviderSchema = z.object({
 
 export const connectionSchema = z.object({
   id: z.string(), name: z.string(),
-  provider: z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma']),
+  provider: connectionProviderIdSchema,
   providerLabel: z.string(), fields: z.record(z.string()),
   configured: z.boolean(), status: z.string(),
   verifiedIdentity: z.string().nullable().optional(),
   verifiedAt: z.string().nullable().optional(),
-  detail: z.string().nullable().optional(), oauth: z.boolean(),
+  detail: z.string().nullable().optional(), oauth: z.boolean(), authMethod: z.string().optional(),
 })
 
 export const connectionProvidersResponseSchema = z.object({

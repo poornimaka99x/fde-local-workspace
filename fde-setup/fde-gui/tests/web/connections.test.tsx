@@ -29,6 +29,16 @@ const providers = [
     provider: 'figma', label: 'Figma', secretLabel: null,
     docsUrl: 'https://example.test/figma', note: 'OAuth stays in the MCP client.', oauth: true, fields: [],
   },
+  {
+    provider: 'custom-mcp', label: 'Custom MCP server', secretLabel: 'Credential',
+    docsUrl: 'https://modelcontextprotocol.io', note: 'Connect a remote MCP server.', oauth: false,
+    fields: [
+      { name: 'url', label: 'MCP URL', required: true, type: 'url' },
+      { name: 'authMethod', label: 'Authentication', required: true, type: 'select', defaultValue: 'oauth',
+        options: [{ value: 'oauth', label: 'OAuth 2.1' }, { value: 'header', label: 'API key / custom header' }] },
+      { name: 'headerName', label: 'Header name', required: true, showWhen: { field: 'authMethod', equals: 'header' } },
+    ],
+  },
 ]
 
 describe('service connections panel', () => {
@@ -98,6 +108,15 @@ describe('service connections panel', () => {
     expect(sent.find((item) => item.url.endsWith('/secret'))?.body).toEqual({ secret: token })
     expect(card).not.toHaveTextContent(token)
     expect(within(card).getByLabelText(/token/i)).toHaveValue('')
+  })
+
+  it('asks only for details required by the selected MCP authentication method', async () => {
+    render(<ConnectionsView />)
+    await userEvent.selectOptions(await screen.findByLabelText('Provider'), 'custom-mcp')
+    expect(screen.getByLabelText('MCP URL')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Header name')).toBeNull()
+    await userEvent.selectOptions(screen.getByLabelText('Authentication'), 'header')
+    expect(screen.getByLabelText('Header name')).toBeInTheDocument()
   })
 
   it('explains that Figma OAuth belongs to the run-scoped MCP client', async () => {

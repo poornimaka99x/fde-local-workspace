@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Start the FDE Control Center — the local operator console for this toolkit.
+#
+#   fde-gui                 build if needed, start, open the browser
+#   fde-gui --port 7400     listen somewhere else
+#   fde-gui --no-open       start without opening a browser
+#   fde-gui --rebuild       rebuild the interface even if it looks current
+#   fde-gui --install       (re)install dependencies, then start
+#
+# The console binds to 127.0.0.1 only. Each launch mints a new session token and
+# puts it in the URL fragment, which browsers never send to a server; the link
+# is valid for that launch alone.
+set -euo pipefail
+
+SHARED="${CLAUDE_SHARED:-$HOME/.claude-shared}"
+ROOT="${FDE_GUI_ROOT:-$SHARED/fde-gui}"
+PORT="${FDE_GUI_PORT:-7317}"
+OPEN=1
+REBUILD=0
+INSTALL=0
+
+say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
+note() { printf '    %s\n' "$*"; }
+die()  { printf 'fde-gui: %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)     PORT="${2:-}"; shift 2 ;;
+    --no-open)  OPEN=0; shift ;;
+    --rebuild)  REBUILD=1; shift ;;
+    --install)  INSTALL=1; shift ;;
+    -h|--help)  sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)          die "unknown argument: $1" ;;
+  esac
+done
+
+[[ "$PORT" =~ ^[0-9]+$ ]] || die "--port takes a number, got '$PORT'"
+[[ -d "$ROOT" ]] || die "no console at $ROOT — run ./install.sh --update from your fde-setup checkout"
+
+command -v node >/dev/null 2>&1 || die "node is not on your PATH. The console needs Node 22 or later."
+major="$(node -p 'process.versions.node.split(".")[0]')"
+(( major >= 22 )) || die "node $major is too old; the console needs Node 22 or later."
+
+command -v "$SHARED/bin/fde" >/dev/null 2>&1 || [[ -x "$SHARED/bin/fde" ]] || \
+  note "no controller at $SHARED/bin/fde — the console will say so on every screen"
+
+cd "$ROOT"
+
+if (( INSTALL )) || [[ ! -d node_modules ]]; then
+  say "installing console dependencies (once)"
+  npm install --no-audit --no-fund
+fi
+
+# Rebuild when asked, when there is no build, or when a source file is newer
+# than the built bundle.
+needs_build=0
+if (( REBUILD )) || [[ ! -f dist/web/index.html ]]; then
+  needs_build=1
+elif [[ -n "$(find web server package.json vite.config.ts -newer dist/web/index.html -type f -print -quit 2>/dev/null)" ]]; then
+  needs_build=1
+fi
+if (( needs_build )); then
+  say "building the interface"
+  npx vite build
+fi
+
+# A fresh token every launch. It never reaches a log: the server does not log
+# requests, and a fragment is not sent to the server at all.
+token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+url="http://127.0.0.1:$PORT/#token=$token"
+
+if (( OPEN )); then
+  (
+    for _ in $(seq 1 60); do
+      if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+        exec 3>&-
+        if command -v open >/dev/null 2>&1; then open "$url"
+        elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1
+        fi
+        exit 0
+      fi
+      sleep 0.5
+    done
+  ) &
+fi
+
+say "FDE Control Center on http://127.0.0.1:$PORT"
+note "runs      ${FDE_RUNS_DIR:-$SHARED/runs}"
+note "stop with Ctrl-C; a running orchestrator session is hung up with it"
+FDE_GUI_TOKEN="$token" FDE_GUI_PORT="$PORT" exec npx tsx server/src/index.ts

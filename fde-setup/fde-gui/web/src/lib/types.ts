@@ -984,11 +984,16 @@ export interface AccountRemovedResponse {
 
 // ------------------------------------------------------- service connections --
 export interface ConnectionProvider {
-  provider: 'atlassian' | 'atlassian-rovo' | 'github' | 'bitbucket' | 'figma'
+  provider: 'atlassian' | 'atlassian-rovo' | 'github' | 'bitbucket' | 'figma' | 'custom-mcp'
   label: string
   secretLabel: string | null
   docsUrl: string
-  fields: { name: string; label: string; required: boolean; placeholder?: string }[]
+  fields: {
+    name: string; label: string; required: boolean; placeholder?: string
+    type?: 'text' | 'url' | 'select'; defaultValue?: string
+    options?: { value: string; label: string }[]
+    showWhen?: { field: string; equals: string }
+  }[]
   note: string
   oauth?: boolean
 }
@@ -1005,6 +1010,7 @@ export interface ServiceConnection {
   verifiedAt?: string | null
   detail?: string | null
   oauth: boolean
+  authMethod?: string
 }
 
 export interface ConnectionProviderListResponse {

@@ -13,6 +13,14 @@ function statusClass(status: string): string {
   return 'warn'
 }
 
+function credentialLabel(connection: ServiceConnection, provider?: ConnectionProvider): string | null {
+  if (connection.provider !== 'custom-mcp') return provider?.secretLabel ?? 'Token'
+  if (connection.authMethod === 'bearer') return 'Bearer token'
+  if (connection.authMethod === 'header') return `${connection.fields.headerName || 'Header'} value`
+  if (connection.authMethod === 'basic') return 'Password'
+  return null
+}
+
 function ConnectionCard({ connection, provider, reload }: {
   connection: ServiceConnection; provider?: ConnectionProvider; reload: () => void
 }): JSX.Element {
@@ -20,6 +28,7 @@ function ConnectionCard({ connection, provider, reload }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
   const [removing, setRemoving] = useState(false)
+  const secretLabel = credentialLabel(connection, provider)
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true); setError(null)
     try { await fn(); reload() } catch (cause) {
@@ -46,15 +55,17 @@ function ConnectionCard({ connection, provider, reload }: {
     {connection.oauth ? <div className="banner">
       {connection.provider === 'atlassian-rovo' ? <>
         Rovo uses its own Atlassian OAuth sign-in at <code>https://mcp.atlassian.com/v2/mcp</code>. It is separate from the Atlassian REST API token.
-      </> : <>
+      </> : connection.provider === 'figma' ? <>
         Figma uses OAuth in the assigned MCP client at <code>https://mcp.figma.com/mcp</code>.
+      </> : <>
+        This server uses MCP OAuth 2.1. Select it for a Claude or Codex chat, then complete the browser sign-in when that MCP client requests it.
       </>} FDE never receives that OAuth token.
-    </div> : <form className="secret-row" onSubmit={(event) => void save(event)}>
-      <label><span>{connection.configured ? `Replace ${provider?.secretLabel ?? 'token'}` : provider?.secretLabel ?? 'Token'}</span>
+    </div> : secretLabel ? <form className="secret-row" onSubmit={(event) => void save(event)}>
+      <label><span>{connection.configured ? `Replace ${secretLabel}` : secretLabel}</span>
         <input type="password" autoComplete="off" spellCheck={false} value={secret}
           onChange={(event) => setSecret(event.target.value)} /></label>
       <button className="action" disabled={busy || secret.length < 8}>{connection.configured ? 'Replace' : 'Store securely'}</button>
-    </form>}
+    </form> : <p className="banner">This MCP server does not require a credential.</p>}
     <div className="connection-actions">
       {!connection.oauth ? <button className="action" disabled={busy} onClick={() => void act(async () => apiSend(
         `/api/connections/${encodeURIComponent(connection.id)}/verify`, 'POST', {}))}>
@@ -84,11 +95,16 @@ export function ConnectionsView(): JSX.Element {
   if (connections.error) return <ErrorState error={connections.error} />
   if (!providers.data || !connections.data) return <Loading label="Reading service connections…" />
   const selected = providers.data.providers.find((p) => p.provider === providerId) ?? providers.data.providers[0]
+  const effectiveFields = Object.fromEntries((selected?.fields ?? []).map((field) => [
+    field.name, fields[field.name] ?? field.defaultValue ?? '',
+  ]))
+  const visibleFields = (selected?.fields ?? []).filter((field) =>
+    !field.showWhen || effectiveFields[field.showWhen.field] === field.showWhen.equals)
   const reload = (): void => { providers.reload(); connections.reload() }
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault(); setBusy(true); setError(null)
     try {
-      await apiSend('/api/connections', 'POST', { provider: providerId, name: name.trim(), fields })
+      await apiSend('/api/connections', 'POST', { provider: providerId, name: name.trim(), fields: effectiveFields })
       setName(''); setFields({}); reload()
     } catch (cause) { setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not add connection.')) }
     finally { setBusy(false) }
@@ -105,10 +121,14 @@ export function ConnectionsView(): JSX.Element {
       <label><span>Provider</span><select value={providerId} onChange={(e) => { setProviderId(e.target.value as ConnectionProvider['provider']); setFields({}) }}>
         {providers.data.providers.map((p) => <option value={p.provider} key={p.provider}>{p.label}</option>)}</select></label>
       <label><span>Connection name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Work, client, sandbox…" /></label>
-      {(selected?.fields ?? []).map((field) => <label key={field.name}><span>{field.label}</span>
-        <input required={field.required} placeholder={field.placeholder} value={fields[field.name] ?? ''}
-          onChange={(e) => setFields((v) => ({ ...v, [field.name]: e.target.value }))} /></label>)}
-      <button className="action primary" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add connection'}</button>
+      {visibleFields.map((field) => <label key={field.name}><span>{field.label}</span>
+        {field.type === 'select' ? <select required={field.required} value={effectiveFields[field.name]}
+          onChange={(e) => setFields((v) => ({ ...v, [field.name]: e.target.value }))}>
+          {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select> : <input type={field.type === 'url' ? 'url' : 'text'} required={field.required}
+          placeholder={field.placeholder} value={effectiveFields[field.name]}
+          onChange={(e) => setFields((v) => ({ ...v, [field.name]: e.target.value }))} />}</label>)}
+      <button className="action primary" disabled={busy || !name.trim() || visibleFields.some((field) => field.required && !effectiveFields[field.name]?.trim())}>{busy ? 'Adding…' : 'Add connection'}</button>
     </form>
     {connections.data.connections.length === 0 ? <EmptyState title="No service connections">Add one above. Tokens are entered only after the safe metadata record exists.</EmptyState> :
       <div className="connection-grid">{connections.data.connections.map((c) => <ConnectionCard key={c.id} connection={c} provider={byProvider.get(c.provider)} reload={reload} />)}</div>}

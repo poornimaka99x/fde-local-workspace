@@ -2010,7 +2010,34 @@ CONNECTION_PROVIDERS = {
         "fields": [], "oauth": True,
         "note": "Uses Figma's remote MCP server. OAuth stays in the MCP client; FDE stores no Figma token.",
     },
+    "custom-mcp": {
+        "label": "Custom MCP server", "secretLabel": "Credential",
+        "docsUrl": "https://modelcontextprotocol.io/docs/getting-started/intro",
+        "fields": [
+            {"name": "url", "label": "MCP URL", "required": True, "type": "url",
+             "placeholder": "https://mcp.example.com/mcp"},
+            {"name": "authMethod", "label": "Authentication", "required": True,
+             "type": "select", "defaultValue": "oauth", "options": [
+                 {"value": "oauth", "label": "OAuth 2.1 (browser sign-in)"},
+                 {"value": "bearer", "label": "Bearer token"},
+                 {"value": "header", "label": "API key / custom header"},
+                 {"value": "basic", "label": "HTTP Basic"},
+                 {"value": "none", "label": "No authentication"},
+             ]},
+            {"name": "headerName", "label": "Header name", "required": True,
+             "placeholder": "X-API-Key", "showWhen": {"field": "authMethod", "equals": "header"}},
+            {"name": "username", "label": "Username", "required": True,
+             "placeholder": "service-account", "showWhen": {"field": "authMethod", "equals": "basic"}},
+            {"name": "oauthClientId", "label": "OAuth client ID (optional)", "required": False,
+             "placeholder": "Leave blank for automatic registration", "showWhen": {"field": "authMethod", "equals": "oauth"}},
+            {"name": "oauthResource", "label": "OAuth resource (optional)", "required": False,
+             "placeholder": "https://resource.example.com", "showWhen": {"field": "authMethod", "equals": "oauth"}},
+        ],
+        "note": "Connect any remote Streamable HTTP MCP server. The selected authentication method controls which details and credential FDE requests.",
+    },
 }
+
+MCP_AUTH_METHODS = ("oauth", "bearer", "header", "basic", "none")
 
 
 @contextlib.contextmanager
@@ -2120,14 +2147,18 @@ def delete_connection_secret(cid):
 
 
 def public_connection(cid, item):
-    configured = bool(CONNECTION_PROVIDERS.get(item.get("provider"), {}).get("oauth")
-                      or connection_secret_exists(cid))
+    provider = item.get("provider")
+    auth_method = ((item.get("fields") or {}).get("authMethod")
+                   if provider == "custom-mcp" else
+                   "oauth" if CONNECTION_PROVIDERS.get(provider, {}).get("oauth") else "token")
+    needs_secret = auth_method in ("bearer", "header", "basic", "token")
+    configured = bool(not needs_secret or connection_secret_exists(cid))
     status = item.get("status")
     # Secret presence is the current configuration truth. Metadata can lag
     # when an earlier process stored the token but stopped before rewriting the
     # JSON record, or when a connection record is recreated for an existing
     # secret record.
-    if not CONNECTION_PROVIDERS.get(item.get("provider"), {}).get("oauth"):
+    if needs_secret:
         if configured and status == "not_configured":
             status = "configured"
         elif not configured and status in ("configured", "connected"):
@@ -2142,7 +2173,8 @@ def public_connection(cid, item):
         "verifiedIdentity": item.get("verifiedIdentity"),
         "verifiedAt": item.get("verifiedAt"),
         "detail": item.get("detail"),
-        "oauth": bool(CONNECTION_PROVIDERS.get(item.get("provider"), {}).get("oauth")),
+        "oauth": auth_method == "oauth",
+        "authMethod": auth_method,
     }
 
 
@@ -2170,7 +2202,9 @@ def _validate_connection_fields(provider, values):
         raise AccountError("field_invalid", f"unknown field(s): {', '.join(sorted(unknown))}")
     out = {str(k): str(v).strip() for k, v in values.items()}
     for field in spec["fields"]:
-        if field["required"] and not out.get(field["name"]):
+        condition = field.get("showWhen")
+        visible = not condition or out.get(condition["field"]) == condition["equals"]
+        if field["required"] and visible and not out.get(field["name"]):
             raise AccountError("field_required", f"{field['label']} is required")
     if provider == "atlassian":
         parsed = urllib.parse.urlparse(out["siteUrl"])
@@ -2180,6 +2214,29 @@ def _validate_connection_fields(provider, values):
         out["siteUrl"] = f"https://{parsed.hostname}"
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", out["email"]):
             raise AccountError("field_invalid", "Atlassian account email is invalid")
+    elif provider == "custom-mcp":
+        auth_method = out.get("authMethod")
+        if auth_method not in MCP_AUTH_METHODS:
+            raise AccountError("field_invalid", "select a supported MCP authentication method")
+        parsed = urllib.parse.urlparse(out["url"])
+        loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        if parsed.scheme not in (("http", "https") if loopback else ("https",)) or \
+                not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+            raise AccountError("field_invalid", "MCP URL must use HTTPS (HTTP is allowed only for localhost), with no credentials or fragment")
+        if len(out["url"]) > 2048:
+            raise AccountError("field_invalid", "MCP URL is too long")
+        out["url"] = urllib.parse.urlunparse(parsed)
+        if auth_method == "header" and (not re.match(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$", out.get("headerName", ""))
+                                                or out["headerName"].lower() in ("host", "content-length", "connection", "transfer-encoding")):
+            raise AccountError("field_invalid", "enter a safe HTTP header name")
+        if auth_method == "oauth" and out.get("oauthResource"):
+            resource = urllib.parse.urlparse(out["oauthResource"])
+            if resource.scheme != "https" or not resource.hostname or resource.username or resource.password or resource.fragment:
+                raise AccountError("field_invalid", "OAuth resource must be an HTTPS URL without credentials or a fragment")
+        active = {"url", "authMethod"}
+        active.update({"header": {"headerName"}, "basic": {"username"},
+                       "oauth": {"oauthClientId", "oauthResource"}}.get(auth_method, set()))
+        out = {key: value for key, value in out.items() if key in active and value}
     return out
 
 
@@ -2194,6 +2251,11 @@ def cmd_connections_add(args):
     supplied = {}
     if getattr(args, "site_url", None): supplied["siteUrl"] = args.site_url
     if getattr(args, "email", None): supplied["email"] = args.email
+    for pair in getattr(args, "field", None) or []:
+        if "=" not in pair:
+            raise AccountError("field_invalid", "fields must use name=value")
+        key, value = pair.split("=", 1)
+        supplied[key] = value
     fields = _validate_connection_fields(provider, supplied)
     with connections_lock():
         data = load_connections()
@@ -2204,7 +2266,10 @@ def cmd_connections_add(args):
             cid, n = f"{base}-{n}", n + 1
         data["connections"][cid] = {
             "provider": provider, "name": name, "fields": fields,
-            "status": "oauth_required" if CONNECTION_PROVIDERS[provider].get("oauth") else "not_configured",
+            "status": ("oauth_required" if (provider == "custom-mcp" and fields.get("authMethod") == "oauth")
+                       or CONNECTION_PROVIDERS[provider].get("oauth") else
+                       "configured" if provider == "custom-mcp" and fields.get("authMethod") == "none"
+                       else "not_configured"),
             "createdAt": iso(),
         }
         save_connections(data)
@@ -2220,13 +2285,18 @@ def cmd_connections_set_secret(args):
     secret = raw.rstrip("\r\n")
     if len(secret) < 8:
         raise AccountError("secret_too_short", "token is too short")
+    if any(ord(char) < 32 or ord(char) == 127 for char in secret):
+        raise AccountError("secret_invalid", "credential cannot contain control characters")
     with connections_lock():
         data = load_connections()
         item = data["connections"].get(args.connection_id)
         if not item:
             raise AccountError("unknown_connection", f"no connection '{args.connection_id}'", exit_code=4)
-        if CONNECTION_PROVIDERS[item["provider"]].get("oauth"):
-            raise AccountError("oauth_connection", "this connection uses provider OAuth; no token is accepted here")
+        auth_method = ((item.get("fields") or {}).get("authMethod")
+                       if item["provider"] == "custom-mcp" else
+                       "oauth" if CONNECTION_PROVIDERS[item["provider"]].get("oauth") else "token")
+        if auth_method in ("oauth", "none"):
+            raise AccountError("oauth_connection", "this connection does not accept a pasted credential")
         store_connection_secret(args.connection_id, secret)
         item.update(status="configured", detail=None, verifiedAt=None,
                     verifiedIdentity=None)
@@ -2261,21 +2331,63 @@ def _verify_http(url, headers):
         raise AccountError("verification_network", "connection verification failed", str(exc)[:240], 4)
 
 
+def _mcp_headers(item, secret):
+    fields = item.get("fields") or {}
+    method = fields.get("authMethod")
+    if method == "bearer":
+        return {"Authorization": f"Bearer {secret}"}
+    if method == "header":
+        return {fields["headerName"]: secret}
+    if method == "basic":
+        encoded = base64.b64encode(f"{fields['username']}:{secret}".encode()).decode()
+        return {"Authorization": f"Basic {encoded}"}
+    return {}
+
+
+def _verify_mcp(item, secret):
+    """Perform only the bounded MCP initialize handshake; never follow redirects."""
+    payload = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "fde-local", "version": "1"}},
+    }).encode()
+    headers = {**_mcp_headers(item, secret), "Accept": "application/json, text/event-stream",
+               "Content-Type": "application/json", "MCP-Protocol-Version": "2025-06-18",
+               "User-Agent": "fde-local/1"}
+    req = urllib.request.Request(item["fields"]["url"], data=payload, headers=headers, method="POST")
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            return None
+    try:
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=12) as response:
+            response.read(256 * 1024)
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except (OSError, urllib.error.URLError, TimeoutError) as exc:
+        raise AccountError("verification_network", "MCP connection verification failed", str(exc)[:240], 4)
+
+
 @account_command
 def cmd_connections_verify(args):
     data = load_connections(); item = data["connections"].get(args.connection_id)
     if not item:
         raise AccountError("unknown_connection", f"no connection '{args.connection_id}'", exit_code=4)
     provider = item["provider"]
-    if CONNECTION_PROVIDERS[provider].get("oauth"):
-        endpoint = ATLASSIAN_MCP_URL if provider == "atlassian-rovo" else "https://mcp.figma.com/mcp"
+    custom_auth = (item.get("fields") or {}).get("authMethod") if provider == "custom-mcp" else None
+    if CONNECTION_PROVIDERS[provider].get("oauth") or custom_auth == "oauth":
+        endpoint = ((item.get("fields") or {}).get("url") if provider == "custom-mcp" else
+                    ATLASSIAN_MCP_URL if provider == "atlassian-rovo" else "https://mcp.figma.com/mcp")
         item.update(status="oauth_required",
                     detail=f"Authenticate {endpoint} in the assigned MCP client; FDE stores no OAuth token.")
     else:
-        secret = read_connection_secret(args.connection_id)
-        if not secret:
+        secret = read_connection_secret(args.connection_id) if custom_auth != "none" else ""
+        if custom_auth != "none" and not secret:
             raise AccountError("not_configured", "this connection has no stored token", exit_code=4)
-        if provider == "github":
+        if provider == "custom-mcp":
+            code = _verify_mcp(item, secret)
+            body, identity = {}, urllib.parse.urlparse(item["fields"]["url"]).hostname
+        elif provider == "github":
             code, body = _verify_http("https://api.github.com/user", {
                 "Authorization": f"Bearer {secret}", "Accept": "application/vnd.github+json"})
             identity = body.get("login")
@@ -2289,7 +2401,7 @@ def cmd_connections_verify(args):
             code, body = _verify_http(fields["siteUrl"] + "/rest/api/3/myself", {
                 "Authorization": f"Basic {auth}", "Accept": "application/json"})
             identity = body.get("displayName") or body.get("emailAddress")
-        if code == 200:
+        if 200 <= code < 300:
             item.update(status="connected", verifiedIdentity=str(identity or "authenticated"),
                         verifiedAt=iso(), detail="Connection verified")
         else:
@@ -2438,6 +2550,20 @@ def cmd_connections_context(args):
         if not item:
             raise AccountError("unknown_connection", f"no connection '{cid}'", exit_code=4)
         provider = item["provider"]
+        if provider == "custom-mcp":
+            fields = item.get("fields") or {}
+            method = fields.get("authMethod")
+            if method in ("bearer", "header", "basic") and not connection_secret_exists(cid):
+                warnings.append(f"{item.get('name', cid)} has no stored credential.")
+                continue
+            server = {"name": cid, "url": fields["url"], "authMethod": method}
+            if method in ("bearer", "header", "basic"):
+                server["secretEnvVar"] = _connection_env_name(cid)
+            if method == "header": server["headerName"] = fields["headerName"]
+            if fields.get("oauthClientId"): server["oauthClientId"] = fields["oauthClientId"]
+            if fields.get("oauthResource"): server["oauthResource"] = fields["oauthResource"]
+            mcp_servers.append(server)
+            continue
         if CONNECTION_PROVIDERS[provider].get("oauth"):
             endpoint = (ATLASSIAN_MCP_URL if provider == "atlassian-rovo"
                         else "https://mcp.figma.com/mcp")
@@ -2469,6 +2595,40 @@ def cmd_connections_context(args):
                    "<service-context>\n" + "\n\n".join(parts) + "\n</service-context>\n\n")
     return emit_json({"schemaVersion": 1, "context": context,
                       "warnings": warnings, "mcpServers": mcp_servers})
+
+
+def _connection_env_name(cid):
+    return "FDE_MCP_SECRET_" + hashlib.sha256(cid.encode()).hexdigest()[:16].upper()
+
+
+@account_command
+def cmd_connections_env(args):
+    """Emit selected MCP credentials as NUL-delimited name/value pairs for a child process."""
+    ids = list(dict.fromkeys(args.connection or []))
+    if len(ids) > 12:
+        raise AccountError("too_many_connections", "a chat may use at most 12 service connections")
+    records = load_connections()["connections"]
+    pairs = []
+    for cid in ids:
+        item = records.get(cid)
+        if not item:
+            raise AccountError("unknown_connection", f"no connection '{cid}'", exit_code=4)
+        if item.get("provider") != "custom-mcp":
+            continue
+        method = (item.get("fields") or {}).get("authMethod")
+        if method not in ("bearer", "header", "basic"):
+            continue
+        secret = read_connection_secret(cid)
+        if not secret:
+            raise AccountError("not_configured", f"connection '{cid}' has no stored credential", exit_code=4)
+        if method == "basic":
+            username = item["fields"]["username"]
+            secret = "Basic " + base64.b64encode(f"{username}:{secret}".encode()).decode()
+        pairs.extend((_connection_env_name(cid), secret))
+    raw = b"\0".join(value.encode() for value in pairs)
+    if raw: raw += b"\0"
+    sys.stdout.buffer.write(raw)
+    return 0
 
 
 @account_command
@@ -12970,6 +13130,7 @@ def main(argv=None):
     a.add_argument("--name", required=True)
     a.add_argument("--site-url")
     a.add_argument("--email")
+    a.add_argument("--field", action="append", default=[])
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_connections_add)
     a = con.add_parser("set-secret")
@@ -12984,6 +13145,9 @@ def main(argv=None):
     a.add_argument("--connection", action="append", default=[])
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_connections_context)
+    a = con.add_parser("env", help=argparse.SUPPRESS)
+    a.add_argument("--connection", action="append", default=[])
+    a.set_defaults(fn=cmd_connections_env)
     a = con.add_parser("remove")
     a.add_argument("connection_id")
     a.add_argument("--json", action="store_true")

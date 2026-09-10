@@ -6,7 +6,7 @@ import { problem } from '../problem'
 import { describeZod } from '../schemas/input'
 import {
   connectionDetailResponseSchema, connectionListResponseSchema,
-  connectionProvidersResponseSchema, connectionRemovedResponseSchema,
+  connectionProviderIdSchema, connectionProvidersResponseSchema, connectionRemovedResponseSchema,
 } from '../schemas/connections'
 import { ControllerError, runControllerJson, runControllerWithStdin } from '../services/controller'
 import type { Services } from '../services/types'
@@ -14,9 +14,9 @@ import { accountProblem } from './accounts'
 
 const idParams = z.object({ connectionId: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/) })
 const createBody = z.object({
-  provider: z.enum(['atlassian', 'atlassian-rovo', 'github', 'bitbucket', 'figma']),
+  provider: connectionProviderIdSchema,
   name: z.string().trim().min(1).max(49),
-  fields: z.record(z.string(), z.string().max(300)).default({}),
+  fields: z.record(z.string().max(64), z.string().max(2048)).default({}),
 })
 const secretBody = z.object({ secret: z.string().min(1).max(8192) })
 
@@ -34,8 +34,9 @@ export function registerConnectionRoutes(app: FastifyInstance, config: GuiConfig
     const body = createBody.safeParse(request.body)
     if (!body.success) return problem(reply, 400, 'invalid-body', 'Invalid connection.', describeZod(body.error))
     const args = ['connections', 'add', '--provider', body.data.provider, '--name', body.data.name]
-    if (body.data.fields.siteUrl) args.push('--site-url', body.data.fields.siteUrl)
-    if (body.data.fields.email) args.push('--email', body.data.fields.email)
+    for (const [name, value] of Object.entries(body.data.fields)) {
+      if (value !== '') args.push('--field', `${name}=${value}`)
+    }
     args.push('--json')
     try {
       const result = await call(config, args, (v) => connectionDetailResponseSchema.parse(v))
