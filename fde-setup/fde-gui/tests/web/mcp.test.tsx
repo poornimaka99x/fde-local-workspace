@@ -127,6 +127,47 @@ describe('the MCP catalogue panel', () => {
     expect(screen.getByText(/not installed/)).toBeInTheDocument()
   })
 
+  it('offers only the credential the chosen connection mode actually uses', async () => {
+    // DBHub takes either a whole DSN or a password, never both. Showing both
+    // would leave the operator guessing which one the server will read.
+    const dbhub = {
+      ...base, name: 'dbhub', state: 'not_configured',
+      reason: 'not configured: Read-only PostgreSQL DSN',
+      classification: 'customer-data', mutation: 'read-only', readOnlyPolicy: 'server-flag',
+      profiles: ['data'], missingConfiguration: ['Read-only PostgreSQL DSN'],
+      values: { connectionMode: 'dsn' },
+      requiredFields: [
+        { name: 'connectionMode', label: 'Connection', required: true, secret: false,
+          type: 'select', options: [{ value: 'dsn', label: 'A single read-only DSN' },
+            { value: 'parts', label: 'Separate host / port / database / user' }] },
+        { name: 'dsn', label: 'Read-only PostgreSQL DSN', required: true, secret: true,
+          type: 'password', options: [], showWhen: { field: 'connectionMode', equals: 'dsn' } },
+        { name: 'host', label: 'Host', required: true, secret: false, type: 'text',
+          options: [], showWhen: { field: 'connectionMode', equals: 'parts' } },
+        { name: 'password', label: 'Read-only account password', required: true, secret: true,
+          type: 'password', options: [], showWhen: { field: 'connectionMode', equals: 'parts' } },
+      ],
+      credentialsPresent: { dsn: false, password: false },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url === '/api/mcp/servers') return response({ ...catalogue, servers: [dbhub] })
+      if (url === '/api/mcp/gateway') return response(gateway)
+      return response({ title: 'unexpected request' }, 500)
+    }))
+    render(<McpCatalogView />)
+    // The form is already open, because this server is waiting on the operator.
+    await waitFor(() => expect(screen.getByText('Read-only PostgreSQL DSN')).toBeInTheDocument())
+    expect(screen.getByText(/Waiting on you/)).toBeInTheDocument()
+    expect(screen.queryByText('Read-only account password')).toBeNull()
+    expect(screen.queryByText('Host')).toBeNull()
+
+    await userEvent.selectOptions(screen.getByLabelText('Connection'), 'parts')
+    await waitFor(() => expect(screen.getByText('Read-only account password')).toBeInTheDocument())
+    expect(screen.getByText('Host')).toBeInTheDocument()
+    expect(screen.queryByText('Read-only PostgreSQL DSN')).toBeNull()
+  })
+
   it('narrows to a profile without inventing access', async () => {
     render(<McpCatalogView />)
     await waitFor(() => expect(screen.getByText('MCP servers')).toBeInTheDocument())
