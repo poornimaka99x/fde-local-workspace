@@ -2,7 +2,7 @@
   "name": "fde-gui",
   "version": "0.1.0",
   "private": true,
-  "description": "FDE Control Center \u2014 a local workspace for governed runs and Claude chats",
+  "description": "FLOW (Forward-deployed Local Operations Workspace) \u2014 the local console for governed runs and Claude chats",
   "type": "module",
   "engines": {
     "node": ">=22"

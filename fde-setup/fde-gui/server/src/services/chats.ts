@@ -439,7 +439,7 @@ export class ChatService {
    * verified tool list has a read-only subset can be admitted with exactly that
    * subset. Claude and Gemini have no per-chat tool scope to hand, so they get a
    * connection only when every tool it offers reads. An unverified server is
-   * never admitted anywhere: FDE cannot describe as read-only something it has
+   * never admitted anywhere: FLOW cannot describe as read-only something it has
    * not asked.
    */
   private scopeForChat(server: ChatMcpServer, provider: ChatProvider):
@@ -447,7 +447,7 @@ export class ChatService {
     const readable = server.allowedTools ?? []
     if (server.readOnly === true) return { allowed: true, server }
     if (server.allowedTools === undefined) {
-      return { allowed: false, reason: `${server.name} has not been verified, so FDE cannot tell which of its tools only read. Test the connection under Configuration, then try again.` }
+      return { allowed: false, reason: `${server.name} has not been verified, so FLOW cannot tell which of its tools only read. Test the connection under Configuration, then try again.` }
     }
     if (readable.length === 0) {
       return { allowed: false, reason: `${server.name} exposes no tool that is known to only read, so it was not enabled for this chat. A connection that can change things belongs in a run, behind an approval.` }
@@ -568,7 +568,7 @@ export class ChatService {
       args.push(outgoing)
     } else if (isGemini) {
       // Antigravity print mode is intentionally stateless. Carry a bounded
-      // transcript so a durable FDE chat remains conversational without
+      // transcript so a durable FLOW chat remains conversational without
       // depending on undocumented provider-side session storage.
       const history = chat.messages.slice(0, -1).slice(-12)
         .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content.slice(0, 6000)}`)
@@ -763,7 +763,7 @@ export class ChatService {
         const chat = this.read(chatId)
         if (chat.status !== 'running') continue
         chat.status = 'failed'
-        chat.lastError = 'The previous response was interrupted when the FDE console stopped. Send it again to retry.'
+        chat.lastError = 'The previous response was interrupted when the FLOW console stopped. Send it again to retry.'
         chat.updatedAt = new Date().toISOString()
         this.write(chat)
       } catch {

@@ -122,8 +122,8 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
       <Link to="/runs" className="brand">
         <Icon name="spark" size={18} className="spark" />
         <span>
-          FDE Control Center
-          <small>local agent workspace</small>
+          FLOW
+          <small>Forward-deployed Local Operations Workspace</small>
         </span>
       </Link>
 

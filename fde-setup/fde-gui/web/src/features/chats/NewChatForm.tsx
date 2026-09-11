@@ -17,7 +17,7 @@ export function NewChatForm(): JSX.Element {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
 
-  // "Read-only" is a claim FDE has to be able to back. A connection whose tools
+  // "Read-only" is a claim FLOW has to be able to back. A connection whose tools
   // have never been listed is withheld and named, rather than shown with a label
   // nothing enforces.
   const configured = (connections.data?.connections ?? []).filter((connection) => connection.configured)
@@ -55,7 +55,7 @@ export function NewChatForm(): JSX.Element {
   return (
     <>
       <h1>New chat</h1>
-      <p className="lede">A private conversation using Claude, Bedrock, ChatGPT / Codex or Gemini through Antigravity. It creates no FDE run, roles, approvals or checkpoints.</p>
+      <p className="lede">A private conversation using Claude, Bedrock, ChatGPT / Codex or Gemini through Antigravity. It creates no FLOW run, roles, approvals or checkpoints.</p>
       {error ? <ErrorState error={error} /> : null}
       <form className="card" onSubmit={(event) => void submit(event)}>
         <div className="form-grid">
@@ -83,7 +83,7 @@ export function NewChatForm(): JSX.Element {
         />
         <fieldset className="chat-service-access">
           <legend><strong>Service access</strong> <span className="muted">optional, none by default</span></legend>
-          <p className="muted">Allow this chat to read linked content through specific configured connections. Credentials stay in FDE and are never sent to the AI provider.</p>
+          <p className="muted">Allow this chat to read linked content through specific configured connections. Credentials stay in FLOW and are never sent to the AI provider.</p>
           {connections.error ? <ErrorState error={connections.error} /> : null}
           {selectable.length === 0 ?
             <p className="banner">No configured service connections are available. Add a built-in service or custom MCP server under Configuration.</p> :
@@ -99,7 +99,7 @@ export function NewChatForm(): JSX.Element {
               })}
             </div>}
           {unverified.length > 0 ? <p className="banner warn">
-            Not offered yet: {unverified.map((connection) => connection.name).join(', ')}. FDE has not asked
+            Not offered yet: {unverified.map((connection) => connection.name).join(', ')}. FLOW has not asked
             {unverified.length === 1 ? ' it' : ' them'} which tools only read, so
             {unverified.length === 1 ? ' it cannot' : ' they cannot'} be described as read-only here. Test the connection
             under Configuration first.

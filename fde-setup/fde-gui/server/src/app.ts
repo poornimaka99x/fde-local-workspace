@@ -43,7 +43,7 @@ const ASSET_TYPES: Record<string, string> = {
 }
 
 const MISSING_BUILD_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>FDE Control Center</title></head><body style="font:14px system-ui;padding:2rem">
+<title>FLOW</title></head><body style="font:14px system-ui;padding:2rem">
 <h1>The console has not been built yet</h1>
 <p>Run <code>npm run build</code> in <code>fde-gui/</code>, then reload.</p>
 </body></html>`

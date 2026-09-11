@@ -285,7 +285,7 @@ describe('Claude accounts and general chats', () => {
 
   it('withholds a connection whose tools have never been listed, and says why', async () => {
     // A chat has no plan, roles or approvals behind it. "Read-only" therefore
-    // has to be something FDE asked the server, not something the label claims.
+    // has to be something FLOW asked the server, not something the label claims.
     harness.fixture('connections-context', {
       schemaVersion: 1,
       context: '',

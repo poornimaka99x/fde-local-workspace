@@ -59,7 +59,7 @@ function ConnectionCard({ connection, provider, reload }: {
         Figma uses OAuth in the assigned MCP client at <code>https://mcp.figma.com/mcp</code>.
       </> : <>
         This server uses MCP OAuth 2.1. Select it for a Claude or Codex chat, then complete the browser sign-in when that MCP client requests it.
-      </>} FDE never receives that OAuth token.
+      </>} FLOW never receives that OAuth token.
     </div> : secretLabel ? <form className="secret-row" onSubmit={(event) => void save(event)}>
       <label><span>{connection.configured ? `Replace ${secretLabel}` : secretLabel}</span>
         <input type="password" autoComplete="off" spellCheck={false} value={secret}
@@ -84,7 +84,7 @@ export function ConnectionsView(): JSX.Element {
   const providers = useApi<ConnectionProviderListResponse>('/api/connections/providers')
   // Connections may be added by the controller CLI or another open console.
   // Refresh periodically so this inventory remains an honest view of the
-  // metadata already stored in the shared FDE configuration.
+  // metadata already stored in the shared FLOW configuration.
   const connections = useApi<ConnectionListResponse>('/api/connections', 10_000)
   const [providerId, setProviderId] = useState<ConnectionProvider['provider']>('atlassian')
   const [name, setName] = useState('')
@@ -112,7 +112,7 @@ export function ConnectionsView(): JSX.Element {
   const byProvider = new Map(providers.data.providers.map((p) => [p.provider, p]))
   return <section className="settings-section">
     <div className="settings-hero"><div><p className="eyebrow">External systems</p><h2>Service connections</h2>
-      <p className="lede">Credentials are stored locally and establish identity only. External writes still require an FDE publication approval.</p></div>
+      <p className="lede">Credentials are stored locally and establish identity only. External writes still require a FLOW publication approval.</p></div>
       <div className="security-note"><strong>Secrets stay private</strong><span>Tokens are never returned to this page after submission.</span></div>
     </div>
     <form className="connection-add" onSubmit={(event) => void submit(event)}>

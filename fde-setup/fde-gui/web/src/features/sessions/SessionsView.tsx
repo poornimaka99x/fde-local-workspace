@@ -14,7 +14,7 @@ export function SessionsView(): JSX.Element {
 
   const deleteHistory = async (runId: string): Promise<void> => {
     if (!window.confirm(
-      `Delete the console session history for ${runId}? The FDE run and its files will remain unchanged.`,
+      `Delete the console session history for ${runId}? The FLOW run and its files will remain unchanged.`,
     )) return
     setDeleting(runId)
     setDeleteError(null)

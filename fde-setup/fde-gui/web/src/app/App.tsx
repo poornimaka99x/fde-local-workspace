@@ -46,7 +46,7 @@ export function App(): JSX.Element {
   const health = useApi<HealthResponse>(token === null ? null : '/api/health', 120000)
 
   useEffect(() => {
-    document.title = 'FDE Control Center'
+    document.title = 'FLOW'
   }, [])
 
   // One poller for the whole console: it watches the server's change counter
