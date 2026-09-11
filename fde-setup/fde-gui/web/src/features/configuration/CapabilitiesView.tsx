@@ -87,7 +87,7 @@ function AddSkill({ reload }: { reload: () => void }): JSX.Element {
   if (!open) return <button className="action primary" onClick={() => setOpen(true)}>Create skill</button>
   return <form className="extension-form" onSubmit={(event) => void submit(event)}>
     <div className="extension-form-head"><div><h3>Create a user skill</h3>
-      <p className="muted">FDE keeps it in the separate <code>fde-user</code> plugin, so toolkit updates do not overwrite it.</p></div>
+      <p className="muted">FLOW keeps it in the separate <code>fde-user</code> plugin, so toolkit updates do not overwrite it.</p></div>
       <button type="button" className="action" onClick={() => setOpen(false)}>Cancel</button></div>
     <div className="settings-form-grid">
       <label><span>Skill name</span><input value={name} pattern="[a-z][a-z0-9-]{1,62}"
@@ -126,7 +126,7 @@ function ImportPlugin({ reload }: { reload: () => void }): JSX.Element {
   if (!open) return <button className="action" onClick={() => setOpen(true)}>Import local plugin</button>
   return <form className="extension-form compact" onSubmit={(event) => void submit(event)}>
     <div className="extension-form-head"><div><h3>Import a local plugin</h3>
-      <p className="muted">The source must contain <code>.claude-plugin/plugin.json</code>. FDE validates and copies it into the user extension catalogue.</p></div>
+      <p className="muted">The source must contain <code>.claude-plugin/plugin.json</code>. FLOW validates and copies it into the user extension catalogue.</p></div>
       <button type="button" className="action" onClick={() => setOpen(false)}>Cancel</button></div>
     <div className="banner warn"><strong>Review the source first.</strong> A plugin can contain hooks and executable scripts. Importing adds it to the marketplace; activation remains a separate account-level action.</div>
     <label><span>Absolute directory path</span><input value={sourcePath} placeholder="/Users/me/my-fde-plugin"
@@ -145,16 +145,16 @@ export function CapabilitiesView(): JSX.Element {
     `${item.name} ${item.description} ${item.plugin ?? ''}`.toLowerCase().includes(query.trim().toLowerCase())),
   [catalog.data, kind, query])
   if (catalog.error) return <ErrorState error={catalog.error} />
-  if (!catalog.data) return <Loading label="Reading FDE capabilities…" />
+  if (!catalog.data) return <Loading label="Reading FLOW capabilities…" />
 
   return <section className="settings-section">
     <div className="settings-hero"><div><p className="eyebrow">Agent harness</p><h2>Capabilities & extensions</h2>
-      <p className="lede">Everything FDE can load is visible here: plugins, skills, sub-agents, MCP servers, tools, commands, hooks and runtime utilities. Built-in and user-owned capabilities stay visibly separate.</p></div>
-      <div className="security-note"><strong>Extensions stay local</strong><span>Imports are copied into the FDE toolkit. Symbolic links and oversized plugin trees are rejected.</span></div>
+      <p className="lede">Everything FLOW can load is visible here: plugins, skills, sub-agents, MCP servers, tools, commands, hooks and runtime utilities. Built-in and user-owned capabilities stay visibly separate.</p></div>
+      <div className="security-note"><strong>Extensions stay local</strong><span>Imports are copied into the FLOW toolkit. Symbolic links and oversized plugin trees are rejected.</span></div>
     </div>
 
     <div className="extension-actions"><AddSkill reload={catalog.reload} /><ImportPlugin reload={catalog.reload} /></div>
-    <div className="banner"><strong>Availability:</strong> switches apply to new FDE processes; already-running sessions keep their current capability set. MCP switches use the governed MCP controller, disabled tools become CLI deny rules, and hook switches update the local plugin manifest.</div>
+    <div className="banner"><strong>Availability:</strong> switches apply to new FLOW processes; already-running sessions keep their current capability set. MCP switches use the governed MCP controller, disabled tools become CLI deny rules, and hook switches update the local plugin manifest.</div>
     {catalog.data.warnings.length > 0 ? <div className="banner warn"><strong>Some capability definitions could not be read.</strong>
       <ul>{catalog.data.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
 
@@ -177,7 +177,7 @@ export function CapabilitiesView(): JSX.Element {
         {item.detail ? <p className="muted capability-detail">{item.detail}</p> : null}
         {item.tools.length > 0 ? <details><summary>{item.kind === 'mcp' ? 'Tool scope policy' : 'Declared tools'} ({item.tools.length})</summary>
           <div className="capability-tools">{item.tools.map((tool) => <code key={tool}>{tool}</code>)}</div></details> : null}
-        <div className="capability-source"><span>{item.plugin ?? 'FDE configuration'}</span><code title={item.source}>{item.source}</code></div>
+        <div className="capability-source"><span>{item.plugin ?? 'FLOW configuration'}</span><code title={item.source}>{item.source}</code></div>
       </article>)}</div>}
   </section>
 }

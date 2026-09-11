@@ -77,7 +77,7 @@ describe('deleting old records', () => {
     render(<SessionsView />)
     expect(await screen.findByRole('button', { name: 'Stop to delete' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: 'Delete history' }))
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('FDE run and its files will remain unchanged'))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('FLOW run and its files will remain unchanged'))
     await waitFor(() => expect(screen.queryByText('20260901-old-aaaa')).not.toBeInTheDocument())
   })
 

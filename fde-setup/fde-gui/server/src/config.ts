@@ -88,7 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
   const host = env.FDE_GUI_HOST?.trim() || '127.0.0.1'
   if (!LOOPBACK_HOSTS.has(host)) {
     throw new Error(
-      `refusing to bind to ${host}: the FDE Control Center is a local console and ` +
+      `refusing to bind to ${host}: FLOW is a local console and ` +
         'listens on loopback only',
     )
   }

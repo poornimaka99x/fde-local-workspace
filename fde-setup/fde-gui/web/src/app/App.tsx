@@ -13,6 +13,14 @@ import { ProjectsView } from '../features/projects/ProjectsView'
 import { ProjectDetail } from '../features/projects/ProjectDetail'
 import { HealthView } from '../features/health/HealthView'
 import { SessionsView } from '../features/sessions/SessionsView'
+import {
+  FdeConfigurationView,
+  FdeRunDetail,
+  FdeRunsView,
+  FdeSystemView,
+  NewFdeRunForm,
+  SystemsView,
+} from '../features/systems/FdeSystemViews'
 
 const ChatsView = lazy(() => import('../features/chats/ChatsView').then((module) => ({ default: module.ChatsView })))
 const DesignPanelForm = lazy(() =>
@@ -46,7 +54,7 @@ export function App(): JSX.Element {
   const health = useApi<HealthResponse>(token === null ? null : '/api/health', 120000)
 
   useEffect(() => {
-    document.title = 'FDE Control Center'
+    document.title = 'FLOW'
   }, [])
 
   // One poller for the whole console: it watches the server's change counter
@@ -64,7 +72,11 @@ export function App(): JSX.Element {
   const projectMatch = /^\/projects\/([^/]+)$/.exec(path)
   const projectEditMatch = /^\/projects\/([^/]+)\/edit$/.exec(path)
   const chatMatch = /^\/chats\/([^/]+)$/.exec(path)
-  const section = path.startsWith('/projects')
+  const fdeConfigurationMatch = /^\/systems\/forward-deployed-engineer\/configurations\/([^/]+)$/.exec(path)
+  const fdeRunMatch = /^\/systems\/forward-deployed-engineer\/runs\/([^/]+)$/.exec(path)
+  const section = path.startsWith('/systems')
+    ? 'systems'
+    : path.startsWith('/projects')
     ? 'projects'
     : path.startsWith('/chats')
       ? 'chats'
@@ -132,7 +144,19 @@ export function App(): JSX.Element {
             </div>
           ) : null}
           <Suspense fallback={<div className="card muted">Loading view…</div>}>
-            {path === '/runs/new' ? (
+            {path === '/systems/forward-deployed-engineer/new' ? (
+              <NewFdeRunForm initialConfigurationId={search.get('configurationId') ?? undefined} />
+            ) : fdeConfigurationMatch?.[1] ? (
+              <FdeConfigurationView configurationId={decodeURIComponent(fdeConfigurationMatch[1])} />
+            ) : fdeRunMatch?.[1] ? (
+              <FdeRunDetail runId={decodeURIComponent(fdeRunMatch[1])} />
+            ) : path === '/systems/forward-deployed-engineer/runs' ? (
+              <FdeRunsView />
+            ) : path === '/systems/forward-deployed-engineer' ? (
+              <FdeSystemView />
+            ) : path === '/systems' ? (
+              <SystemsView />
+            ) : path === '/runs/new' ? (
               <NewRunForm projectId={search.get('projectId') ?? undefined} />
             ) : path === '/design-panel/new' ? (
               <DesignPanelForm projectId={search.get('projectId') ?? undefined} />
@@ -150,6 +174,8 @@ export function App(): JSX.Element {
               <ChatDetail chatId={decodeURIComponent(chatMatch[1])} />
             ) : projectMatch?.[1] ? (
               <ProjectDetail projectId={decodeURIComponent(projectMatch[1])} />
+            ) : section === 'systems' ? (
+              <SystemsView />
             ) : section === 'projects' ? (
               <ProjectsView />
             ) : section === 'chats' ? (

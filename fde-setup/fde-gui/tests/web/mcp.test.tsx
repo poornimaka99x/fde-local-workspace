@@ -88,7 +88,7 @@ describe('the MCP catalogue panel', () => {
     }))
   })
 
-  it('separates what FDE knows about from what a run could actually use', async () => {
+  it('separates what FLOW knows about from what a run could actually use', async () => {
     render(<McpCatalogView />)
     await waitFor(() => expect(screen.getByText('MCP servers')).toBeInTheDocument())
     expect(screen.getAllByText('ready', { selector: '.badge' })).toHaveLength(2)

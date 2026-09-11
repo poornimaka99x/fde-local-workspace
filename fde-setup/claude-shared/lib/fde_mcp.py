@@ -47,6 +47,36 @@ TRANSPORTS = ("stdio", "http", "sse")
 AUTH_MODES = ("none", "oauth", "bearer", "header", "basic", "local-credential-chain")
 MUTATION_CLASSES = ("read-only", "mutation-capable")
 
+# What a caller may ask a server to do, from narrowest to broadest. A scope is a
+# CEILING, never a grant: it can only narrow the enforceable tool set that
+# `enforceable_tools` already proved safe. Granting `delete` on a server whose
+# delete tools are withheld by its allowlist changes nothing, and says so.
+SCOPES = ("read", "search", "create", "update", "delete", "deploy", "administer")
+READ_ONLY_SCOPES = ("read", "search")
+
+# The fallback classifier, consulted only when the catalogue declares nothing
+# and the server's own annotations say nothing. Ordered broadest first, because
+# a tool that looks like two things is treated as the more dangerous one.
+_SCOPE_PATTERNS = (
+    ("administer", (r"admin", r"grant", r"revoke", r"permission", r"policy",
+                    r"^execute", r"shell", r"^eval", r"credential", r"token")),
+    ("deploy", (r"deploy", r"publish", r"release", r"rollout", r"rollback",
+                r"restart", r"scale", r"provision", r"terminate")),
+    ("delete", (r"^delete", r"^remove", r"^drop", r"^destroy", r"^purge",
+                r"^uninstall", r"^clear", r"^close")),
+    ("update", (r"^update", r"^edit", r"^replace", r"^set", r"^write", r"^rename",
+                r"^move", r"^patch", r"^put", r"^modify", r"^apply", r"^fill",
+                r"^click", r"^type", r"^press", r"^hover", r"^drag", r"^select",
+                r"^navigate", r"^resize", r"^emulate", r"^activate", r"^handle")),
+    ("create", (r"^create", r"^add", r"^new", r"^insert", r"^upload", r"^post")),
+    ("search", (r"search", r"^find", r"^query", r"^grep", r"^lookup")),
+    ("read", (r"^get", r"^read", r"^list", r"^describe", r"^show", r"^fetch",
+              r"^inspect", r"^snapshot", r"^take_", r"^status", r"^check",
+              r"^think", r"^dump", r"^wait", r"^performance_", r"^lighthouse",
+              r"^browser_snapshot", r"^browser_console", r"^browser_network",
+              r"^browser_tabs", r"^browser_take")),
+)
+
 # How a server's read-only subset can actually be *proved*, not asserted:
 #
 #   none         nothing constrains the tool set — a mutation-capable server
@@ -258,6 +288,9 @@ _DEFAULTS = {
     "readOnlyPolicy": "none",
     "allowTools": (),
     "denyTools": (),
+    # {scope: [patterns]}. Declared where an operator knows this provider's
+    # tools; derived from annotations and names where they do not.
+    "scopes": {},
     "mutationApproval": None,
     "useWhen": "",
     "preferOver": (),
@@ -579,6 +612,16 @@ def validate(doc, *, known_roles=KNOWN_ROLES, known_stages=KNOWN_STAGES):
                             f"{', '.join(READ_ONLY_POLICIES)}")
         _validate_patterns(problems, f"{where}: allowTools", server["allowTools"])
         _validate_patterns(problems, f"{where}: denyTools", server["denyTools"])
+        scopes = server.get("scopes")
+        if not isinstance(scopes, dict):
+            problems.append(f"{where}: scopes must be an object of scope to patterns")
+        else:
+            for scope, patterns in scopes.items():
+                if scope not in SCOPES:
+                    problems.append(f"{where}: unknown scope {scope!r}; use one of "
+                                    + ", ".join(SCOPES))
+                    continue
+                _validate_patterns(problems, f"{where}: scopes.{scope}", patterns)
         _validate_user_config(problems, where, server["userConfig"])
 
         approval = server["mutationApproval"]
@@ -1630,7 +1673,103 @@ def tool_is_mutation(name, server, tool, health=None):
     return tool not in set(allowed)
 
 
+# ------------------------------------------------------------------- scopes --
+
+def scope_of_tool(tool_name, server, record=None):
+    """Which scope calling this tool falls under.
+
+    Four sources, in order of authority: what the catalogue declares, what the
+    server's own MCP annotations say, what the name looks like, and — when none
+    of those answer — `administer`. That last step is the important one: a tool
+    nobody has classified is available only to a caller granted the broadest
+    scope, so an unrecognised tool appearing in a server update cannot quietly
+    ride in on a read-only grant.
+    """
+    declared = (server.get("scopes") or {})
+    # Broadest first: a tool matching two declarations is the more dangerous one.
+    for scope in reversed(SCOPES):
+        for pattern in declared.get(scope, ()):
+            try:
+                if re.search(pattern, tool_name):
+                    return scope
+            except re.error:
+                continue
+    annotations = record or {}
+    if annotations.get("destructiveHint"):
+        return "delete"
+    if annotations.get("readOnlyHint"):
+        return "search" if any(re.search(p, tool_name)
+                               for p in dict(_SCOPE_PATTERNS)["search"]) else "read"
+    for scope, patterns in _SCOPE_PATTERNS:
+        if any(re.search(pattern, tool_name) for pattern in patterns):
+            return scope
+    return "administer"
+
+
+def discovered_tools(name, health):
+    """The tool names `fde mcp verify` actually saw, with their annotations."""
+    record = (health or {}).get(name) or {}
+    return {tool["name"]: tool for tool in (record.get("tools") or [])
+            if isinstance(tool, dict) and isinstance(tool.get("name"), str)}
+
+
+def scope_map(name, server, health):
+    """{tool name: scope} over the tools this server was observed to offer."""
+    observed = discovered_tools(name, health)
+    return {tool: scope_of_tool(tool, server, record) for tool, record in observed.items()}
+
+
+def tools_for_scopes(name, server, settings, health, granted):
+    """The tools a caller holding `granted` may be given, and how sure we are.
+
+    A scope NARROWS; it never widens. The starting point is whatever
+    `enforceable_tools` already proved safe, so granting `delete` on a server
+    whose delete tools are withheld by its allowlist adds nothing — and the
+    result says so rather than leaving the operator to infer it.
+    """
+    granted = [scope for scope in SCOPES if scope in set(granted or ())]
+    base = enforceable_tools(name, server, settings, health)
+    mapping = scope_map(name, server, health)
+    observed = sorted(mapping)
+
+    if base == []:
+        return {"tools": [], "state": "nothing-enforceable", "enforced": True,
+                "granted": granted, "withheld": [], "byScope": {}, "unenforceable": granted,
+                "reason": "No tool on this server can be proved safe, so none is offered."}
+
+    universe = sorted(base) if base is not None else observed
+    if not universe:
+        # `base is None` means the whole tool set is safe, but nobody has listed
+        # it yet. Claiming a scope was applied here would be a claim about tools
+        # this machine has never seen.
+        return {"tools": None, "state": "unverified", "enforced": False,
+                "granted": granted, "withheld": [], "byScope": {}, "unenforceable": granted,
+                "reason": ("Its tool list has not been verified, so scopes cannot be applied "
+                           f"to it yet. Run: fde mcp verify {name}")}
+
+    by_scope = {}
+    allowed, withheld = [], []
+    for tool in universe:
+        scope = mapping.get(tool) or scope_of_tool(tool, server)
+        by_scope.setdefault(scope, []).append(tool)
+        (allowed if scope in granted else withheld).append(tool)
+    unenforceable = [scope for scope in granted if not by_scope.get(scope)]
+    return {"tools": sorted(allowed), "state": "enforced", "enforced": True,
+            "granted": granted, "withheld": sorted(withheld),
+            "byScope": {scope: sorted(tools) for scope, tools in sorted(by_scope.items())},
+            "unenforceable": unenforceable,
+            "reason": (f"{len(allowed)} of {len(universe)} enforceable tools fall within "
+                       + (", ".join(granted) or "no granted scope") + ".")}
+
+
+def minimum_scopes(server):
+    """What a read-only stage needs from this server: nothing wider than search."""
+    return list(READ_ONLY_SCOPES) if server.get("mutation") != "read-only" else list(READ_ONLY_SCOPES)
+
+
 __all__ = [
+    "SCOPES", "READ_ONLY_SCOPES", "scope_of_tool", "scope_map", "discovered_tools",
+    "tools_for_scopes", "minimum_scopes",
     "SCHEMA_VERSION", "SUPPORTED_SCHEMA_VERSIONS", "GLOBAL_TARGETS", "TRANSPORTS",
     "AUTH_MODES", "MUTATION_CLASSES", "READ_ONLY_POLICIES", "LIFECYCLE_STATES",
     "UNAVAILABLE", "NOT_CONFIGURED", "AUTHENTICATION_REQUIRED", "READY", "ACTIVE",

@@ -1,0 +1,695 @@
+{
+  "schemaVersion": 1,
+  "name": "forward-deployed-engineer",
+  "label": "Forward Deployed Engineer",
+  "revision": "2026-09-11.1",
+  "description": "The full forward-deployed delivery lifecycle: business intent through operations, with an independent reviewer at every stage.",
+  "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
+  "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
+  "_optional": "`optional` is the spec's 'when applicable' set: real capabilities this stage can use, deliberately not on by default because they are conditional on the work (a database in scope, designs in scope, a cloud in scope). The console offers them; nothing enables them on its own.",
+  "_mcpScopes": "The minimum each stage needs, and no more. A scope is a ceiling: it narrows the tool set allowTools and denyTools already proved safe and can never widen it, so a scope here is a statement of intent that is then intersected with what is actually enforceable. Selection never installs a server, connects an account, requests a credential or contacts anything.",
+  "unlistedDefault": "disabled",
+  "protected": [
+    "plugin:fde"
+  ],
+  "stages": [
+    {
+      "name": "business-intent",
+      "label": "Business intent analysis",
+      "controllerStages": [
+        "intake"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:atlassian",
+          "mcp:fde:context7",
+          "mcp:fde:figma",
+          "skill:fde:client-context",
+          "skill:fde:context-budget",
+          "skill:fde:crosscheck",
+          "skill:fde:mcp-usage",
+          "skill:fde:product-discovery",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:integration-scout",
+          "agent:fde:product-analyst",
+          "agent:fde:researcher",
+          "agent:fde:reviewer",
+          "agent:fde:ui-ux-designer",
+          "tool:fde:WebFetch",
+          "tool:fde:WebSearch",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:product-analyst",
+          "agent:fde:reviewer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "mcp:fde:serena"
+      ],
+      "mcpScopes": {
+        "mcp:fde:atlassian": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:figma": [
+          "read"
+        ],
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:serena": [
+          "read",
+          "search"
+        ]
+      },
+      "notes": {
+        "serena": "Offered for analysis of an existing system, once that analysis is approved."
+      }
+    },
+    {
+      "name": "solution-requirements",
+      "label": "Solution requirements",
+      "controllerStages": [
+        "research"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:atlassian",
+          "mcp:fde:context7",
+          "mcp:fde:figma",
+          "skill:fde:client-context",
+          "skill:fde:crosscheck",
+          "skill:fde:product-discovery",
+          "skill:fde:quality-gates",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:product-analyst",
+          "agent:fde:reviewer",
+          "agent:fde:solutioner",
+          "agent:fde:standards-reviewer",
+          "agent:fde:ui-ux-designer",
+          "tool:fde:WebFetch",
+          "tool:fde:WebSearch",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reviewer",
+          "agent:fde:standards-reviewer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [],
+      "mcpScopes": {
+        "mcp:fde:atlassian": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:figma": [
+          "read"
+        ],
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ]
+      }
+    },
+    {
+      "name": "technical-architecture",
+      "label": "Technical requirements and architecture",
+      "controllerStages": [
+        "solutioning"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:context7",
+          "mcp:fde:figma",
+          "mcp:fde:serena",
+          "skill:fde:crosscheck",
+          "skill:fde:design-system",
+          "skill:fde:mcp-usage",
+          "skill:fde:verification-evidence",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:design-system-steward",
+          "agent:fde:integration-scout",
+          "agent:fde:reliability-reviewer",
+          "agent:fde:repo-cartographer",
+          "agent:fde:security-reviewer",
+          "agent:fde:solutioner",
+          "agent:fde:standards-reviewer",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reliability-reviewer",
+          "agent:fde:security-reviewer",
+          "agent:fde:standards-reviewer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "mcp:fde:aws",
+        "mcp:fde:azure",
+        "mcp:fde:dbhub",
+        "skill:ponytail:ponytail-audit",
+        "skill:ponytail:ponytail-debt"
+      ],
+      "mcpScopes": {
+        "mcp:fde:serena": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:figma": [
+          "read"
+        ],
+        "mcp:fde:dbhub": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:aws": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:azure": [
+          "read",
+          "search"
+        ]
+      },
+      "notes": {
+        "dbhub": "Offered when database analysis is in scope.",
+        "cloud": "aws and azure are offered read-only, when cloud architecture is in scope."
+      }
+    },
+    {
+      "name": "development-planning",
+      "label": "Development planning",
+      "controllerStages": [
+        "planning"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:atlassian",
+          "mcp:fde:context7",
+          "mcp:fde:serena",
+          "skill:fde:crosscheck",
+          "skill:fde:jira-delivery",
+          "skill:fde:quality-gates",
+          "skill:fde:task-init",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:delivery-manager",
+          "agent:fde:repo-cartographer",
+          "agent:fde:reviewer",
+          "agent:fde:solutioner",
+          "agent:fde:test-engineer",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reviewer",
+          "agent:fde:test-engineer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [],
+      "mcpScopes": {
+        "mcp:fde:atlassian": [
+          "read",
+          "search",
+          "create",
+          "update"
+        ],
+        "mcp:fde:serena": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ]
+      },
+      "notes": {
+        "substitution": "repo-cartographer covers the codebase-discovery role here. The Anthropic feature-dev plugin was considered for it and rejected on licence grounds; this is a recorded substitution with a narrower agent, not a silent one."
+      }
+    },
+    {
+      "name": "vertical-slice",
+      "label": "Vertical-slice implementation",
+      "controllerStages": [
+        "implementation"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:context7",
+          "mcp:fde:playwright",
+          "mcp:fde:serena",
+          "plugin:ponytail",
+          "skill:fde:implementation",
+          "skill:fde:quality-gates",
+          "skill:fde:tdd-evidence",
+          "skill:ponytail:ponytail",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:implementation-engineer",
+          "agent:fde:tdd-guide",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
+          "hook:ponytail:UserPromptSubmit",
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:tdd-guide",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "agent:fde:design-system-steward",
+        "agent:fde:security-reviewer",
+        "mcp:fde:figma",
+        "skill:fde:design-system",
+        "skill:fde:design-to-code",
+        "skill:ponytail:ponytail-help"
+      ],
+      "mcpScopes": {
+        "mcp:fde:serena": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:playwright": [
+          "read",
+          "update"
+        ],
+        "mcp:fde:figma": [
+          "read"
+        ]
+      },
+      "ponytailMode": "full",
+      "notes": {
+        "design": "design-to-code, design-system, design-system-steward and figma are offered when designs are in scope.",
+        "security": "security-reviewer is offered, and should be switched on, for security-sensitive changes.",
+        "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate.",
+        "ponytailPlugin": "plugin:ponytail is enabled here and in quality-review only. Everywhere else it stays off, which is what keeps its lifecycle hooks out of the stages it has no business in.",
+        "serenaScope": "read and search only. Serena's editing tools are withheld by its own allowlist, and repository writes belong to the run's one-time Codex write approval rather than to a connector. Asking for `update` here would be a grant that buys nothing."
+      }
+    },
+    {
+      "name": "quality-review",
+      "label": "Quality assurance and review",
+      "controllerStages": [
+        "review",
+        "verification"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:chrome-devtools",
+          "mcp:fde:context7",
+          "mcp:fde:playwright",
+          "mcp:fde:serena",
+          "plugin:ponytail",
+          "skill:fde:ci-diagnose",
+          "skill:fde:quality-gates",
+          "skill:fde:tdd-evidence",
+          "skill:fde:verification-evidence",
+          "skill:ponytail:ponytail-review",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:ci-investigator",
+          "agent:fde:reliability-reviewer",
+          "agent:fde:reviewer",
+          "agent:fde:security-reviewer",
+          "agent:fde:test-engineer",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
+          "tool:fde:Bash",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reliability-reviewer",
+          "agent:fde:reviewer",
+          "agent:fde:security-reviewer",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "mcp:fde:langfuse",
+        "skill:ponytail:ponytail-audit",
+        "skill:ponytail:ponytail-debt",
+        "skill:ponytail:ponytail-gain"
+      ],
+      "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "update"
+        ],
+        "mcp:fde:chrome-devtools": [
+          "read"
+        ],
+        "mcp:fde:serena": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:langfuse": [
+          "read",
+          "search"
+        ]
+      },
+      "notes": {
+        "langfuse": "Offered when AI observability is in scope.",
+        "playwrightScope": "read and update: an end-to-end check has to click, type and navigate. Its tracing, evaluate and upload tools stay outside every scope this workflow grants."
+      },
+      "ponytailMode": "lite"
+    },
+    {
+      "name": "documentation",
+      "label": "Implementation documentation",
+      "controllerStages": [
+        "presentation",
+        "publication"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:context7",
+          "skill:fde:handover",
+          "skill:fde:verification-evidence",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:repo-cartographer",
+          "agent:fde:reviewer",
+          "agent:fde:standards-reviewer",
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reviewer",
+          "agent:fde:standards-reviewer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "mcp:fde:atlassian",
+        "skill:fde:design-system"
+      ],
+      "mcpScopes": {
+        "mcp:fde:context7": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:atlassian": [
+          "read",
+          "search",
+          "update"
+        ]
+      },
+      "notes": {
+        "atlassian": "Offered when requirements or tickets have to be updated.",
+        "design-system": "Offered when the deliverable includes design-system work."
+      }
+    },
+    {
+      "name": "scm-build-deploy",
+      "label": "Source control, build and deployment",
+      "controllerStages": [
+        "deployment"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:atlassian",
+          "mcp:fde:langfuse",
+          "skill:fde:ci-diagnose",
+          "skill:fde:handover",
+          "skill:fde:release-observability",
+          "skill:fde:scm-pr-review",
+          "skill:fde:verification-evidence",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:ci-investigator",
+          "agent:fde:pr-analyst",
+          "agent:fde:release-manager",
+          "agent:fde:reviewer",
+          "agent:fde:security-reviewer",
+          "agent:fde:sre-observability",
+          "tool:fde:Bash",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reviewer",
+          "agent:fde:security-reviewer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "mcp:fde:aws",
+        "mcp:fde:azure"
+      ],
+      "mcpScopes": {
+        "mcp:fde:atlassian": [
+          "read",
+          "search",
+          "update"
+        ],
+        "mcp:fde:langfuse": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:aws": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:azure": [
+          "read",
+          "search"
+        ]
+      },
+      "notes": {
+        "bash": "Source control and builds need a shell. What leaves this machine does not become permitted by having one: deployment, merge, publication, infrastructure mutation and production change keep their own approval gates.",
+        "cloud": "aws and azure are offered read-only; the cloud in use is the operator's to choose."
+      }
+    },
+    {
+      "name": "operations",
+      "label": "Operations engineering",
+      "controllerStages": [
+        "observability"
+      ],
+      "common": {
+        "enable": [
+          "mcp:fde:aws",
+          "mcp:fde:azure",
+          "mcp:fde:chrome-devtools",
+          "mcp:fde:dbhub",
+          "mcp:fde:langfuse",
+          "mcp:fde:playwright",
+          "skill:fde:ci-diagnose",
+          "skill:fde:handover",
+          "skill:fde:release-observability",
+          "skill:fde:retrospective",
+          "skill:fde:verification-evidence",
+          "tool:fde:Glob",
+          "tool:fde:Grep",
+          "tool:fde:Read"
+        ]
+      },
+      "primary": {
+        "enable": [
+          "agent:fde:ci-investigator",
+          "agent:fde:reliability-reviewer",
+          "agent:fde:researcher",
+          "agent:fde:security-reviewer",
+          "agent:fde:sre-observability",
+          "tool:fde:Write"
+        ]
+      },
+      "reviewer": {
+        "enable": [
+          "agent:fde:reliability-reviewer",
+          "agent:fde:security-reviewer",
+          "tool:fde:Write"
+        ],
+        "disable": [
+          "tool:fde:Bash",
+          "tool:fde:Edit",
+          "tool:fde:Task"
+        ]
+      },
+      "optional": [
+        "tool:fde:Bash"
+      ],
+      "mcpScopes": {
+        "mcp:fde:aws": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:azure": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:langfuse": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:dbhub": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:playwright": [
+          "read"
+        ],
+        "mcp:fde:chrome-devtools": [
+          "read"
+        ]
+      },
+      "notes": {
+        "readonly": "Operations defaults to read-only investigation. Every connector here is scoped to read and search, and Bash is offered rather than granted. A code change, a data change, a rollback, a restart, a scaling action, an infrastructure change or a production remediation needs its own approval gate.",
+        "bash": "Offered, not enabled: an investigation that needs a shell is a decision the operator makes, once, in the open.",
+        "browserScope": "read only, on both browser connectors. Operations observes; it does not drive."
+      }
+    }
+  ],
+  "_featureDev": "Anthropic's feature-dev plugin is deliberately not integrated. It is distributed under Anthropic's commercial terms with all rights reserved, and this toolkit is MIT. Its code-explorer, code-architect and code-reviewer roles are held by fde-core's repo-cartographer, solutioner and reviewer/test-engineer respectively.",
+  "ponytail": {
+    "plugin": "plugin:ponytail",
+    "modes": [
+      "off",
+      "lite",
+      "full",
+      "ultra"
+    ],
+    "defaultMode": "off",
+    "_modes": "The mode is per stage, and selectable per workflow and stage. A stage that does not name one gets defaultMode, which is off: Ponytail changes how code gets written, and that is not something a stage should inherit by accident.",
+    "_optIn": "ponytail-audit, ponytail-debt and ponytail-gain are offered, never enabled. They scan whole repositories and reason about debt across them, which is expensive and reaches well outside the deliverable unit a stage is scoped to.",
+    "_hooks": "The three lifecycle hooks are separate, individually switchable capabilities and are enabled only in the stages where Ponytail itself is on."
+  },
+  "governance": {
+    "statement": "FDE governance and the project's own instructions take precedence whenever instructions conflict. Guidance from any imported plugin \u2014 Ponytail's minimal-code guidance included \u2014 is advice about how to write code, not permission to deliver less than what was agreed.",
+    "neverOverridden": [
+      "business acceptance criteria",
+      "security requirements",
+      "privacy requirements",
+      "accessibility requirements",
+      "required error handling",
+      "data-loss protection",
+      "regulatory controls",
+      "recorded architectural decisions",
+      "required testing",
+      "human approval gates"
+    ]
+  }
+}

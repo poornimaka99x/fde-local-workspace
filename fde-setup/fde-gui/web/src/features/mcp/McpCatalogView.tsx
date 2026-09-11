@@ -83,13 +83,13 @@ function ServerCard({ server, reload }: { server: McpServer, reload: () => void 
     <p className="muted">{server.reason}</p>
 
     {server.missingDependencies.length > 0 ? <div className="banner warn">
-      <strong>Not installed on this machine.</strong> FDE will not install it for you.
+      <strong>Not installed on this machine.</strong> FLOW will not install it for you.
       {server.setup ? <> Run: <code>{server.setup}</code></> : null}
       {server.docsUrl ? <> <a href={server.docsUrl} target="_blank" rel="noreferrer">Documentation</a></> : null}
     </div> : null}
 
     {server.unscopedWrites ? <div className="banner danger">
-      <strong>FDE cannot scope this provider's tools.</strong> Its OAuth token belongs to the
+      <strong>FLOW cannot scope this provider's tools.</strong> Its OAuth token belongs to the
       MCP client, so there is no tool list to build an allowlist from. It reaches a session
       with every tool it offers, and its writes are stopped only at publication, by
       <code>fde approve-publish</code>. If you know its read tool names, pin them in the
@@ -98,7 +98,7 @@ function ServerCard({ server, reload }: { server: McpServer, reload: () => void 
 
     {server.state === 'blocked' && server.enforceableTools?.length === 0 ? <div className="banner danger">
       <strong>Held back on purpose.</strong> This server exposes tools that can change
-      things, and FDE has no verified read-only subset to hand its client. It stays
+      things, and FLOW has no verified read-only subset to hand its client. It stays
       inactive rather than being described as safe.
     </div> : null}
 
@@ -180,7 +180,7 @@ export function McpCatalogView(): JSX.Element {
         <h2>MCP servers</h2>
         <p className="lede">
           Being listed here is not access. A server is in the <strong>catalogue</strong> when
-          FDE knows how to run it, <strong>configured</strong> when you have supplied what it
+          FLOW knows how to run it, <strong>configured</strong> when you have supplied what it
           needs, <strong>ready</strong> when it is also installed and verified, and
           <strong> active</strong> only inside a run or chat whose approved roles, stages and
           profile actually call for it.
@@ -209,7 +209,7 @@ export function McpCatalogView(): JSX.Element {
 
     {gateway.data ? <div className="banner">
       <strong>Docker MCP Gateway:</strong> {gateway.data.available ? 'available' : 'not installed'} — {gateway.data.detail}.
-      {' '}Docker is optional; nothing in FDE requires it.
+      {' '}Docker is optional; nothing in FLOW requires it.
       {gateway.data.available && Object.keys(gateway.data.routedThroughGateway).length > 0
         ? <> These would run through the gateway instead of directly: {Object.keys(gateway.data.routedThroughGateway).sort().join(', ')}.</>
         : null}

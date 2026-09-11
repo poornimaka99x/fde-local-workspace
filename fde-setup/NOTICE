@@ -37,5 +37,37 @@ re-verified with `vendor/bin/design-sources audit`.
    the Apache License:
        fde-toolkit/plugins/fde-core/vendor/impeccable/NOTICE-upstream.md
 
+--------------------------------------------------------------------------
+Vendored plugins
+--------------------------------------------------------------------------
+
+This repository also vendors one third-party plugin under
+`fde-toolkit/plugins/`. Unlike the design references above it contains
+executable code. It is pinned to an immutable upstream commit, imported as a
+reviewed subset, and its provenance — upstream URL, tag, commit, licence,
+imported paths, and the SHA-256 of every file — is recorded in the lock file
+beside its manifest. Re-verify it at any time with `fde plugins verify`.
+
+4. ponytail
+   https://github.com/dietrichgebert/ponytail
+   Copyright (c) 2026 DietrichGebert
+   Licensed under the MIT License.
+   Pinned at v4.9.0, commit 356918eba965ee1eac64bd3a7f0dd02108350de5.
+   Full text: fde-toolkit/plugins/ponytail/LICENSE
+   Provenance: fde-toolkit/plugins/ponytail/.claude-plugin/fde-lock.json
+   Imported: the plugin manifest, six skills, six commands, three lifecycle
+   hooks and the JavaScript modules they require. Not imported: artwork,
+   benchmarks, tests, translated READMEs, the MCP server, and the packaging
+   for other agents.
+
+--------------------------------------------------------------------------
+Considered and not included
+--------------------------------------------------------------------------
+
+Anthropic's feature-dev plugin (https://github.com/anthropics/claude-code,
+plugins/feature-dev) is deliberately NOT vendored here. It is distributed
+under Anthropic's commercial terms with all rights reserved, which does not
+grant redistribution. Its roles are covered by first-party FDE sub-agents.
+
 Each vendored work remains under its own licence. Nothing in this
 repository's MIT licence supersedes those terms.

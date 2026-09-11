@@ -79,7 +79,7 @@ describe('resume sessions', () => {
     expect(body.session.command).toEqual([harness.config.fdeStartBin, '--resume', RUN])
   })
 
-  it('hands the session only the environment an FDE profile needs', async () => {
+  it('hands the session only the environment a FLOW profile needs', async () => {
     await resume(RUN)
     const env = FakeTerminal.spawned[0]?.options.env ?? {}
     expect(Object.keys(env).sort()).toEqual([

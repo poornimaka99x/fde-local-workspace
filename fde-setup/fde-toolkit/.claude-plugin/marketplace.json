@@ -1,11 +1,18 @@
 {
   "name": "fde-toolkit",
-  "owner": { "name": "Poornima" },
+  "owner": {
+    "name": "Poornima"
+  },
   "plugins": [
     {
       "name": "fde-core",
       "source": "./plugins/fde-core",
       "description": "End-to-end FDE toolkit with per-run roles, product/design/delivery workflows, GitHub and Bitbucket PR review, TDD and evidence checkpoints, bounded context and learning, harness audits, deployment and observability."
+    },
+    {
+      "name": "ponytail",
+      "source": "./plugins/ponytail",
+      "description": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions."
     }
   ]
 }

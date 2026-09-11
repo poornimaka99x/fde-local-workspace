@@ -159,7 +159,7 @@ export class SessionManager {
    * Start a command assembled by a trusted server route. This is deliberately
    * not an HTTP command endpoint: callers never supply file, args, cwd or env.
    * It lets the same hardened PTY/ticket lifecycle host Claude's fixed login
-   * command as well as an FDE resume.
+   * command as well as a FLOW resume.
    */
   startCommand(options: {
     sessionId: string
@@ -349,7 +349,7 @@ export class SessionManager {
 const SECRET_NAME = /TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|COOKIE|SESSION/i
 
 /**
- * The environment an FDE profile actually needs, and nothing else. Anything
+ * The environment a FLOW profile actually needs, and nothing else. Anything
  * secret-looking is dropped even if it somehow reaches the allowlist, so a
  * diagnostic listing env names can never name one.
  */

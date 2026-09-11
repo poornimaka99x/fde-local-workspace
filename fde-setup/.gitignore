@@ -7,6 +7,13 @@ runs/
 claude-shared/runs/*
 !claude-shared/runs/.gitkeep
 
+# The operator's own capability decisions, and the record of them. Machine
+# state: the built-in defaults are config/workflows/ and config/security-policy.json.
+claude-shared/config/capability-config.json
+claude-shared/config/capability-policy.json
+claude-shared/config/capability-policy.json.migrated
+claude-shared/config/capability-events.jsonl
+
 # Secrets and local material
 env.sh
 .env.sh
@@ -26,6 +33,10 @@ claude-shared/intake/
 
 # Quarantine for material staged for manual deletion. Never source.
 _to_delete/
+
+# Superseded plugin trees kept for rollback. Machine state, not source: the
+# lock file beside each installed plugin is what records its provenance.
+fde-toolkit/plugins/.versions/
 
 # Dependencies and build output
 node_modules/

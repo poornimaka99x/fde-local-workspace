@@ -642,6 +642,70 @@ export interface ClaudeAccountsResponse {
   accounts: ClaudeAccount[]
 }
 
+export type CapabilityState = 'inherit' | 'enabled' | 'disabled'
+
+export interface FdeStageConfiguration {
+  id: string
+  label: string
+  enabled: boolean
+  primaryAccount: string | null
+  reviewerAccount: string | null
+  approvalRequired: true
+  capabilityOverrides: Record<string, CapabilityState>
+}
+
+export interface FdeSystemConfiguration {
+  schemaVersion: 1
+  id: string
+  version: number
+  systemType: 'forward-deployed-engineer'
+  executorType: 'forward-deployed-engineer'
+  name: string
+  description: string
+  enabled: boolean
+  projectId: string | null
+  repository: string | null
+  workspace: string | null
+  artifactRoot: string
+  orchestrator: string
+  reviewer: string | null
+  routing: 'auto' | 'manual'
+  strategy: 'balanced' | 'quality_first' | 'cost_first'
+  model: string
+  effort: Exclude<ClaudeEffort, 'ultra'>
+  stages: FdeStageConfiguration[]
+  governance: {
+    approvalAfterEveryStage: true
+    approvalBeforeCodeChanges: true
+    approvalBeforeDeployment: true
+    approvalBeforeProductionMutation: true
+    stopOnAmbiguity: true
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SystemTypeDefinition {
+  id: 'forward-deployed-engineer'
+  name: string
+  shortName: string
+  description: string
+  executorType: 'forward-deployed-engineer'
+  lifecycle: { id: string; label: string; controllerStages: readonly string[] }[]
+}
+
+export interface FdeRunRegistration {
+  schemaVersion: 1
+  runId: string
+  systemType: 'forward-deployed-engineer'
+  executorType: 'forward-deployed-engineer'
+  configurationId: string
+  configurationVersion: number
+  configurationSnapshot: FdeSystemConfiguration
+  businessIntent: string
+  createdAt: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'

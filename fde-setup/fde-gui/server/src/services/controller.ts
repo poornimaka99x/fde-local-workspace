@@ -98,7 +98,7 @@ function statusForExit(code: number): { status: number; problem: string } {
 }
 
 /**
- * The child gets only the environment the installed FDE/Claude profiles need.
+ * The child gets only the environment the installed FLOW/Claude profiles need.
  * Everything else — tokens, keys, Direct Line secrets — is left behind.
  */
 export function controllerEnv(config: GuiConfig): NodeJS.ProcessEnv {

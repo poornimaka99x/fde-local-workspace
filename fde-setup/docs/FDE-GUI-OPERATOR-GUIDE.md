@@ -34,6 +34,35 @@ for that launch alone. Stop the console with Ctrl-C.
 
 ## The screens
 
+### Systems and the Forward Deployed Engineer
+
+**Systems** is the entry point for executable agent systems. Select **Forward
+Deployed Engineer** to configure or start the complete governed delivery
+lifecycle independently of ordinary runs and chats.
+
+The installation supplies `Default Forward Deployed Engineer`. You can also
+create named profiles for a product, repository or environment. Each save
+creates a new profile version; a run records the exact version and full profile
+snapshot it started with. Editing the reusable profile therefore does not
+rewrite history.
+
+**Start run** collects the business intent, configuration, project and
+orchestrator. The review step shows the effective stages and retained human
+gates before it calls the dedicated `forward-deployed-engineer` executor. The
+default launches the controller's `full` shape. A profile with stages switched
+off receives an explicit controller plan containing only the enabled stages.
+
+**Forward Deployed Engineer Runs** is a separate index. It contains only runs
+created by that executor and links into the same controller-owned run detail and
+session views, where role selection, questions and approvals continue. It does
+not reclassify ordinary runs as FDE system runs.
+
+System profiles are stored in
+`~/.claude-shared/config/system-configurations/forward-deployed-engineer/` and
+executor registrations in
+`~/.claude-shared/config/system-runs/forward-deployed-engineer/`. Neither is an
+authority over controller lifecycle state or approval ledgers.
+
 ### Runs
 
 Every run the controller knows about, newest activity first. Search by run id,
