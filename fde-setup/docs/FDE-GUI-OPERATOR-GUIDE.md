@@ -41,14 +41,10 @@ requirement or Jira key; filter by state, project, orchestrator or whether a
 session can be resumed. A run's state comes from the controller — the console
 never decides a run is finished because a file appeared.
 
-![The runs list](screenshots/runs.png)
-
 ### Run detail
 
 The header carries the run id, its project, the requirement and the state. The
 **Next** panel shows the controller's own next step, to run in a terminal.
-
-![A run's overview](screenshots/run-overview.png)
 
 Six tabs:
 
@@ -62,16 +58,12 @@ Six tabs:
 - **Approvals & evidence** — approvals with their status, checkpoints with their
   evidence, and the output-hygiene report.
 
-![Approvals, checkpoints and hygiene evidence](screenshots/run-evidence.png)
-
 ### Resuming a run
 
 For a Claude-led run, **Resume session** starts exactly
 `fde-start --resume <run-id>` and streams it into the page. You type into it as
 you would in a terminal — including the approval phrases, which are yours to
 type.
-
-![An orchestrator session](screenshots/run-session.png)
 
 One process per run: a second tab attaches to the same session rather than
 starting another. Closing the tab detaches; it does not stop the run. **Stop**
@@ -94,8 +86,6 @@ Projects group runs. A project is a name, a description and repository paths
 that must already exist; it holds no workflow state. Nothing here clones,
 changes or deletes a repository.
 
-![Projects](screenshots/projects.png)
-
 ### Active sessions and system health
 
 **Active sessions** lists what this console has started. A session you started in
@@ -106,16 +96,12 @@ your own terminal is not listed — it belongs to that terminal.
 names of your Claude profiles. No credential is opened, and no network or
 Keychain check runs here.
 
-![System health](screenshots/health.png)
-
 ## Themes and keyboard
 
 The console follows your machine's light or dark setting; the **Theme** control
 in the top bar overrides it for this browser. Every screen passes an automated
 WCAG 2.1 AA audit, contrast included, in both themes. Tab reaches a skip link
 first; the run tabs move with the arrow keys, Home and End.
-
-![The light theme](screenshots/runs-light.png)
 
 ## MCP servers
 
