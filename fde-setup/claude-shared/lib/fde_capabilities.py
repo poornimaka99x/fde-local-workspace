@@ -29,6 +29,11 @@ import pathlib
 import re
 import shutil
 
+# The MCP catalogue answers "is this server usable, for whom, with which tools".
+# Asking it rather than re-deriving that here is the whole point of the library
+# living beside this one: two opinions about a connector is one too many.
+import fde_mcp
+
 SCHEMA_VERSION = 1
 
 KINDS = ("plugin", "skill", "agent", "mcp", "tool", "command", "hook", "script", "workflow")
@@ -558,80 +563,86 @@ def _plugin_items(shared, warnings):
     return items
 
 
-def _mcp_items(shared, warnings):
+# How the MCP library's lifecycle states read to an operator. The distinction
+# that matters: "off because you switched it off" and "off because it is not
+# connected" send a reader to two different places, and collapsing them into
+# one word is how somebody spends an afternoon toggling the wrong switch.
+_MCP_HEALTH = {
+    fde_mcp.READY: ("ok", "available"),
+    fde_mcp.ACTIVE: ("ok", "available"),
+    fde_mcp.AUTHENTICATION_REQUIRED: ("degraded", "unavailable"),
+    fde_mcp.UNHEALTHY: ("degraded", "unavailable"),
+    fde_mcp.UNAVAILABLE: ("unavailable", "unavailable"),
+    fde_mcp.NOT_CONFIGURED: ("unavailable", "unavailable"),
+    fde_mcp.BLOCKED: ("unavailable", "blocked"),
+}
+
+
+def _mcp_items(shared, warnings, context=None):
     """The governed MCP catalogue, as capabilities.
 
     Selection here means "may be used when it is already connected". It never
     installs a server, connects an account, asks for a credential or contacts
-    anything: the catalogue file and the operator's own settings are the only
-    inputs.
+    anything. Every input is a file on this machine: the catalogue, the
+    operator's settings, and whatever `fde mcp verify` last recorded.
     """
     target = shared / "mcp" / "mcp-servers.json"
-    try:
-        raw = _read_json(target)
-    except FileNotFoundError:
+    context = {} if context is None else context
+    if not target.is_file():
         warnings.append("mcp/mcp-servers.json: not installed")
         return []
-    except (json.JSONDecodeError, OSError, CapabilityError) as exc:
-        raise CapabilityError("invalid-mcp-catalogue",
-                              "mcp/mcp-servers.json could not be read.", detail=str(exc))
-    servers = raw.get("servers") if isinstance(raw, dict) else None
-    if not isinstance(servers, dict):
-        raise CapabilityError("invalid-mcp-catalogue", "mcp/mcp-servers.json has no servers object.")
-    configured = {}
     try:
-        user = _read_json(shared / "config" / "mcp-user-config.json")
-        if isinstance(user, dict) and isinstance(user.get("servers"), dict):
-            configured = user["servers"]
-    except FileNotFoundError:
-        pass
-    except (json.JSONDecodeError, OSError, CapabilityError) as exc:
-        raise CapabilityError("invalid-mcp-user-config",
-                              "config/mcp-user-config.json could not be read.", detail=str(exc))
-    health_doc = {}
-    try:
-        loaded = _read_json(shared / "mcp" / "health.json")
-        if isinstance(loaded, dict):
-            health_doc = loaded.get("servers") if isinstance(loaded.get("servers"), dict) else loaded
-    except (FileNotFoundError, json.JSONDecodeError, OSError, CapabilityError):
-        health_doc = {}
+        catalog = fde_mcp.Catalog.load(target)
+        user_doc = fde_mcp.load_user_config(shared / "config" / "mcp-user-config.json")
+    except fde_mcp.CatalogError as exc:
+        raise CapabilityError("invalid-mcp-catalogue", f"The MCP catalogue could not be read: {exc}",
+                              detail="; ".join(getattr(exc, "problems", [])[:5]) or None)
+    health_doc = fde_mcp.load_health(shared / "mcp" / "health.json")
+    secrets = shared / "secrets" / "mcp"
     items = []
-    for name in sorted(servers):
-        server = servers[name]
-        if not MCP_RE.match(name) or not isinstance(server, dict):
-            warnings.append(f"mcp: {name!r} is not a usable server entry")
+    for name in catalog.names():
+        if not MCP_RE.match(name):
+            warnings.append(f"mcp: {name!r} is not a usable server name")
             continue
-        settings = configured.get(name) if isinstance(configured.get(name), dict) else {}
-        connected = settings.get("enabled") is True
-        reported = health_doc.get(name) if isinstance(health_doc.get(name), dict) else {}
-        state = reported.get("state")
-        # Connection state and configuration state are different questions. A
-        # server the operator has selected but never connected is "selected but
-        # unavailable", not "off" — and must never be reported as reachable.
-        if not connected:
-            health = {"state": "unavailable", "code": "not-connected",
-                      "message": "This server is not configured and connected on this machine."}
-            availability = "unavailable"
-        elif state in ("unhealthy", "blocked"):
-            health = {"state": "degraded" if state == "unhealthy" else "unavailable",
-                      "code": state, "message": reported.get("reason")}
-            availability = "unavailable" if state == "blocked" else "available"
-        else:
-            health, availability = _ok(), "available"
-        allow = server.get("allowTools")
+        server = catalog.get(name)
+        settings = fde_mcp.server_settings(user_doc, name)
+        lifecycle, reason = fde_mcp.server_state(name, server, settings, health_doc,
+                                                 secrets_dir=secrets)
+        connected = settings["enabled"] is True
+        if not connected and lifecycle in (fde_mcp.READY, fde_mcp.ACTIVE):
+            # Usable, but the operator has not switched it on. That is not a
+            # fault and must not be reported as one — nor as reachable.
+            lifecycle = fde_mcp.NOT_CONFIGURED
+            reason = "This server is not switched on for this machine."
+        state, availability = _MCP_HEALTH.get(lifecycle, ("unknown", "unavailable"))
+        enforceable = fde_mcp.enforceable_tools(name, server, settings, health_doc)
         items.append(_record(
             kind="mcp", namespace=BUILTIN_NAMESPACE, name=name,
             description=server.get("useWhen") or server.get("note") or "MCP server.",
             origin="built-in", plugin=None, source=target, shared=shared,
             provenance={"type": "built-in", "url": None, "ref": None, "commit": None,
                         "checksum": None, "license": None, "installedAt": None,
-                        "validatedAt": None, "pinned": True},
-            tools=[t for t in allow if isinstance(t, str)] if isinstance(allow, list) else [],
+                        "validatedAt": None, "validationStatus": None, "reviewNote": None,
+                        "commitVerified": False, "pinned": True},
+            tools=sorted(enforceable) if enforceable else [],
             dependencies=[{"kind": "connection", "name": name,
                            "state": "connected" if connected else "not-connected"}],
-            health=health, availability=availability,
+            health={"state": state, "code": lifecycle, "message": fde_mcp.redact(reason)},
+            availability=availability,
             detail=" · ".join(str(server[k]) for k in ("transport", "classification", "mutation")
                               if isinstance(server.get(k), str))))
+        items[-1]["mcp"] = {
+            "lifecycle": lifecycle,
+            "connected": connected,
+            "mutation": server["mutation"],
+            "classification": server["classification"],
+            "readOnlyPolicy": server["readOnlyPolicy"],
+            "enforceableTools": None if enforceable is None else sorted(enforceable),
+            "declaredScopes": sorted(server.get("scopes") or {}),
+        }
+        context.setdefault("servers", {})[name] = server
+        context.setdefault("settings", {})[name] = settings
+    context["health"] = health_doc
     return items
 
 
@@ -700,17 +711,21 @@ class Catalog:
     from the decision is what makes a snapshot reproducible.
     """
 
-    def __init__(self, shared, items, warnings):
+    def __init__(self, shared, items, warnings, mcp_context=None):
         self.shared = shared
         self.items = {item["id"]: item for item in items}
         self.warnings = warnings
+        # What resolution needs to apply a scope to a connector, captured once
+        # during discovery rather than re-read per stage.
+        self.mcp_context = mcp_context or {}
 
     @classmethod
     def discover(cls, shared=None):
         shared = pathlib.Path(shared) if shared else shared_root()
         warnings = []
+        mcp_context = {}
         items = _plugin_items(shared, warnings)
-        items += _mcp_items(shared, warnings)
+        items += _mcp_items(shared, warnings, mcp_context)
         items += _tool_items(shared, items)
         items += _workflow_items(shared, warnings)
         seen, unique = set(), []
@@ -720,7 +735,7 @@ class Catalog:
                 continue
             seen.add(item["id"])
             unique.append(item)
-        return cls(shared, unique, warnings)
+        return cls(shared, unique, warnings, mcp_context)
 
     def get(self, cid):
         return self.items.get(cid)
@@ -1298,6 +1313,29 @@ EFFECTIVE_LABELS = (
 )
 
 
+# The six states an operator needs told apart, decided in this order. "Off
+# because you switched it off" and "off because nothing is connected" send a
+# reader to two different places, so they are never the same word.
+def _connection_state(entry, connector):
+    lifecycle = connector.get("lifecycle")
+    if entry["effective"] == "blocked" or lifecycle == fde_mcp.BLOCKED:
+        return "blocked-by-policy"
+    if entry["state"] == DISABLED:
+        return "installed-but-disabled"
+    if lifecycle == fde_mcp.AUTHENTICATION_REQUIRED:
+        return "authentication-required"
+    if lifecycle == fde_mcp.UNHEALTHY:
+        return "connection-error"
+    if lifecycle in (fde_mcp.READY, fde_mcp.ACTIVE):
+        return "selected-and-connected"
+    return "selected-but-unavailable"
+
+
+CONNECTION_STATES = ("selected-and-connected", "selected-but-unavailable",
+                     "installed-but-disabled", "authentication-required",
+                     "connection-error", "blocked-by-policy")
+
+
 def _decide(cid, *, security, layers, builtin_default, unlisted):
     """The precedence walk for one capability. Returns (state, effective, layer, configured)."""
     if cid in security.get("forbidden", ()):
@@ -1319,16 +1357,34 @@ def _decide(cid, *, security, layers, builtin_default, unlisted):
     return DISABLED, "not-selected", "default", INHERIT
 
 
+def mcp_scope_setting(server):
+    return f"mcp.{server}.scopes"
+
+
 def _template_settings(template, stage):
     """Layer 8 for settings: what the template says for this stage."""
     settings = {}
-    ponytail = template.get("ponytail") if template else None
+    if not template:
+        return settings
+    ponytail = template.get("ponytail")
     if isinstance(ponytail, dict):
         settings["ponytail.mode"] = ponytail.get("defaultMode", "off")
-        if stage:
-            for entry in template["stages"]:
-                if entry["name"] == stage and entry.get("ponytailMode") is not None:
-                    settings["ponytail.mode"] = entry["ponytailMode"]
+    for entry in template["stages"]:
+        if stage is not None and entry["name"] != stage:
+            continue
+        if isinstance(ponytail, dict) and entry.get("ponytailMode") is not None:
+            settings["ponytail.mode"] = entry["ponytailMode"]
+        for cid, scopes in (entry.get("mcpScopes") or {}).items():
+            try:
+                _kind, _namespace, name = parse_id(cid)
+            except CapabilityError:
+                continue
+            # A stage declares the minimum it needs. With no stage in view the
+            # union is taken, because "what may this workflow ever ask for" is a
+            # different question from "what may it ask for here".
+            key = mcp_scope_setting(name)
+            settings[key] = sorted(set(settings.get(key, [])) | set(scopes)) \
+                if stage is None else list(scopes)
     return settings
 
 
@@ -1445,6 +1501,34 @@ def resolve(catalog, config, *, workflow=None, stage=None, role="primary", works
                                          "overridden": False,
                                          "reason": "Ponytail is not switched on for this stage."}
 
+    # Connectors get the last word, because what a scope actually buys depends
+    # on the tool list, and the tool list depends on what verification saw.
+    for cid, entry in resolved.items():
+        item = catalog.items[cid]
+        if item["kind"] != "mcp":
+            continue
+        server = catalog.mcp_context.get("servers", {}).get(item["name"])
+        connector = dict(item.get("mcp") or {})
+        granted = settings.get(mcp_scope_setting(item["name"]), {}).get("value") or []
+        if isinstance(granted, str):
+            granted = [part.strip() for part in granted.split(",") if part.strip()]
+        connector["granted"] = [scope for scope in fde_mcp.SCOPES if scope in set(granted)]
+        connector["connectionState"] = _connection_state(entry, connector)
+        if server is not None:
+            decision = fde_mcp.tools_for_scopes(
+                item["name"], server,
+                catalog.mcp_context.get("settings", {}).get(item["name"]),
+                catalog.mcp_context.get("health", {}), connector["granted"])
+            connector.update({key: decision[key] for key in
+                              ("tools", "withheld", "byScope", "unenforceable", "state", "reason")})
+            connector["scopeEnforced"] = decision["enforced"]
+        entry["mcp"] = connector
+        # A connector selected with no scope at all is selected for nothing.
+        # Better said out loud than discovered when a tool call is refused.
+        if entry["state"] == ENABLED and not connector["granted"]:
+            degraded.append({"id": cid, "ref": entry["ref"],
+                             "reason": "No permission scope is granted for it at this stage."})
+
     # A bundle that names something this installation does not have is reported,
     # never invented. The stage runs degraded and says what is missing.
     missing = [{"id": cid, "reason": "not installed"}
@@ -1513,10 +1597,27 @@ def snapshot_document(resolution, catalog, *, run_id, role):
                   "layer": entry["layer"]}
                  for entry in resolution["capabilities"]
                  if entry["layer"] != "default" or entry["state"] == ENABLED]
+    # A connector is not reproduced by its name. Which scopes it held and which
+    # tools that came to is the part an audit needs, and the part the runtime
+    # enforcement reads back.
+    connectors = []
+    for entry in resolution["capabilities"]:
+        if entry["kind"] != "mcp" or entry["state"] != ENABLED:
+            continue
+        connector = entry.get("mcp") or {}
+        connectors.append({
+            "id": entry["id"], "ref": entry["ref"],
+            "connectionState": connector.get("connectionState"),
+            "granted": connector.get("granted", []),
+            "tools": connector.get("tools"),
+            "scopeState": connector.get("state"),
+            "enforced": connector.get("scopeEnforced"),
+        })
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "runId": run_id,
         "role": role,
+        "connectors": connectors,
         "workflow": resolution["workflow"],
         "workflowRevision": resolution["workflowRevision"],
         "stage": resolution["stage"],

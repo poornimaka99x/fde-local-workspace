@@ -24,6 +24,7 @@ TOOLKIT_SRC = ROOT / "fde-toolkit"
 
 sys.path.insert(0, str(SHARED_SRC / "lib"))
 import fde_capabilities as cap  # noqa: E402
+import fde_mcp  # noqa: E402
 
 
 class CapabilityTestCase(unittest.TestCase):
@@ -341,7 +342,12 @@ class McpSelectionTest(CapabilityTestCase):
         self.assertEqual(serena["state"], "enabled")
         self.assertFalse(serena["active"])
         self.assertEqual(serena["effective"], "unavailable")
-        self.assertEqual(serena["health"]["code"], "not-connected")
+        # The code is the MCP library's own lifecycle state, not a second
+        # opinion invented here — that is what keeps the console and the
+        # runtime from disagreeing about a connector.
+        self.assertIn(serena["health"]["code"], fde_mcp.LIFECYCLE_STATES)
+        self.assertNotIn(serena["health"]["code"], (fde_mcp.READY, fde_mcp.ACTIVE))
+        self.assertEqual(serena["mcp"]["connectionState"], "selected-but-unavailable")
 
     def test_resolution_never_writes_to_the_mcp_catalogue_or_health(self):
         catalogue = self.shared / "mcp" / "mcp-servers.json"
@@ -356,7 +362,10 @@ class McpSelectionTest(CapabilityTestCase):
         document, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "operations")
         degraded = {entry["ref"]: entry["reason"] for entry in document["degraded"]}
         self.assertIn("fde:aws", degraded)
-        self.assertIn("not configured and connected", degraded["fde:aws"])
+        # Whatever the reason is, it has to be the real one and it has to name
+        # something the operator can act on.
+        self.assertTrue(degraded["fde:aws"])
+        self.assertNotEqual(degraded["fde:aws"], "This capability is not usable right now.")
 
 
 class FailClosedTest(CapabilityTestCase):

@@ -357,7 +357,71 @@ That is a statement the runtime hands to the agent. The mechanism that makes it
 binding is the layer order: a plugin contributes at layer 8, and security policy
 is layer 1.
 
-## 10. Commands
+## 10. Connectors: selection, states and scopes
+
+### Selecting an MCP is not connecting one
+
+A default-enabled MCP means "use it when it is there". It never installs a
+server, connects an account, requests a credential, broadens a permission,
+enables write access, or contacts anything — not during resolution, and not
+while a page is being rendered. Every input is a file on this machine: the
+catalogue, the operator's settings, and whatever `fde mcp verify` last recorded.
+Only a server the operator has already configured and switched on can become
+effectively active.
+
+### The six states
+
+| state | what it means |
+|-------|----------------|
+| `selected-and-connected` | a stage selected it, and it is configured, switched on and healthy |
+| `selected-but-unavailable` | a stage selected it; it is not switched on, or a dependency or setting is missing |
+| `installed-but-disabled` | present and usable, and the operator switched it off |
+| `authentication-required` | the provider refused the stored credential |
+| `connection-error` | it would not start |
+| `blocked-by-policy` | disabled in the catalogue, ungovernable, or forbidden by the security policy |
+
+They are derived from the MCP library's own lifecycle states rather than
+re-decided here, and they are deliberately six rather than two: "off because you
+switched it off" and "off because nothing is connected" send a reader to
+different places, and one word for both is how somebody spends an afternoon
+toggling the wrong switch.
+
+### Scopes
+
+A scope says what a caller may ask a server to do: `read`, `search`, `create`,
+`update`, `delete`, `deploy`, `administer`.
+
+**A scope is a ceiling, never a grant.** It narrows the tool set that
+`allowTools` and `denyTools` already proved safe; it can never widen it.
+Granting every scope in the vocabulary yields exactly the enforceable set and
+not one tool more — there is a test that asserts precisely that. A scope granted
+with no tool behind it is reported as `unenforceable` rather than left to look
+like it did something.
+
+A tool is placed in a scope by four things, in order of authority: what the
+catalogue declares for that server, the MCP annotations discovery recorded
+(`destructiveHint`, `readOnlyHint`), what the name looks like, and — when none of
+those answer — `administer`. That last step matters: a tool nobody has
+classified is available only to a caller granted the broadest scope, so a new
+tool appearing in a server update cannot quietly ride in on a read-only grant.
+
+Scopes are resolved by the same precedence walk as everything else, at the same
+scopes, so "the reviewer holds read only, on this one run" is expressible and
+lands in the run snapshot with the tool list it produced.
+
+Three servers declare their scopes explicitly because their tool sets are known:
+serena, playwright and chrome-devtools. Two consequences worth stating:
+driving a browser — clicking, typing, filling a form — is `update`, so a stage
+granted `read` alone can observe a page but not drive one; and serena is granted
+`read` and `search` only, because its editing tools are withheld by its own
+allowlist and repository writes belong to the run's Codex write approval rather
+than to a connector.
+
+Where a server's tool list has not been verified, FDE says so instead of
+claiming a scope was applied. Where nothing can be proved safe, it offers
+nothing. Neither is reported as success.
+
+## 11. Commands
 
 ```
 fde capabilities [--kind K] [--namespace N] [--json]
@@ -380,18 +444,18 @@ fde plugins update <source> --name N [same options]
 fde plugins verify [<name>]
 fde plugins rollback <name> [--version V]
 fde plugins remove <name>
+fde config set-option mcp.<server>.scopes read,search [--scope SCOPE]
 ```
 
 `SCOPE` is `global`, `workspace:<name>`, `workflow:<name>`, `stage:<workflow>/<stage>`,
 `role:primary`, `role:reviewer` or `run:<id>`. It defaults to `global`.
 
-## 11. Out of scope for this phase
+## 12. Out of scope for this phase
 
 Deliberately not done yet, in the order they are planned:
 
 - the nine stage bundles wired to real installed capabilities, and degraded
   workflow diagnostics
-- MCP permission scopes and the six connection states
 - runtime enforcement in `fde-start` and `mcp-sync`, including the fact that
   `fde-start` currently passes `--mcp-config` without `--settings`, so the tool
   scoping `mcp-sync` generates is written and never applied

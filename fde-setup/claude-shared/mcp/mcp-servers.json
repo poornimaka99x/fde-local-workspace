@@ -2,6 +2,7 @@
   "schemaVersion": 2,
   "_comment": "Single source of truth for MCP servers across Claude Code, Codex CLI and Gemini/Antigravity. Edit here, then run: mcp-sync. Each tool stores MCP config in a different file and a different schema; mcp-sync translates. GitHub Copilot is not part of this ecosystem and is never written to. Being listed here is NOT a grant: an entry says how FDE would run a server, never that anyone may. Readiness, profile, stage and role decide that, and `fde mcp status` shows the result.",
   "_targets": "Every server declares who gets it. 'claude' | 'gemini' | 'codex' are global targets, written into each CLI's user-level config. 'role:<role>' is a run-scoped target: the server is NOT placed in anyone's global config, and mcp-sync --run <run-id> writes it only for the identity that holds that role in that run. A server is one or the other, never both.",
+  "_scopeVocabulary": "A scope says what a caller may ask a server to do: read, search, create, update, delete, deploy, administer. It is a CEILING, never a grant \u2014 it narrows the tool set allowTools and denyTools already proved safe, and can never widen it. A server that declares no scopes has its tools classified from their MCP annotations and their names, and anything unclassified falls to `administer`, so a new tool cannot ride in on a read-only grant.",
   "_secrets": "No credential is ever written here. A userConfig field with \"secret\": true names an environment variable; the value lives in ~/.claude-shared/secrets/mcp/<server>/<field> with mode 0600 and is injected only into the child process that needs it.",
 
   "profiles": {
@@ -95,6 +96,29 @@
         "^replace_", "^insert_", "^create_", "^delete_", "^write_", "^rename_",
         "^move_", "^execute_shell_command$"
       ],
+      "_scopes": "activate_project selects which project the server answers about; it changes the server's own state, not the repository, and serena cannot answer anything without it, so it is read.",
+      "scopes": {
+        "read": [
+          "^get_symbols_overview$", "^read_file$", "^read_memory$", "^list_dir$",
+          "^list_memories$", "^find_file$", "^get_current_config$",
+          "^check_onboarding_performed$", "^think_about_", "^activate_project$"
+        ],
+        "search": [
+          "^find_symbol$", "^find_referencing_symbols$", "^search_for_pattern$"
+        ],
+        "create": [
+          "^create_", "^insert_", "^write_memory$"
+        ],
+        "update": [
+          "^replace_", "^rename_", "^move_", "^write_file$"
+        ],
+        "delete": [
+          "^delete_"
+        ],
+        "administer": [
+          "^execute_shell_command$"
+        ]
+      },
       "mutationApproval": {
         "gate": "implementation-write",
         "note": "Serena's edits would land in the repository, not outside this machine, so they belong behind the run's existing one-time Codex write approval — not behind a publication approval. Until such a scope is authorised, its editing tools are simply absent."
@@ -157,6 +181,24 @@
         "^browser_evaluate$", "^browser_install$", "^browser_file_upload$",
         "^browser_pdf_save$", "^browser_start_tracing$", "^browser_stop_tracing$"
       ],
+      "_scopes": "Interacting with a page \u2014 clicking, typing, filling a form \u2014 is `update`. A stage granted read alone observes the browser; driving it is a wider grant, which is what an end-to-end test actually needs.",
+      "scopes": {
+        "read": [
+          "^browser_snapshot$", "^browser_take_screenshot$", "^browser_console_messages$",
+          "^browser_network_requests$", "^browser_wait_for$", "^browser_tabs$"
+        ],
+        "update": [
+          "^browser_navigate", "^browser_click$", "^browser_type$", "^browser_press_key$",
+          "^browser_hover$", "^browser_select_option$", "^browser_drag$",
+          "^browser_fill_form$", "^browser_resize$", "^browser_handle_dialog$"
+        ],
+        "delete": [
+          "^browser_close$"
+        ],
+        "administer": [
+          "^browser_evaluate$", "^browser_install$", "^browser_file_upload$"
+        ]
+      },
       "mutationApproval": { "targets": ["jira", "confluence", "sharepoint", "bitbucket", "github", "email", "teams", "figma", "deployment"] },
       "verify": { "method": "tools/list", "timeoutSeconds": 120 },
       "useWhen": "Browser workflows, accessibility-tree interaction, responsive behaviour and end-to-end verification of a UI you are building.",
@@ -211,6 +253,27 @@
         "^evaluate_script$", "^upload_file$", "^fill$", "^fill_form$", "^click$",
         "^hover$", "^drag$", "^handle_dialog$", "^press_key$", "^type_text$"
       ],
+      "_scopes": "This is the operator's real browser, so its allowlist is already narrower than playwright's. Page lifecycle is update or delete; everything a trace, a snapshot or a console reader does is read.",
+      "scopes": {
+        "read": [
+          "^list_pages$", "^take_snapshot$", "^take_screenshot$", "^wait_for$",
+          "^list_console_messages$", "^get_console_message$", "^list_network_requests$",
+          "^get_network_request$", "^performance_", "^lighthouse_audit$",
+          "^take_heapsnapshot$"
+        ],
+        "create": [
+          "^new_page$"
+        ],
+        "update": [
+          "^select_page$", "^navigate_page$", "^resize_page$", "^emulate"
+        ],
+        "delete": [
+          "^close_page$"
+        ],
+        "administer": [
+          "^evaluate_script$", "^upload_file$"
+        ]
+      },
       "mutationApproval": {
         "gate": "denied",
         "note": "This server's interaction and script-evaluation tools are denied outright in this phase, by any approval. Driving a page is Playwright's job, under Playwright's own origin restrictions."

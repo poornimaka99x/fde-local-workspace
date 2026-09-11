@@ -24,6 +24,7 @@ import pathlib
 import sys
 
 import fde_capabilities as cap
+import fde_mcp
 import fde_plugin_import as imports
 
 # The controller sets this. It is the only thing that knows how to turn a run id
@@ -212,6 +213,28 @@ def cmd_config_show(args):
             print(f"{kind}s")
             _print_rows(rows)
             print()
+    connectors = [entry for entry in resolution["capabilities"]
+                  if entry["kind"] == "mcp" and entry.get("mcp")
+                  and (args.all or entry["state"] == cap.ENABLED)]
+    if connectors:
+        print("connectors")
+        width = max(len(entry["ref"]) for entry in connectors)
+        for entry in connectors:
+            connector = entry["mcp"]
+            scopes = ", ".join(connector.get("granted") or []) or "no scope"
+            print(f"  {entry['ref']:<{width}}  {connector['connectionState']:<24}  {scopes}")
+            tools = connector.get("tools")
+            if tools:
+                print(f"  {'':<{width}}  {len(tools)} tools: {', '.join(tools[:6])}"
+                      + (" …" if len(tools) > 6 else ""))
+            elif connector.get("state") == "unverified":
+                print(f"  {'':<{width}}  tool list not verified; scopes cannot be applied yet")
+            elif connector.get("state") == "nothing-enforceable":
+                print(f"  {'':<{width}}  no tool can be proved safe, so none is offered")
+            if connector.get("unenforceable") and connector.get("state") == "enforced":
+                print(f"  {'':<{width}}  granted but unavailable here: "
+                      + ", ".join(connector["unenforceable"]))
+        print()
     if resolution["settings"]:
         print("settings")
         for name, entry in sorted(resolution["settings"].items()):
@@ -287,16 +310,32 @@ def cmd_config_reset(args):
 def cmd_config_set_option(args):
     """Set something that is not on/off — a Ponytail mode, a permission scope."""
     shared = _shared()
-    if args.workflow and args.value != "inherit":
-        template = cap.load_template(shared, args.workflow)
-        if args.name == "ponytail.mode":
-            modes = (template.get("ponytail") or {}).get("modes", [])
-            if modes and args.value not in modes:
+    value = args.value
+    if value != "inherit":
+        if args.name.startswith("mcp.") and args.name.endswith(".scopes"):
+            # A scope list, not a string. Validated here so an unusable scope is
+            # refused at the point somebody types it rather than silently
+            # narrowing a connector to nothing at run time.
+            value = [part.strip() for part in args.value.split(",") if part.strip()]
+            unknown = [scope for scope in value if scope not in fde_mcp.SCOPES]
+            if unknown:
                 raise cap.CapabilityError(
-                    "invalid-value", f"{args.value!r} is not a Ponytail mode.",
+                    "invalid-value", f"{unknown[0]!r} is not a permission scope.",
+                    detail="Use one or more of: " + ", ".join(fde_mcp.SCOPES) + ".")
+            server = args.name[len("mcp."):-len(".scopes")]
+            if cap.Catalog.discover(shared).get(f"mcp:fde:{server}") is None:
+                raise cap.CapabilityError("unknown-capability",
+                                          f"No MCP server named {server!r} is in the catalogue.",
+                                          detail="see: fde mcp list")
+        elif args.workflow and args.name == "ponytail.mode":
+            template = cap.load_template(shared, args.workflow)
+            modes = (template.get("ponytail") or {}).get("modes", [])
+            if modes and value not in modes:
+                raise cap.CapabilityError(
+                    "invalid-value", f"{value!r} is not a Ponytail mode.",
                     detail=f"{args.workflow} offers: {', '.join(modes)}.")
     config = cap.Config.load(shared)
-    config.set_setting(args.name, None if args.value == "inherit" else args.value, args.scope).save()
+    config.set_setting(args.name, None if value == "inherit" else value, args.scope).save()
     payload = {"schemaVersion": cap.SCHEMA_VERSION, "scope": args.scope,
                "name": args.name, "value": args.value, "config": config.explicit()}
     if args.json:

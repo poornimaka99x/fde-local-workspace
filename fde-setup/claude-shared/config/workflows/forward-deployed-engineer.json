@@ -7,7 +7,7 @@
   "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
   "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
   "_optional": "`optional` is the spec's 'when applicable' set: real capabilities this stage can use, deliberately not on by default because they are conditional on the work (a database in scope, designs in scope, a cloud in scope). The console offers them; nothing enables them on its own.",
-  "_mcpScopes": "Declared here and enforced in the MCP permission phase. Recording the intended scope with the bundle keeps the two from drifting while the enforcement is built.",
+  "_mcpScopes": "The minimum each stage needs, and no more. A scope is a ceiling: it narrows the tool set allowTools and denyTools already proved safe and can never widen it, so a scope here is a statement of intent that is then intersected with what is actually enforceable. Selection never installs a server, connects an account, requests a credential or contacts anything.",
   "unlistedDefault": "disabled",
   "protected": [
     "plugin:fde"
@@ -344,15 +344,15 @@
       "mcpScopes": {
         "mcp:fde:serena": [
           "read",
-          "search",
-          "update"
+          "search"
         ],
         "mcp:fde:context7": [
           "read",
           "search"
         ],
         "mcp:fde:playwright": [
-          "read"
+          "read",
+          "update"
         ],
         "mcp:fde:figma": [
           "read"
@@ -363,7 +363,8 @@
         "design": "design-to-code, design-system, design-system-steward and figma are offered when designs are in scope.",
         "security": "security-reviewer is offered, and should be switched on, for security-sensitive changes.",
         "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate.",
-        "ponytailPlugin": "plugin:ponytail is enabled here and in quality-review only. Everywhere else it stays off, which is what keeps its lifecycle hooks out of the stages it has no business in."
+        "ponytailPlugin": "plugin:ponytail is enabled here and in quality-review only. Everywhere else it stays off, which is what keeps its lifecycle hooks out of the stages it has no business in.",
+        "serenaScope": "read and search only. Serena's editing tools are withheld by its own allowlist, and repository writes belong to the run's one-time Codex write approval rather than to a connector. Asking for `update` here would be a grant that buys nothing."
       }
     },
     {
@@ -426,7 +427,8 @@
       ],
       "mcpScopes": {
         "mcp:fde:playwright": [
-          "read"
+          "read",
+          "update"
         ],
         "mcp:fde:chrome-devtools": [
           "read"
@@ -445,7 +447,8 @@
         ]
       },
       "notes": {
-        "langfuse": "Offered when AI observability is in scope."
+        "langfuse": "Offered when AI observability is in scope.",
+        "playwrightScope": "read and update: an end-to-end check has to click, type and navigate. Its tracing, evaluate and upload tools stay outside every scope this workflow grants."
       },
       "ponytailMode": "lite"
     },
@@ -655,7 +658,8 @@
       },
       "notes": {
         "readonly": "Operations defaults to read-only investigation. Every connector here is scoped to read and search, and Bash is offered rather than granted. A code change, a data change, a rollback, a restart, a scaling action, an infrastructure change or a production remediation needs its own approval gate.",
-        "bash": "Offered, not enabled: an investigation that needs a shell is a decision the operator makes, once, in the open."
+        "bash": "Offered, not enabled: an investigation that needs a shell is a decision the operator makes, once, in the open.",
+        "browserScope": "read only, on both browser connectors. Operations observes; it does not drive."
       }
     }
   ],
