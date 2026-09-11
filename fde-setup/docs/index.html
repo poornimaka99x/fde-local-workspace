@@ -61,7 +61,7 @@
   --c-warn-bg:#352b18;
 
   --display:"Newsreader","Iowan Old Style",Palatino,Georgia,ui-serif,serif;
-  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 
   --measure:66ch;
@@ -214,10 +214,6 @@ code{
 .topnav::-webkit-scrollbar{display:none}
 .topnav a{color:var(--ink-muted);text-decoration:none;white-space:nowrap}
 .topnav a:hover{color:var(--accent)}
-@media (max-width:1040px){
-  .topnav a:nth-child(2),.topnav a:nth-child(3),.topnav a:nth-child(5),
-  .topnav a:nth-child(7),.topnav a:nth-child(9),.topnav a:nth-child(10){display:none}
-}
 @media (max-width:760px){ .topnav{display:none} }
 
 /* ---------- hero ---------- */
@@ -368,7 +364,7 @@ code{
 .c-cmd{
   font-family:var(--mono)!important;font-size:11.5px;color:var(--c-ink);
   background:var(--c-rail);border:1px solid var(--c-border);border-radius:8px;
-  padding:11px 13px;white-space:pre-wrap;overflow-wrap:anywhere;
+  padding:11px 13px;overflow-x:auto;white-space:pre;
 }
 .c-cmd .flag{color:var(--c-accent)}
 .c-cmd .ph{color:var(--c-muted)}
@@ -564,29 +560,6 @@ table.data code{white-space:nowrap}
 }
 .pipeline i{color:var(--ink-subtle);font-style:normal}
 
-[id]{scroll-margin-top:72px}
-.option-grid{
-  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;
-}
-.option-link{
-  display:flex;flex-direction:column;gap:8px;min-height:150px;padding:18px;
-  color:var(--ink);text-decoration:none;background:var(--surface);
-  border:1px solid var(--border-strong);border-radius:var(--r-lg);
-  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
-}
-.option-link:hover{
-  transform:translateY(-2px);border-color:var(--accent);
-  box-shadow:0 10px 28px rgba(40,34,28,.08);
-}
-.option-link b{font-family:var(--display);font-size:1.15rem}
-.option-link span:last-child{color:var(--ink-muted);font-size:.86rem;line-height:1.55}
-.option-number{
-  font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--accent);
-}
-@media (max-width:900px){.option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:560px){.option-grid{grid-template-columns:1fr}.option-link{min-height:0}}
-
 footer{
   border-top:1px solid var(--border);
   background:var(--bg-sunk);
@@ -594,6 +567,62 @@ footer{
 }
 .foot-grid{display:flex;flex-wrap:wrap;gap:28px;justify-content:space-between;align-items:flex-start}
 .foot-grid p{font-size:.86rem;color:var(--ink-muted);max-width:46ch;line-height:1.6}
+
+/* design-panel barrier diagram */
+.pd{
+  margin:0;border:1px solid var(--border-strong);border-radius:var(--r-lg);
+  overflow:hidden;background:var(--surface);
+}
+.pd-ctx{
+  padding:16px 20px;background:var(--accent-wash);
+  border-bottom:1px solid color-mix(in srgb,var(--accent) 25%,transparent);
+  display:flex;flex-direction:column;gap:4px;
+}
+.pd-tag{
+  font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent-deep);
+}
+.pd-ctx b{font-family:var(--mono);font-size:.92rem;color:var(--ink)}
+.pd-hash{font-size:.82rem;color:var(--ink-muted)}
+.pd-fan{
+  display:grid;grid-template-columns:repeat(3,1fr);height:20px;
+  background:var(--bg-sunk);border-bottom:1px solid var(--border);
+}
+.pd-fan span{border-left:1px dashed var(--border-strong);width:0;margin-inline:auto;height:100%}
+.pd-lanes{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:1px;background:var(--border);
+}
+.pd-lane{
+  background:var(--bg-sunk);padding:14px 16px;
+  display:flex;flex-direction:column;gap:4px;min-width:0;
+}
+.pd-lane b{font-family:var(--mono);font-size:.84rem;color:var(--ink);overflow-wrap:anywhere}
+.pd-lane>span{font-size:.8rem;color:var(--ink-muted)}
+.pd-state{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;
+  padding:2px 8px;border-radius:999px;align-self:flex-start;margin-top:3px;
+}
+.pd-state.ok{background:var(--ok-wash);color:var(--ok)}
+.pd-state.warn{background:var(--warn-wash);color:var(--warn)}
+.pd-barrier{
+  padding:14px 20px;font-size:.86rem;line-height:1.55;color:var(--ink-muted);
+  background:var(--surface);
+  border-block:1px dashed var(--border-strong);
+}
+.pd-barrier b{display:block;font-family:var(--mono);font-size:.72rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--danger);margin-bottom:5px}
+.pd-recon{padding:16px 20px;display:flex;flex-direction:column;gap:4px}
+.pd-recon b{font-family:var(--mono);font-size:.9rem;color:var(--ink)}
+.pd-recon span{font-size:.85rem;color:var(--ink-muted);line-height:1.55}
+.pd figcaption{
+  padding:12px 20px;border-top:1px solid var(--border);
+  background:var(--bg-sunk);font-size:.82rem;color:var(--ink-subtle);line-height:1.55;
+}
+@media (max-width:680px){
+  .pd-lanes{grid-template-columns:minmax(0,1fr)}
+  .pd-fan{display:none}
+}
 
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
@@ -610,6 +639,7 @@ html{scroll-behavior:smooth}
       <a href="#configuration">Configuration</a>
       <a href="#workspace">Workspace</a>
       <a href="#run">A run</a>
+      <a href="#design-panel">Design panel</a>
       <a href="#gates">Approvals</a>
       <a href="#governance">Governance</a>
       <a href="#start">Get started</a>
@@ -898,7 +928,7 @@ html{scroll-behavior:smooth}
     <div class="grid-2">
       <div class="panel">
         <h4>Design panel</h4>
-        <p>Two or three Claude accounts get the same sealed brief, work behind an information barrier, and are reconciled into one recommendation. Still a normal run: same plan and role approval, same artifacts.</p>
+        <p>Two or three Claude accounts get the same sealed brief, work behind an information barrier, and are reconciled into one recommendation. Still a normal run: same plan and role approval, same artifacts. <a href="#design-panel">How it works &rarr;</a></p>
       </div>
       <div class="panel">
         <h4>System health</h4>
@@ -1026,7 +1056,7 @@ html{scroll-behavior:smooth}
             <tr><td>Claude on Bedrock</td><td><code>claude_bedrock</code></td><td><code>~/.claude-profiles/bedrock</code></td><td>Own folder; AWS profile and region are provider settings used for every launch</td></tr>
             <tr><td>ChatGPT / Codex</td><td><code>chatgpt_codex</code></td><td><code>~/.codex</code></td><td>Shares the provider's default folder — it predates per-account folders</td></tr>
             <tr><td>Gemini (Antigravity)</td><td><code>gemini</code></td><td><code>~/.gemini/antigravity-cli</code></td><td>One sign-in per machine; the token is in the OS keyring, so a second account is refused</td></tr>
-            <tr><td>Microsoft Copilot</td><td><code>microsoft_copilot</code></td><td><code>~/.fde-copilot</code></td><td>Shares the default folder; FLOW stores the Direct Line secret in the account directory</td></tr>
+            <tr><td>Microsoft Copilot</td><td><code>microsoft_copilot</code></td><td><code>~/.fde-copilot</code></td><td>Shares the default folder; the Direct Line secret lives in the Keychain</td></tr>
           </tbody>
         </table>
       </div>
@@ -1085,7 +1115,7 @@ html{scroll-behavior:smooth}
           </div>
         </div>
       </div>
-      <p class="c-caption"><b>Service connections.</b> These never become role identities, and configuring one never authorises an external write. Tokens are written to <code>~/.claude-shared/secrets/service-connections/</code> with owner-only permissions, and the browser never gets them back.</p>
+      <p class="c-caption"><b>Service connections.</b> These never become role identities, and configuring one never authorises an external write. Tokens are written to <code>~/.claude-shared/secrets/service-connections/</code> with owner-only permissions — which also avoids an interactive Keychain prompt — and the browser never gets them back.</p>
 
       <div class="grid-3">
         <div class="panel">
@@ -1204,40 +1234,17 @@ html{scroll-behavior:smooth}
 <section id="workspace">
   <div class="wrap stack-lg">
     <div class="stack prose">
-      <p class="eyebrow">Ways to work</p>
-      <h2>Choose the FLOW option that matches the job</h2>
+      <p class="eyebrow">The workspace</p>
+      <h2>Four ways in — and only two of them are governed runs</h2>
       <p class="lede">
-        Start a governed FDE lifecycle for repeatable delivery, group related work in a project, open a chat for
-        focused exploration, or keep several live sessions moving at once. Each option has a clear purpose and
-        its own safety boundary.
+        Not every question deserves a twelve-stage lifecycle, and not every lifecycle should be assembled from
+        scratch. FLOW keeps the governed path, the pre-configured path and the ungoverned path visibly separate,
+        so you always know which one you are on.
       </p>
     </div>
 
-    <nav class="option-grid" aria-label="FLOW ways to work">
-      <a class="option-link" href="#fde-lifecycle">
-        <span class="option-number">Option 01</span>
-        <b>FDE lifecycle</b>
-        <span>Run a named, versioned delivery process with roles, evidence, review and human approvals.</span>
-      </a>
-      <a class="option-link" href="#projects">
-        <span class="option-number">Option 02</span>
-        <b>Projects</b>
-        <span>Group related runs, chats and existing repository paths without changing their permissions.</span>
-      </a>
-      <a class="option-link" href="#chats">
-        <span class="option-number">Option 03</span>
-        <b>Chats</b>
-        <span>Explore an idea in restricted plan mode, with no run, roles or approvals created.</span>
-      </a>
-      <a class="option-link" href="#sessions">
-        <span class="option-number">Option 04</span>
-        <b>Sessions</b>
-        <span>Switch between several active conversations while each continues in its own run context.</span>
-      </a>
-    </nav>
-
     <!-- FDE LIFECYCLE -->
-    <div class="stack" id="fde-lifecycle">
+    <div class="stack">
       <h3>1 · The FDE lifecycle — a governed system you configure once</h3>
       <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
         A normal run is scoped by conversation every time. A <b>system</b> is the opposite: a named, versioned
@@ -1293,7 +1300,7 @@ html{scroll-behavior:smooth}
     </div>
 
     <!-- PROJECTS -->
-    <div class="stack" id="projects">
+    <div class="stack">
       <h3>2 · Projects — the folder runs belong to</h3>
       <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
         A project is a name, a description and a list of repository paths. That is deliberately all it is: it
@@ -1338,7 +1345,7 @@ html{scroll-behavior:smooth}
     </div>
 
     <!-- CHATS -->
-    <div class="stack" id="chats">
+    <div class="stack">
       <h3>3 · Chats — thinking out loud, with nothing switched on</h3>
       <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
         Sometimes you just want to ask something. A chat creates no run, no roles, no plan, no approvals and no
@@ -1386,7 +1393,7 @@ html{scroll-behavior:smooth}
     </div>
 
     <!-- SESSIONS -->
-    <div class="stack" id="sessions">
+    <div class="stack">
       <h3>4 · Sessions — several runs open at once</h3>
       <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
         Real delivery work does not happen one run at a time. Each Claude-led run gets its own orchestrator
@@ -1614,6 +1621,344 @@ fde-start <span class="kw">--orchestrator</span> bedrock       <span class="cm">
   </div>
 </section>
 
+<!-- ============================ DESIGN PANEL ============================ -->
+<section id="design-panel">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Design panel</p>
+      <h2>Three accounts, identical context, one argument worth having</h2>
+      <p class="lede">
+        Ask one model to design a screen and you get one answer with no way to tell how contingent it was. A
+        design panel gives two or three separately authenticated Claude accounts <em>the same sealed bytes</em>,
+        keeps them from seeing each other, and reconciles what comes back into one recommendation that records
+        what it rejected and why.
+      </p>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        It is a normal run in a named shape — not a second orchestration system, and not three unrelated chats.
+        What is new is that <code>uiUxDesign</code> may be held by <em>several</em> identities at once.
+      </p>
+    </div>
+
+    <div class="pipeline">
+      <span>intake</span><i>→</i>
+      <span class="gate">solution architecture</span><i>→</i>
+      <span>adversarial review</span><i>→</i>
+      <span class="gate">reconciliation</span><i>→</i>
+      <span>presentation</span>
+    </div>
+    <p style="font-size:.86rem;color:var(--ink-subtle);margin-top:-24px">
+      The panel works in the two highlighted stages. Everything else is the ordinary lifecycle.
+    </p>
+
+    <!-- the barrier diagram -->
+    <figure class="pd">
+      <div class="pd-ctx">
+        <span class="pd-tag">sealed once</span>
+        <b>common-context.md</b>
+        <span class="pd-hash">contextSha256 · a strict prefix of every participant's prompt</span>
+      </div>
+      <div class="pd-fan" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="pd-lanes">
+        <div class="pd-lane">
+          <b>claude_work</b>
+          <span>flow lens</span>
+          <span class="pd-state ok">succeeded</span>
+        </div>
+        <div class="pd-lane">
+          <b>claude_msc</b>
+          <span>visual lens</span>
+          <span class="pd-state ok">succeeded</span>
+        </div>
+        <div class="pd-lane">
+          <b>claude_alt</b>
+          <span>system lens</span>
+          <span class="pd-state warn">failed · retryable</span>
+        </div>
+      </div>
+      <div class="pd-barrier">
+        <b>information barrier</b>
+        no participant's prompt may contain another's proposal — the controller enforces this rather than
+        trusting the prompt builder, and refuses to start a participant if it would be broken
+      </div>
+      <div class="pd-recon">
+        <b>reconciliation</b>
+        <span>orchestrator account · needs two successful proposals · the barrier opens exactly once, here, and the opening is an event in the run log</span>
+      </div>
+      <figcaption>The default is independent-first. A partial failure is normal and not fatal: the successful proposals stay available and the failed participant carries a safe reason.</figcaption>
+    </figure>
+
+    <!-- SEALED CONTEXT -->
+    <div class="stack">
+      <h3>The sealed context is the whole point</h3>
+      <div class="callout">
+        Every participant's prompt is <b>the shared bytes, then its own lens block</b> — and the shared context
+        is a <b>strict prefix</b> of every prompt. The controller asserts it and the test suite proves it. That
+        is what makes “everyone got the same context” <em>checkable</em> rather than merely intended.
+      </div>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        It is built once, written to <code>artifacts/design-panel/common-context.md</code>, and reused
+        byte-for-byte. <code>context-manifest.json</code> records exactly what went into it — so months later you
+        can answer what the designers were actually looking at.
+      </p>
+
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Manifest field</th><th>What it pins</th></tr></thead>
+          <tbody>
+            <tr><td><code>projectId</code>, <code>repositories</code></td><td>the project and its repository roots, each with its Git HEAD where it has one</td></tr>
+            <tr><td><code>brief</code></td><td>SHA-256 and size of the design brief</td></tr>
+            <tr><td><code>inputFiles</code></td><td>each attachment: media type, size, SHA-256, whether it was inlined or passed as a file, and the sealed copy's path</td></tr>
+            <tr><td><code>productMd</code>, <code>designMd</code></td><td>the selected project documents with digests — <em>or the reason one was not included</em></td></tr>
+            <tr><td><code>designReferences</code></td><td>catalog documents, their upstream commit, licence and digest</td></tr>
+            <tr><td><code>guidancePacks</code></td><td>each enabled pack, its pinned commit, licence, dial settings, and exactly which document bytes were used</td></tr>
+            <tr><td><code>commonContextBytes</code>, <code>contextSha256</code></td><td>the size and digest of the shared bytes</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Images are sealed by bytes, not by path</h4>
+          <p>A selected image is copied into <code>media/</code> and that copy is what participants get. It is re-hashed at <em>every</em> start, so an image that changed between two participants refuses the second start rather than quietly giving two accounts different bytes under one context digest.</p>
+        </div>
+        <div class="panel">
+          <h4>The selection is bounded and explicit</h4>
+          <p>No repository is traversed and no folder is inlined. At most 12 attachments, 256 KiB each, 64 KiB inlined each, 512 KiB of context in total. Guidance is cut on whole section boundaries and the manifest records how many bytes of each document were used.</p>
+        </div>
+        <div class="panel">
+          <h4>Refused before it starts, not after</h4>
+          <p>Symlinks, sensitive paths, and an attachment whose bytes no longer match its digest are all refused. A file that is not UTF-8 text and is not an image type the installed CLI can accept is refused <em>before</em> the panel runs, rather than turned into prompt text.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODES -->
+    <div class="stack">
+      <h3>Independent-first, or a staged handoff</h3>
+      <div class="grid-2">
+        <div class="panel">
+          <h4>Independent-first <span style="color:var(--ink-subtle);font-weight:400">— the default</span></h4>
+          <p>No participant sees another's proposal until every one of them has finished or failed, and the controller refuses a prompt that contains one. You get genuinely independent reads of the same brief.</p>
+        </div>
+        <div class="panel">
+          <h4>Collaborative <span style="color:var(--ink-subtle);font-weight:400">— order enforced</span></h4>
+          <p>Participants work in their configured order. Each one receives the succeeded proposals ahead of it in a <code>&lt;handoff&gt;</code> block carrying each proposal's digest, and is told to say what it adopts, changes and rejects. A failed predecessor hands nothing on and does not block.</p>
+        </div>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        In collaborative mode an earlier participant cannot be retried once a later one has worked — that would
+        replace a proposal somebody was already given. Start a new run instead. Every handoff writes a
+        <code>design-panel.handoff</code> event naming who received which proposals by digest.
+      </p>
+    </div>
+
+    <!-- PARTICIPANTS -->
+    <div class="stack">
+      <h3>What a participant is allowed to do: nothing</h3>
+      <div class="grid-3">
+        <div class="panel">
+          <h4>No tools at all</h4>
+          <p>Each runs with <code>--tools ''</code>, <code>--restricted</code>, <code>--strict-mcp-config</code> and plan-only permissions, so it cannot write a repository even if something in its context told it to. Concept generation writes nothing but the run.</p>
+        </div>
+        <div class="panel">
+          <h4>Its own credentials, always</h4>
+          <p>Every participant runs under its own <code>CLAUDE_CONFIG_DIR</code>. No profile's environment is merged with another's — the isolation guarantee is a real Claude-profile one, not a convention.</p>
+        </div>
+        <div class="panel">
+          <h4>Real ceilings, real Stop</h4>
+          <p>A wall-clock ceiling (15 minutes by default), an output ceiling, at most three running at once, and a Stop that actually kills the process.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- OUTPUT TARGETS -->
+    <div class="stack">
+      <h3>Three output targets</h3>
+      <div class="grid-3">
+        <div class="panel">
+          <h4><code>recommendation</code></h4>
+          <p>A document: the comparison, the reconciliation, and the final design recommendation.</p>
+        </div>
+        <div class="panel">
+          <h4><code>design-to-code</code></h4>
+          <p>The same, plus a handoff section on the reconciliation for whoever implements it.</p>
+        </div>
+        <div class="panel">
+          <h4><code>prototype</code></h4>
+          <p>An artifact, not a description of one. Each proposal must carry a <code>## Prototype</code> section holding exactly one fenced HTML block — a complete, self-contained document with nothing fetched over the network.</p>
+        </div>
+      </div>
+      <div class="callout">
+        For a prototype the controller <b>refuses a proposal that describes a prototype instead of delivering
+        one</b>: nothing is recorded, and the participant stays running and retryable. Extracted files land in
+        <code>artifacts/design-panel/prototypes/</code> and the console previews them with scripts off.
+      </div>
+    </div>
+
+    <!-- RECONCILIATION -->
+    <div class="stack">
+      <h3>Reconciliation, and the approval that stops a walkover</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Reconciliation runs in the <code>reconciliation</code> stage under the run's orchestrator account and
+        needs <b>two</b> successful proposals. With one, it refuses — unless you say otherwise, out loud:
+      </p>
+      <pre>fde design-panel approve-degraded &lt;run-id&gt;
+<span class="ph">APPROVE DEGRADED RECONCILIATION &lt;run-id&gt;</span></pre>
+      <div class="callout">
+        That is a typed approval on purpose. <b>A recommendation nothing argued with is a decision, not a
+        default</b> — and the final design says so.
+      </div>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        The answer must arrive in exactly these sections, or it is refused and nothing is written. The
+        comparison covers user flow, hierarchy, visual language, components, accessibility, responsive
+        behaviour, motion, risks and implementation cost; the reconciliation lists accepted and rejected ideas
+        explicitly, attributed, with reasons.
+      </p>
+      <pre><span class="kw">## Comparison</span>
+<span class="kw">## Reconciliation</span>
+<span class="kw">## Final design recommendation</span>
+<span class="kw">## Design-to-code handoff</span>      <span class="cm">only when the output target is design-to-code</span></pre>
+
+      <pre>artifacts/design-panel/
+  context-manifest.json
+  common-context.md
+  references/&lt;reference-id&gt;.md
+  proposals/claude_work.md
+  proposals/claude_msc.md
+  proposals/claude_alt.md
+  media/
+  comparison.md
+  reconciliation.md
+  final-design.md
+  design-to-code-handoff.md</pre>
+    </div>
+
+    <!-- GUIDANCE -->
+    <div class="stack">
+      <h3>Guidance packs, and what wins when they disagree</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Optional, off by default, and shown with what each one changes. <b>Taste</b> is visual-direction
+        guidance with three dials — variance, motion and density, each 1–10 and recorded in the panel manifest.
+        <b>Impeccable</b> shapes during concept generation, critiques during review and polishes only after
+        reconciliation; it is a guidance layer only, with no launcher, engine binary or hooks.
+        <b>Design-language references</b> are a catalog of reviewed <code>DESIGN.md</code> documents — at most
+        one primary and one secondary, copied into the sealed context and hashed.
+      </p>
+      <div class="callout warnbox">
+        Taste and Impeccable give conflicting stylistic direction. Enabling both is possible, but only
+        <b>after the conflict has been shown to you and you have chosen</b>. And a design-language reference is
+        inspiration for an original, project-specific direction — never authorisation to impersonate a brand or
+        reuse its assets.
+      </div>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        When guidance disagrees, this precedence decides — and it is written into every sealed context, so it
+        travels with the work:
+      </p>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>#</th><th>What wins</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>your stated requirements and acceptance criteria</td></tr>
+            <tr><td>2</td><td>existing product truth, accessibility obligations, design system and code conventions</td></tr>
+            <tr><td>3</td><td>approved project <code>PRODUCT.md</code> and <code>DESIGN.md</code></td></tr>
+            <tr><td>4</td><td>the selected design-language reference — inspiration only</td></tr>
+            <tr><td>5</td><td>selected Taste guidance</td></tr>
+            <tr><td>6</td><td>Impeccable's generic guidance and any detector findings</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- STARTING -->
+    <div class="stack">
+      <h3>Starting one</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        From the console it is two steps, because a panel has two moments: <b>create the run</b> (project,
+        design brief, orchestrator), then <b>seal the context and configure the panel</b> (attachments,
+        participants, lenses, model and effort per account, output target, optional reference and guidance
+        packs, independent-first or collaborative). Between those two steps you can attach files. After the
+        second, the context is sealed — the only way to change it is a new panel on a new run.
+      </p>
+      <div class="callout">
+        Creating the panel proposes the plan and <em>selects</em> the designers. <b>It approves nothing.</b> The
+        panel page then tells you which roles the plan still needs and the exact phrase to type.
+      </div>
+      <pre>fde start <span class="kw">--json --orchestrator</span> work <span class="kw">--project</span> &lt;project-id&gt; <span class="kw">--shape</span> design-panel <span class="kw">--</span> <span class="st">"Rework returns"</span>
+
+fde design-panel create &lt;run-id&gt; <span class="kw">--brief-file</span> brief.md <span class="kw">--propose-plan</span> \
+    <span class="kw">--participant</span> work:flow \
+    <span class="kw">--participant</span> msc:visual:high \
+    <span class="kw">--participant</span> alt:system
+
+fde roles &lt;run-id&gt; <span class="kw">--set</span> solutioning=work <span class="kw">--set</span> review=msc <span class="kw">--set</span> presentation=work
+fde approve-plan &lt;run-id&gt;              <span class="cm"># type: APPROVE PLAN &lt;run-id&gt;</span>
+fde resume &lt;run-id&gt; <span class="kw">--next</span>             <span class="cm"># into solutioning</span>
+fde design-panel start &lt;run-id&gt; claude_work <span class="kw">--print-prompt</span></pre>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        <code>--participant</code> is <code>&lt;agent&gt;:&lt;lens&gt;[:&lt;effort&gt;[:&lt;model&gt;]]</code>. The model is
+        last so a provider model id containing a colon still parses.
+      </p>
+    </div>
+
+    <!-- RECOVERY -->
+    <div class="stack">
+      <h3>When something goes wrong</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Orphaned work becomes a retryable interruption the first time the panel is read after a restart.
+        Nothing is silently resumed, and no proposal is lost: what was recorded stays recorded.
+      </p>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>What happened</th><th>What you see</th><th>What to do</th></tr></thead>
+          <tbody>
+            <tr><td>The console restarted mid-run</td><td>participants become <code>interrupted</code> with a reason</td><td>Retry them</td></tr>
+            <tr><td>An account hit a usage limit</td><td>that participant is <code>failed</code>, the others untouched</td><td>Retry it later, or reconcile with the rest</td></tr>
+            <tr><td>Only one proposal succeeded</td><td>reconciliation refuses</td><td>Retry, or approve a degraded reconciliation</td></tr>
+            <tr><td>The model answered without the required sections</td><td>the answer is refused, nothing is written</td><td>Reconcile again</td></tr>
+            <tr><td>A vendored source no longer matches its lock</td><td>the panel refuses to use it</td><td><code>design-sources audit</code>, then <code>update</code></td></tr>
+            <tr><td><code>fde</code> is older than the console</td><td>the console says so</td><td><code>./install.sh --update</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- LIMITATIONS -->
+    <div class="stack">
+      <h3>Limitations, stated plainly</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        These are in the repository's own documentation, not extracted from it by anyone else. A feature that
+        lists what it is not is usually the one worth trusting.
+      </p>
+      <dl class="rule-list">
+        <div class="rule-item">
+          <dt>Claude accounts only</dt>
+          <dd>Codex, Gemini and Copilot are not participants. The point is separately authenticated Claude accounts reading identical context, and the isolation guarantee is a Claude-profile one.</dd>
+        </div>
+        <div class="rule-item">
+          <dt>Collaborative is not a conversation</dt>
+          <dd>It is a staged handoff. There is no shared session, and a participant sees a predecessor's finished proposal, not its reasoning. The accounts never talk to each other live.</dd>
+        </div>
+        <div class="rule-item">
+          <dt>Participants have no tools</dt>
+          <dd>They cannot read the repository themselves; they see what you sealed into the context and nothing else. That is the trade for the guarantee that concept generation writes nothing.</dd>
+        </div>
+        <div class="rule-item">
+          <dt>A prototype is not a build</dt>
+          <dd>One self-contained HTML file with no network access — a design artifact to look at and click through. It authorises no repository write.</dd>
+        </div>
+        <div class="rule-item">
+          <dt>The reconciliation is one model call</dt>
+          <dd>With a required shape. It is evidence and a recommendation, not an approval: implementation, publication and deployment keep their own gates.</dd>
+        </div>
+        <div class="rule-item">
+          <dt>The console must be running</dt>
+          <dd>The console runs the accounts; the controller owns the record. If the console is not running, nothing progresses — and nothing is lost.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</section>
+
 <!-- ============================ GATES ============================ -->
 <section id="gates">
   <div class="wrap stack-lg">
@@ -1830,7 +2175,7 @@ exec $SHELL <span class="kw">-l</span></pre>
           </p>
           <pre>cp claude-shared/env.sh.example ~/.claude-shared/env.sh
 chmod 600 ~/.claude-shared/env.sh
-${EDITOR:-vi} ~/.claude-shared/env.sh <span class="cm"># CONFLUENCE_BASE_URL, EMAIL, API_TOKEN</span>
+open -e ~/.claude-shared/env.sh    <span class="cm"># CONFLUENCE_BASE_URL, EMAIL, API_TOKEN</span>
 source ~/.claude-shared/env.sh
 
 confluence spaces                  <span class="cm"># should list your spaces</span></pre>
@@ -1934,8 +2279,8 @@ fde shapes             <span class="cm"># the named plan shapes</span></pre>
       <div class="grid-3">
         <div class="panel">
           <h4>Copilot Studio</h4>
-          <p>Needs an eligible account and a published agent. Store the Direct Line secret through FLOW, not in <code>env.sh</code>:<br>
-          <code>fde accounts set-secret &lt;account-id&gt;</code></p>
+          <p>Needs a licence and a published agent. The Direct Line secret goes in the Keychain, not <code>env.sh</code>:<br>
+          <code>security add-generic-password -a "$USER" -s fde-copilot-directline -w</code></p>
         </div>
         <div class="panel">
           <h4>Bitbucket via Atlassian</h4>
@@ -2066,7 +2411,7 @@ fde design-panel reconcile &lt;run-id&gt;
           <tr><td><code>not in this run's plan</code></td><td>that stage isn't in scope</td><td>widen the plan, or don't do it</td></tr>
           <tr><td><code>already been passed</code></td><td>you can widen a plan forwards, not backwards</td><td>new run for that work</td></tr>
           <tr><td><code>holds no role in run</code></td><td>that identity was not assigned anything here</td><td>assign it, or use one that was</td></tr>
-          <tr><td><code>Choose a replacement</code></td><td>you assigned something not installed on this device</td><td>install it, pick another, or <code>--allow-unavailable</code></td></tr>
+          <tr><td><code>Choose a replacement</code></td><td>you assigned something not installed on this Mac</td><td>install it, pick another, or <code>--allow-unavailable</code></td></tr>
           <tr><td><code>no Codex write approval on record</code></td><td>the role is not the approval</td><td><code>fde approve-codex …</code></td></tr>
           <tr><td><code>task file changed since approval</code></td><td>you edited the task after approving</td><td>approve the new one; never widen the old</td></tr>
           <tr><td><code>approval consumed</code> / <code>expired</code></td><td>one use, 30 minutes</td><td>approve again</td></tr>
@@ -2101,7 +2446,7 @@ fde design-panel reconcile &lt;run-id&gt;
       <h4 style="font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-subtle);font-family:var(--mono);font-weight:500">Source</h4>
       <p>
         <a href="https://github.com/poornimaka99x/fde-local-workspace">github.com/poornimaka99x/fde-local-workspace</a><br>
-        Source, setup guides and technical documentation are available in the repository.
+        See <code>LICENSE</code> and <code>NOTICE</code> in the repository — vendored dependencies keep their own terms.
       </p>
     </div>
   </div>

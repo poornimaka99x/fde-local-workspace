@@ -1,57 +1,59 @@
-# FDE Claude Code setup
+# FLOW
 
-One Claude Code installation, several identities, many repositories — without
-copying config into every repo, without one account's settings leaking into
-another's, and without any agent deciding for itself what it is allowed to do.
+**F**orward-deployed **L**ocal **O**perations **W**orkspace — a local console and
+controller for running real delivery work through several AI coding agents
+(Claude Code, ChatGPT/Codex, Gemini, Microsoft Copilot) under one governed
+lifecycle, on your own machine.
 
-**New here, or coming back after the re-architecture? Read
-[START-HERE.md](START-HERE.md)** — copy-paste, about 30 minutes to a first
-completed run. `RUNBOOK.md` is the phased setup detail; this file is the design.
+Most agent tooling can tell you what changed. FLOW is built so you can also answer
+what it was allowed to read, whose authority it acted on, and what you would show
+a client who asked. It was built for forward-deployed work — client estates,
+client constraints, interrupted sessions, several engagements at once — where
+that second question is the one that actually costs you.
 
-Canonical source: the private repository this directory came from. Clone it,
-run `./install.sh`, and `./install.sh --update` when it changes.
+The design rule throughout: **read-only is enforced, or it is not claimed.** Tool
+scope is built from the tool list a server actually reported and expressed in each
+client's own mechanism. A code write is bound to the SHA-256 of one task file. And
+where a provider's tools cannot be enumerated at all, FLOW reports it as `blocked`
+with the reason rather than describing it as safe.
 
-## Configuration console
+**New here? [START-HERE.md](START-HERE.md)** is copy-paste, about 30 minutes to a
+first completed run. [`RUNBOOK.md`](RUNBOOK.md) is the phased setup detail. This
+file is the design.
 
-The console's **Configuration** page keeps two deliberately separate kinds of
-access. **AI accounts** are identities that may be assigned roles in a run;
-Claude and Codex use isolated profile directories, Gemini uses Antigravity's
-single machine Keychain sign-in, and Copilot Studio uses a separately stored
-Direct Line credential. **Service connections** are Atlassian REST, Atlassian
-Rovo MCP, GitHub, Bitbucket and Figma access. They never become role identities and configuring
-one never authorises an external write.
+> **On naming.** FLOW is the system. `fde` is the controller command, `fde-start`
+> the launcher, `fde-gui` the console package, `~/.claude-shared` the shared root.
+> Those identifiers are a stable contract with anything already installed and are
+> deliberately not renamed.
 
-**Capabilities** is the inventory of the agent harness itself. It lists every
-installed plugin, skill, sub-agent, MCP server, declared tool, command, hook and
-runtime utility, with its built-in or user-owned origin. From the same tab a
-user can create a skill in the separately managed `fde-user` plugin, or import
-a local plugin that contains `.claude-plugin/plugin.json`. Imports are bounded,
-reject symbolic links and never overwrite an existing plugin. Refresh or
-install the resulting marketplace plugin in each AI account that should use it;
-sessions already running retain the capabilities they started with.
+## Quickstart
 
-Each configurable capability has an on/off switch. States are stored in the
-local capability policy and apply to new FDE processes. MCP changes still pass
-through the MCP controller, tool changes become explicit CLI deny rules, and
-hook changes update the local hook manifest. `fde-core` itself is protected
-because disabling the control-plane plugin would make the configuration screen
-an unreliable description of the system it controls.
+```bash
+git clone https://github.com/poornimaka99x/fde-local-workspace.git
+cd fde-local-workspace
 
-Atlassian, GitHub and Bitbucket tokens are submitted once and stored in
-`~/.claude-shared/secrets/service-connections/` with owner-only directory and
-file permissions. This avoids an interactive Keychain password prompt; the
-browser and metadata registry never receive them back. Figma uses the official remote MCP endpoint
-`https://mcp.figma.com/mcp`; its OAuth credential remains owned by the MCP
-client. Figma is wired only after roles are confirmed, and canvas writes require
-`fde approve-publish <run-id> figma`, like every other publication target.
+./install.sh --update --dry-run     # look first — nothing is written
+./install.sh --update
+exec $SHELL -l
 
-General chats have no service access by default. The New chat screen lets the
-user grant read-only access to specific configured connections. For REST
-connections, FDE resolves only matching Jira, Confluence, GitHub or Bitbucket
-links included in the message, then gives the result—not the credential—to the
-selected Claude, Codex or Gemini account. Atlassian REST tokens and Rovo OAuth
-are separate connections: the former enables this bounded link reader; the
-latter remains owned by each MCP-capable client.
+cp claude-shared/env.sh.example ~/.claude-shared/env.sh   # then edit it
+chmod 600 ~/.claude-shared/env.sh
+
+fde doctor                          # what is configured, what is broken
+fde-start                           # start a run and its orchestrator chat
+```
+
+Then open the console:
+
+```bash
+cd fde-gui && npm install && npm start
+# open the http://127.0.0.1:7317/#token=... link it prints
+```
+
+Requires Node 22+ and Claude Code signed in at least once. Codex and Gemini are
+optional until you assign them a role. The full walkthrough, including the two
+typed approvals and what to do when a command refuses you, is in
+[START-HERE.md](START-HERE.md).
 
 ## The idea in two sentences
 
@@ -65,6 +67,21 @@ the combined plan and role assignment; Codex writes only under a one-time
 approval bound to the exact bytes of one task file; and anything that leaves
 this machine — Jira, Confluence, SharePoint, GitHub, Bitbucket, Figma,
 deployment, email or Teams — needs its own publication approval.
+
+## What is in this repository
+
+| Path | What it is |
+|---|---|
+| [`START-HERE.md`](START-HERE.md) | Copy-paste setup to a first completed run, plus the refusal table |
+| [`RUNBOOK.md`](RUNBOOK.md) | Phased setup detail, including the parts that need an admin |
+| `claude-shared/bin/fde` | The controller — a single Python 3 program, no dependencies |
+| [`fde-gui/`](fde-gui/README.md) | The FLOW console: projects, runs, plans, roles, approvals, evidence |
+| `fde-toolkit/` | The plugin marketplace: skills, specialist agents, commands, hooks |
+| [`docs/FDE-DESIGN-PANEL.md`](docs/FDE-DESIGN-PANEL.md) | Several Claude accounts, one sealed context, one reconciled recommendation |
+| [`docs/MCP-GOVERNANCE.md`](docs/MCP-GOVERNANCE.md) | Per-server setup, credentials, read/write boundaries, tool scope |
+| [`docs/FDE-CONTROLLER-CONTRACTS.md`](docs/FDE-CONTROLLER-CONTRACTS.md) | The machine-readable controller surface |
+| [`docs/FDE-GUI-THREAT-MODEL.md`](docs/FDE-GUI-THREAT-MODEL.md) | The console's security boundaries |
+| [`docs/index.html`](docs/index.html) | The project landing page |
 
 ## The four layers
 
@@ -506,7 +523,7 @@ provenance, licences and the audit behind them are in
 [`docs/FDE-DESIGN-SOURCES.md`](docs/FDE-DESIGN-SOURCES.md); how to run a panel is
 in [`docs/FDE-DESIGN-PANEL.md`](docs/FDE-DESIGN-PANEL.md).
 
-## The control center (local, read-only)
+## The FLOW console
 
 `fde-gui/` is a local operator console over this controller: projects, runs,
 plans, roles, approvals, checkpoints, events, attachments, artifacts and
@@ -528,6 +545,48 @@ publication all happen in that conversation, typed by you.
 Details, environment variables and the deliberate deviations are in
 [`fde-gui/README.md`](fde-gui/README.md); the security boundaries are in
 [`docs/FDE-GUI-THREAT-MODEL.md`](docs/FDE-GUI-THREAT-MODEL.md).
+
+### Configuration
+
+The console's **Configuration** page keeps two deliberately separate kinds of
+access. **AI accounts** are identities that may be assigned roles in a run;
+Claude and Codex use isolated profile directories, Gemini uses Antigravity's
+single machine Keychain sign-in, and Copilot Studio uses a separately stored
+Direct Line credential. **Service connections** are Atlassian REST, Atlassian
+Rovo MCP, GitHub, Bitbucket and Figma access. They never become role identities and configuring
+one never authorises an external write.
+
+**Capabilities** is the inventory of the agent harness itself. It lists every
+installed plugin, skill, sub-agent, MCP server, declared tool, command, hook and
+runtime utility, with its built-in or user-owned origin. From the same tab a
+user can create a skill in the separately managed `fde-user` plugin, or import
+a local plugin that contains `.claude-plugin/plugin.json`. Imports are bounded,
+reject symbolic links and never overwrite an existing plugin. Refresh or
+install the resulting marketplace plugin in each AI account that should use it;
+sessions already running retain the capabilities they started with.
+
+Each configurable capability has an on/off switch. States are stored in the
+local capability policy and apply to new FDE processes. MCP changes still pass
+through the MCP controller, tool changes become explicit CLI deny rules, and
+hook changes update the local hook manifest. `fde-core` itself is protected
+because disabling the control-plane plugin would make the configuration screen
+an unreliable description of the system it controls.
+
+Atlassian, GitHub and Bitbucket tokens are submitted once and stored in
+`~/.claude-shared/secrets/service-connections/` with owner-only directory and
+file permissions. This avoids an interactive Keychain password prompt; the
+browser and metadata registry never receive them back. Figma uses the official remote MCP endpoint
+`https://mcp.figma.com/mcp`; its OAuth credential remains owned by the MCP
+client. Figma is wired only after roles are confirmed, and canvas writes require
+`fde approve-publish <run-id> figma`, like every other publication target.
+
+General chats have no service access by default. The New chat screen lets the
+user grant read-only access to specific configured connections. For REST
+connections, FDE resolves only matching Jira, Confluence, GitHub or Bitbucket
+links included in the message, then gives the result—not the credential—to the
+selected Claude, Codex or Gemini account. Atlassian REST tokens and Rovo OAuth
+are separate connections: the former enables this bounded link reader; the
+latter remains owned by each MCP-capable client.
 
 ## Caveats
 
