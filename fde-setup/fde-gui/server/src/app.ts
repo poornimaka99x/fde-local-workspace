@@ -27,6 +27,7 @@ import { registerAccountRoutes } from './routes/accounts'
 import { registerConnectionRoutes } from './routes/connections'
 import { registerMcpRoutes } from './routes/mcp'
 import { registerCapabilityRoutes } from './routes/capabilities'
+import { registerSystemRoutes } from './routes/systems'
 import { AccountService } from './services/accounts'
 import { ChatService } from './services/chats'
 import { DesignPanelService } from './services/design-panel'
@@ -120,6 +121,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   registerRunRoutes(app, config, resolved)
   registerRoutingRoutes(app, config, resolved)
   registerDesignPanelRoutes(app, resolved)
+  registerSystemRoutes(app, config, resolved)
 
   // The terminal routes live inside their own plugin so the websocket support
   // is loaded before the route that needs it. Hooks from the root — headers,

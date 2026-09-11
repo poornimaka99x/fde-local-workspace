@@ -5,7 +5,17 @@
 It shows projects, runs, plans, roles, approvals, checkpoints, events, input
 attachments, artifacts and output-hygiene evidence. It can create a project,
 edit one, create a run and attach a file — each one a controller command, with
-the console writing nothing itself.
+the console writing no controller-owned run state itself. Reusable system
+profiles and the index that identifies which executor created a run live under
+`~/.claude-shared/config`; lifecycle state remains controller-owned.
+
+The **Systems** screen exposes **Forward Deployed Engineer** as a first-class
+system. It has named, versioned configurations, a dedicated start wizard and a
+separate run history. Its executor starts the controller's full lifecycle by
+default, from business intent through observability, while retaining the
+controller's role selection and exact approval gates. A configuration can turn
+stages off, choose its default orchestrator, and point to the existing
+capability catalogue for skill, sub-agent, MCP, tool, plugin and hook controls.
 
 It can also resume a Claude-led run: Resume starts exactly
 `fde-start --resume <run-id>` in an embedded terminal, one process per run, and
