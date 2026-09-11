@@ -1,0 +1,9 @@
+{
+  "_comment": "Layer 1 of the capability precedence order: what no other layer may change. A capability listed in 'required' is always on and its switch is not offered; one listed in 'forbidden' is always off and no bundle, plugin, sub-agent, command, hook or upgrade can turn it on. This file is toolkit-owned and deliberately short — it is the list of decisions that are not the operator's to make per run, not a second place to configure FDE.",
+  "_failClosed": "If this file exists and cannot be read as schema 1, nothing resolves. An unknown security posture is not treated as a permissive one.",
+  "schemaVersion": 1,
+  "required": [
+    "plugin:fde"
+  ],
+  "forbidden": []
+}
