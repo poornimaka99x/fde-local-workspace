@@ -36,7 +36,7 @@ const servers = [
     ...base, name: 'atlassian', state: 'ready',
     reason: "sign in inside its MCP client (/mcp); its tools cannot be scoped from here",
     transport: 'http', classification: 'tenant-data', mutation: 'mutation-capable',
-    readOnlyPolicy: 'client-credential', profiles: ['maxeda-delivery'], unscopedWrites: true,
+    readOnlyPolicy: 'client-credential', profiles: ['client-delivery'], unscopedWrites: true,
     requiredFields: [{
       name: 'allowTools', label: 'Pin a read-only tool allowlist (comma separated)',
       required: false, secret: false, type: 'text', options: [],

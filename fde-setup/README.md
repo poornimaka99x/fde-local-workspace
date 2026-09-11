@@ -21,6 +21,22 @@ Direct Line credential. **Service connections** are Atlassian REST, Atlassian
 Rovo MCP, GitHub, Bitbucket and Figma access. They never become role identities and configuring
 one never authorises an external write.
 
+**Capabilities** is the inventory of the agent harness itself. It lists every
+installed plugin, skill, sub-agent, MCP server, declared tool, command, hook and
+runtime utility, with its built-in or user-owned origin. From the same tab a
+user can create a skill in the separately managed `fde-user` plugin, or import
+a local plugin that contains `.claude-plugin/plugin.json`. Imports are bounded,
+reject symbolic links and never overwrite an existing plugin. Refresh or
+install the resulting marketplace plugin in each AI account that should use it;
+sessions already running retain the capabilities they started with.
+
+Each configurable capability has an on/off switch. States are stored in the
+local capability policy and apply to new FDE processes. MCP changes still pass
+through the MCP controller, tool changes become explicit CLI deny rules, and
+hook changes update the local hook manifest. `fde-core` itself is protected
+because disabling the control-plane plugin would make the configuration screen
+an unreliable description of the system it controls.
+
 Atlassian, GitHub and Bitbucket tokens are submitted once and stored in
 `~/.claude-shared/secrets/service-connections/` with owner-only directory and
 file permissions. This avoids an interactive Keychain password prompt; the
@@ -81,7 +97,7 @@ Then open a new shell and sign in once per profile:
 
 ```bash
 cc-work  cc-msc  cc-alt     personal accounts
-cc-bedrock                  Maxeda on Bedrock
+cc-bedrock                  Acme on Bedrock
 cc-which                    what exists, what's active
 fde doctor                  what is configured, what is broken
 ```
@@ -263,7 +279,7 @@ gated at publication by `fde approve-publish`, and you can pin a real allowlist
 with `fde mcp configure atlassian --set allowTools=…`.
 
 **Profiles** name a slice of the catalogue for a kind of work — `coding`,
-`frontend-testing`, `maxeda-delivery`, `data`, `observability`. Selecting one
+`frontend-testing`, `client-delivery`, `data`, `observability`. Selecting one
 narrows the effective set; it never widens it.
 
 Ten servers ship in the catalogue: Context7 and Serena for code, Playwright and
@@ -373,7 +389,7 @@ existing repository paths; it holds no workflow state.
 
 ```bash
 fde project create --name "Returns modernisation" --repo ~/code/returns-api
-fde start "MAX-142 returns orchestration" --project returns-modernisation-a1b2
+fde start "ACME-142 returns orchestration" --project returns-modernisation-a1b2
 fde projects                       # names, repositories, run counts
 fde project show <project-id>      # its repositories and its runs
 fde delete <run-id> --confirm <run-id>       # move a complete run to recoverable trash

@@ -195,7 +195,14 @@ sync_tree() {  # sync_tree <src-dir> <rel-prefix>
       *.DS_Store|*/.git/*|*/__pycache__/*|*.pyc) continue ;;
     esac
     sync_file "$f" "$rel"
-  done < <(find "$root" -type f -print0)
+  # Dependencies and build output are derived, not source: pruned from the walk
+  # rather than copied. The console reinstalls and rebuilds them on its next
+  # launch, which is both faster and the only way the installed copy is
+  # guaranteed to match the source just synced.
+  done < <(find "$root" \
+    \( -name node_modules -o -name dist -o -name .git -o -name __pycache__ \
+       -o -name .pytest_cache -o -name coverage -o -name _to_delete \) -prune -o \
+    -type f -print0)
 }
 
 # ---- 1. shared assets -------------------------------------------------------
@@ -213,6 +220,16 @@ sync_file "$SRC/shell/claude-profile-new" "bin/claude-profile-new"
 say "syncing plugin marketplace into $SHARED/fde-toolkit"
 sync_tree "$SRC/fde-toolkit" "fde-toolkit"
 (( DRY )) || chmod +x "$SHARED/fde-toolkit/plugins/fde-core/bin/"*.sh 2>/dev/null || true
+
+# ---- 3. operator console ----------------------------------------------------
+# fde-gui runs from $SHARED/fde-gui, not from this checkout, so a console fix
+# that is never synced here simply never reaches you. This script shipped
+# without that step, which is how a fixed console could sit in the source while
+# the installed one stayed broken. Source only: node_modules and dist are
+# pruned by sync_tree, and `fde-gui` installs dependencies on first launch and
+# rebuilds whenever a source file is newer than the built bundle.
+say "syncing operator console into $SHARED/fde-gui"
+sync_tree "$SRC/fde-gui" "fde-gui"
 # The vendored design sources are data. Only the audit/update tool beside them
 # is executable, and nothing inside those source trees ever is.
 (( DRY )) || chmod +x "$SHARED/fde-toolkit/plugins/fde-core/vendor/bin/design-sources" 2>/dev/null || true
@@ -225,7 +242,7 @@ if [[ -x "$SHARED/fde-toolkit/plugins/fde-core/vendor/bin/design-sources" ]] && 
   fi
 fi
 
-# ---- 3. directories that must exist but stay yours ---------------------------
+# ---- 4. directories that must exist but stay yours ---------------------------
 for d in intake runs shared/clients config; do
   if [[ ! -d "$SHARED/$d" ]]; then
     act "create   $d/"
@@ -252,7 +269,7 @@ __pycache__/
 GI
 fi
 
-# ---- 4. profiles -------------------------------------------------------------
+# ---- 5. profiles -------------------------------------------------------------
 export CLAUDE_SHARED="$SHARED"
 if [[ "$MODE" == "install" ]]; then
   for p in "${PROFILES[@]}"; do
@@ -277,7 +294,7 @@ else
   note "update mode: profiles, credentials and settings.json left exactly as they are"
 fi
 
-# ---- 5. MCP wiring -----------------------------------------------------------
+# ---- 6. MCP wiring -----------------------------------------------------------
 say "syncing MCP config to the agent CLIs that are installed"
 if (( DRY )); then
   "$SHARED/bin/mcp-sync" --dry-run 2>/dev/null || note "(mcp-sync dry run unavailable until installed)"
@@ -302,7 +319,7 @@ else
   note "    brew install pandoc      # or: pip install python-docx --break-system-packages"
 fi
 
-# ---- 6. shell wiring ---------------------------------------------------------
+# ---- 7. shell wiring ---------------------------------------------------------
 line="source \"\$HOME/.claude-shared/shell/claude-profiles.sh\"
 export PATH=\"\$HOME/.claude-shared/bin:\$PATH\"
 [ -f \"\$HOME/.claude-shared/env.sh\" ] && source \"\$HOME/.claude-shared/env.sh\""
@@ -316,7 +333,7 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
   fi
 done
 
-# ---- 7. source of truth ------------------------------------------------------
+# ---- 8. source of truth ------------------------------------------------------
 if [[ ! -d "$SHARED/.git" ]]; then
   if (( GIT_INIT )); then
     say "initialising a git repository in $SHARED (you asked with --git-init)"
@@ -342,7 +359,7 @@ cat <<EOF
 Open a new shell, then:
 
   cc-work  cc-msc  cc-alt      personal accounts
-  cc-bedrock                   Maxeda on Bedrock (bedrock-dev / eu-west-1,
+  cc-bedrock                   Acme on Bedrock (bedrock-dev / eu-west-1,
                                from ~/.claude-profiles/bedrock/settings.json)
   cc-which                     profiles and which one is active
   fde doctor                   what is configured, what is broken

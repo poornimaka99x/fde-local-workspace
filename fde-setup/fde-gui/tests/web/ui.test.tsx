@@ -53,10 +53,10 @@ describe('run list states', () => {
             warnings: ['runs/broken/manifest.json: malformed manifest.json'],
             runs: [
               {
-                runId: '20260902-max-2-bbbb',
+                runId: '20260902-acme-2-bbbb',
                 state: 'complete',
                 projectId: null,
-                requirement: 'MAX-2 legacy run',
+                requirement: 'ACME-2 legacy run',
                 updatedAt: '2026-09-02T10:00:00+00:00',
                 orchestrator: { agentId: 'chatgpt_codex', label: 'ChatGPT/Codex', kind: 'codex' },
                 session: {
@@ -72,7 +72,7 @@ describe('run list states', () => {
         : jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 1, warnings: [] }),
     )
     render(<RunsView />)
-    const row = await screen.findByRole('row', { name: /20260902-max-2-bbbb/ })
+    const row = await screen.findByRole('row', { name: /20260902-acme-2-bbbb/ })
     expect(within(row).getByText('complete')).toBeInTheDocument()
     expect(within(row).getByText('unassigned')).toBeInTheDocument()
     expect(within(row).getByText(/original Codex task/)).toBeInTheDocument()
@@ -131,9 +131,9 @@ describe('run list states', () => {
       if (url.includes('query=')) requested = url
       return jsonResponse({ schemaVersion: 1, runs: [], total: 3, returned: 0, warnings: [] })
     })
-    render(<RunsView initialQuery="MAX-142" />)
-    await waitFor(() => expect(requested).toContain('query=MAX-142'))
-    expect(await screen.findByDisplayValue('MAX-142')).toBeInTheDocument()
+    render(<RunsView initialQuery="ACME-142" />)
+    await waitFor(() => expect(requested).toContain('query=ACME-142'))
+    expect(await screen.findByDisplayValue('ACME-142')).toBeInTheDocument()
   })
 
   it('surfaces a server error with a way to retry', async () => {

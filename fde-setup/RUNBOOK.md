@@ -143,11 +143,11 @@ every time. Every Atlassian call is logged to the run's `events.jsonl`.
 
 ```bash
 cc-bedrock
-/client-context maxeda
+/client-context acme
 ```
 
-Fill in stakeholders (Erik, Berend), the decisions already made with dates, the
-constraints, and **the vocabulary** — Maxeda's own nouns for their domain
+Fill in stakeholders (Dana, Rafi), the decisions already made with dates, the
+constraints, and **the vocabulary** — Acme's own nouns for their domain
 objects. Every later stage inherits this file. Skipping it is why agent output
 sounds generic.
 
@@ -258,7 +258,7 @@ fde project create --name "Returns modernisation" \
   --description "Store and web returns" \
   --repo ~/code/returns-api --repo ~/code/returns-web
 fde projects
-fde start "MAX-142 returns orchestration" --project returns-modernisation-a1b2
+fde start "ACME-142 returns orchestration" --project returns-modernisation-a1b2
 ```
 
 The repository paths must already exist. FDE reads about them; it does not
@@ -330,10 +330,10 @@ tasks.
 # What would it choose, and why? Creates nothing, writes nothing, reads nothing
 # connected — not even the Jira item the request names.
 fde routing preview --orchestrator work --strategy balanced --requirement-stdin <<<'
-MAX-142 Add a paginated /orders endpoint to the NestJS API; 50 per page, keep the
+ACME-142 Add a paginated /orders endpoint to the NestJS API; 50 per page, keep the
 existing response envelope.'
 
-fde start --routing auto --strategy balanced --orchestrator work -- 'MAX-142 ...'
+fde start --routing auto --strategy balanced --orchestrator work -- 'ACME-142 ...'
 ```
 
 Strategies: `balanced` (the default), `quality_first`, `cost_first`. All three
@@ -443,7 +443,7 @@ is a separate, just-in-time approval:
 ```bash
 fde approve-codex <run-id> implementation \
   --task-file artifacts/implementation/implementation-task.md \
-  --repo ~/work/maxeda-returns \
+  --repo ~/work/client-returns \
   --commands "pytest -q"
 ```
 
@@ -508,7 +508,7 @@ preview. When you actually want it out there:
 
 ```bash
 fde output-hygiene <run-id> --check
-fde approve-publish <run-id> jira --summary "8 stories under MAX-142" \
+fde approve-publish <run-id> jira --summary "8 stories under ACME-142" \
   --items artifacts/delivery-plan/jira-preview.txt
 # you type: APPROVE PUBLISH <run-id>
 

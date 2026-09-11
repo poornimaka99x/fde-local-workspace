@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authed, makeHarness, type Harness } from './harness'
 import { claudeSession, statusFixture } from './fixtures'
 
-const RUN = '20260901-max-1-aaaa'
+const RUN = '20260901-acme-1-aaaa'
 const PROJECT = 'returns-modernisation-a1b2'
 
 /** A same-origin change, as the console's own fetch would send it. */
@@ -60,7 +60,7 @@ describe('safe mutations', () => {
         runId: RUN,
         state: 'awaiting_plan',
         projectId: PROJECT,
-        requirement: 'MAX-1 returns research',
+        requirement: 'ACME-1 returns research',
         updatedAt: '2026-09-03T10:00:00+00:00',
         orchestrator: { agentId: 'claude_work', label: 'Claude: work', kind: 'claude' },
         session: claudeSession,
@@ -245,7 +245,7 @@ describe('safe mutations', () => {
   it('creates a run with only what the new-run flow may collect', async () => {
     const response = await post('/api/runs', {
       projectId: PROJECT,
-      requirement: 'MAX-1 returns research',
+      requirement: 'ACME-1 returns research',
       orchestrator: 'work',
       shape: 'research',
     })
@@ -258,7 +258,7 @@ describe('safe mutations', () => {
       'start', '--json', '--orchestrator', 'claude_work',
       '--model', 'default', '--effort', 'auto',
       '--project', PROJECT, '--shape', 'research',
-      '--', 'MAX-1 returns research',
+      '--', 'ACME-1 returns research',
     ])
   })
 

@@ -9,7 +9,7 @@ import { authed, makeHarness, type Harness } from './harness'
  * never clears an approval gate on the operator's behalf.
  */
 
-const RUN = '20260907-max-142-abcd'
+const RUN = '20260907-acme-142-abcd'
 
 const decision = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   schemaVersion: 1,
@@ -508,7 +508,7 @@ describe('the routing API', () => {
     })
     const response = await post('/api/runs', {
       orchestrator: 'work', routing: 'auto', strategy: 'quality_first',
-      requirement: 'MAX-142 add a paginated orders endpoint',
+      requirement: 'ACME-142 add a paginated orders endpoint',
     })
     expect(response.statusCode).toBe(201)
     const call = harness.calls().find((args) => args[0] === 'start')
@@ -528,7 +528,7 @@ describe('the routing API', () => {
     })
     const response = await post('/api/runs', {
       orchestrator: 'work', model: 'sonnet', effort: 'high',
-      requirement: 'MAX-142 add a paginated orders endpoint',
+      requirement: 'ACME-142 add a paginated orders endpoint',
     })
     expect(response.statusCode).toBe(201)
     const call = harness.calls().find((args) => args[0] === 'start')
@@ -542,7 +542,7 @@ describe('the routing API', () => {
   it('refuses a model alongside automatic routing', async () => {
     const response = await post('/api/runs', {
       orchestrator: 'work', routing: 'auto', model: 'sonnet',
-      requirement: 'MAX-142 add a paginated orders endpoint',
+      requirement: 'ACME-142 add a paginated orders endpoint',
     })
     expect(response.statusCode).toBe(400)
     expect(harness.calls().some((args) => args[0] === 'start')).toBe(false)
@@ -551,7 +551,7 @@ describe('the routing API', () => {
   it('refuses a strategy without automatic routing', async () => {
     const response = await post('/api/runs', {
       orchestrator: 'work', strategy: 'cost_first',
-      requirement: 'MAX-142 add a paginated orders endpoint',
+      requirement: 'ACME-142 add a paginated orders endpoint',
     })
     expect(response.statusCode).toBe(400)
   })

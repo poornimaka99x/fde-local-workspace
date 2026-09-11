@@ -174,14 +174,53 @@ fi
 # an edit since approval fails here — the approval is not widened, it is refused.
 grant="$("$FDE" _consume-approval "$run" "$stage" --task-file "$task_file")" || exit 7
 
-read -r repo writable network approval_id <<<"$(
+# NUL-separated, read into an array. A field must never be recovered by shell
+# word-splitting: a repository path containing a space would shift every later
+# field, and one of those fields is the writable root that bounds the sandbox.
+grant_fields=()
+while IFS= read -r -d '' field; do grant_fields+=("$field"); done < <(
   printf '%s' "$grant" | python3 -c '
 import json,sys
 g = json.load(sys.stdin)
-print(g["repositoryPath"], g["writableRoot"], str(bool(g["network"])).lower(), g["approvalId"])
-')" || die "could not read the approval grant"
+for key in ("approvalId", "repositoryPath", "writableRoot", "taskFile", "taskFileSha256"):
+    sys.stdout.write(str(g[key]) + "\0")
+sys.stdout.write(("true" if g.get("network") else "false") + "\0")
+'
+)
+[[ ${#grant_fields[@]} -eq 6 ]] || die "could not read the approval grant"
+approval_id="${grant_fields[0]}"
+repo="${grant_fields[1]}"
+writable="${grant_fields[2]}"
+approved_task="${grant_fields[3]}"
+approved_sha="${grant_fields[4]}"
+network="${grant_fields[5]}"
 
 [[ -d "$writable" ]] || die "approved writable root no longer exists: $writable"
+[[ "$approved_task" == /* ]] || die "the controller returned a relative task path; refusing"
+
+# Read the approved bytes HERE, from the absolute path the controller resolved
+# and hashed, and before the cd below. The earlier version re-read the caller's
+# relative --task-file after changing directory, so the bytes Codex was handed
+# came from <repo>/<given> while the hash had been taken over <run.dir>/<given>
+# — the gate checked one file and Codex wrote from another. One read, digest
+# verified against the grant, and the content is carried in a variable from
+# here on: nothing re-opens the file after the check.
+approved_prompt="$(python3 - "$approved_task" "$approved_sha" <<'VERIFY'
+import hashlib, sys
+path, expected = sys.argv[1], sys.argv[2]
+try:
+    data = open(path, "rb").read()
+except OSError as exc:
+    sys.stderr.write("cannot read the approved task file: %s\n" % exc)
+    raise SystemExit(1)
+if hashlib.sha256(data).hexdigest() != expected:
+    sys.stderr.write("task file no longer matches the approved digest\n")
+    raise SystemExit(1)
+sys.stdout.write(data.decode("utf-8", "replace"))
+VERIFY
+)" || die "the approved task file changed after the approval was consumed. The
+            approval is spent; re-approve the file you actually mean to run:
+              fde approve-codex $run $stage --task-file <file> --repo <path>"
 
 printf 'ask-codex: approval %s consumed — workspace-write in %s, network off\n' \
   "$approval_id" "$writable" >&2
@@ -208,4 +247,4 @@ exec codex exec \
   --skip-git-repo-check \
   ${model_options[@]+"${model_options[@]}"} \
   ${config_options[@]+"${config_options[@]}"} \
-  "$(cat "$task_file")"
+  "$approved_prompt"

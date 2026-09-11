@@ -52,7 +52,7 @@ class FakeSocket {
 function runFixture(overrides: Partial<RunStatus> = {}): RunStatus {
   return {
     schemaVersion: 1,
-    runId: '20260903-max-1-aaaa',
+    runId: '20260903-acme-1-aaaa',
     dir: '/tmp/run',
     manifest: {},
     state: 'research',
@@ -144,7 +144,7 @@ describe('the session panel', () => {
     stubFetch({ available: false, session: null })
     render(<SessionPanel run={runFixture()} />)
     expect(await screen.findByText(/no terminal backend/)).toBeInTheDocument()
-    expect(screen.getByText('fde-start --resume 20260903-max-1-aaaa')).toBeInTheDocument()
+    expect(screen.getByText('fde-start --resume 20260903-acme-1-aaaa')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Resume session/ })).not.toBeInTheDocument()
   })
 
@@ -153,14 +153,14 @@ describe('the session panel', () => {
       status: 'started',
       ticket: 'ticket-abc',
       session: {
-        runId: '20260903-max-1-aaaa',
+        runId: '20260903-acme-1-aaaa',
         status: 'running',
         pid: 4242,
         startedAt: '2026-09-03T10:00:00+00:00',
         exitedAt: null,
         exitCode: null,
         cwd: '/tmp/repo',
-        command: ['/bin/fde-start', '--resume', '20260903-max-1-aaaa'],
+        command: ['/bin/fde-start', '--resume', '20260903-acme-1-aaaa'],
         envKeys: ['HOME', 'PATH'],
         stopRequestedAt: null,
         attachedClients: 0,
@@ -173,7 +173,7 @@ describe('the session panel', () => {
 
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
     const socket = FakeSocket.instances[0]
-    expect(socket?.url).toContain('/api/runs/20260903-max-1-aaaa/session/terminal?ticket=ticket-abc')
+    expect(socket?.url).toContain('/api/runs/20260903-acme-1-aaaa/session/terminal?ticket=ticket-abc')
     expect(posted[0]?.url).toContain('/session/resume')
 
     act(() => socket?.deliver({ type: 'ready', backlog: 'scoping the run\r\n', session: {} }))
@@ -191,14 +191,14 @@ describe('the session panel', () => {
 
   it('starts a newly-created run once and removes the reload trigger', async () => {
     const running = {
-      runId: '20260903-max-1-aaaa', status: 'running', pid: 4242,
+      runId: '20260903-acme-1-aaaa', status: 'running', pid: 4242,
       startedAt: '2026-09-03T10:00:00+00:00', exitedAt: null, exitCode: null,
       cwd: '/tmp/repo', command: [], envKeys: [], stopRequestedAt: null, attachedClients: 0,
     }
     stubFetch({ available: true, session: null }, () => ({
       status: 'started', ticket: 'new-run-ticket', session: running,
     }))
-    window.history.pushState(null, '', '/runs/20260903-max-1-aaaa?startSession=1')
+    window.history.pushState(null, '', '/runs/20260903-acme-1-aaaa?startSession=1')
     render(<SessionPanel run={runFixture()} autoStart />)
 
     await waitFor(() => expect(posted.filter((call) => call.url.includes('/session/resume'))).toHaveLength(1))
@@ -208,7 +208,7 @@ describe('the session panel', () => {
 
   it('can attach to a session that is already running', async () => {
     const running = {
-      runId: '20260903-max-1-aaaa', status: 'running', pid: 7,
+      runId: '20260903-acme-1-aaaa', status: 'running', pid: 7,
       startedAt: '2026-09-03T10:00:00+00:00', exitedAt: null, exitCode: null,
       cwd: '/tmp/repo', command: [], envKeys: [], stopRequestedAt: null, attachedClients: 0,
     }
@@ -225,7 +225,7 @@ describe('the session panel', () => {
   it('interrupts first, and only force-stops behind a confirmation', async () => {
     {
       const running = {
-        runId: '20260903-max-1-aaaa',
+        runId: '20260903-acme-1-aaaa',
         status: 'running',
         pid: 99,
         startedAt: '2026-09-03T10:00:00+00:00',
@@ -261,7 +261,7 @@ describe('the session panel', () => {
 
   it('detaches on unmount without stopping the session', async () => {
     const running = {
-      runId: '20260903-max-1-aaaa',
+      runId: '20260903-acme-1-aaaa',
       status: 'running',
       pid: 7,
       startedAt: '2026-09-03T10:00:00+00:00',

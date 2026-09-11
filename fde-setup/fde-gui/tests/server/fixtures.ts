@@ -16,21 +16,21 @@ export const codexSession = {
 
 export const runRows = [
   {
-    runId: '20260901-max-1-aaaa',
+    runId: '20260901-acme-1-aaaa',
     state: 'research',
     projectId: 'returns-a1b2',
-    requirement: 'MAX-1 returns research',
-    jiraKey: 'MAX-1',
+    requirement: 'ACME-1 returns research',
+    jiraKey: 'ACME-1',
     updatedAt: '2026-09-01T10:00:00+00:00',
     orchestrator: { agentId: 'claude_work', label: 'Claude: work', kind: 'claude' },
     session: claudeSession,
   },
   {
-    runId: '20260902-max-2-bbbb',
+    runId: '20260902-acme-2-bbbb',
     state: 'complete',
     projectId: null,
-    requirement: 'MAX-2 legacy run',
-    jiraKey: 'MAX-2',
+    requirement: 'ACME-2 legacy run',
+    jiraKey: 'ACME-2',
     updatedAt: '2026-09-02T10:00:00+00:00',
     orchestrator: { agentId: 'chatgpt_codex', label: 'ChatGPT/Codex', kind: 'codex' },
     session: codexSession,

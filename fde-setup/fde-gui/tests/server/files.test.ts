@@ -3,7 +3,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authed, makeHarness, seedRunDirectory, type Harness } from './harness'
 
-const RUN = '20260901-max-1-aaaa'
+const RUN = '20260901-acme-1-aaaa'
 
 describe('run file browsing', () => {
   let harness: Harness

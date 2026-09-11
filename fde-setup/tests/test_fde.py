@@ -149,7 +149,7 @@ class Sandbox:
     def codex_calls(self):
         return self.codex_log.read_text()
 
-    def start(self, requirement="MAX-142 returns orchestration", shape=None,
+    def start(self, requirement="ACME-142 returns orchestration", shape=None,
               orchestrator="claude_alt"):
         """Most tests are not about the orchestrator question, so this answers it."""
         args = ["start", requirement]
@@ -161,7 +161,7 @@ class Sandbox:
         assert r.returncode == 0, r.stderr
         return next(l.split()[1] for l in r.stdout.splitlines() if l.startswith("run "))
 
-    def start_full(self, requirement="MAX-142 returns orchestration"):
+    def start_full(self, requirement="ACME-142 returns orchestration"):
         """A run scoped to every stage — the old fixed-pipeline behaviour."""
         return self.start(requirement, shape="full")
 
@@ -287,16 +287,16 @@ class TestRoles(FDETest):
         self.assertIn("no orchestrator yet", r.stderr)
 
         self.assertEqual(self.sb.fde("orchestrator", run_id, "codex").returncode, 0)
-        r = self.sb.fde("request", run_id, "MAX-9 research the returns flow, then slides")
+        r = self.sb.fde("request", run_id, "ACME-9 research the returns flow, then slides")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("What do you want done", r.stdout)
         self.assertIn("research the returns flow",
                       (self.sb.run_dir(run_id) / "requirement.md").read_text())
         self.assertEqual(json.loads(
-            (self.sb.run_dir(run_id) / "manifest.json").read_text())["jiraKey"], "MAX-9")
+            (self.sb.run_dir(run_id) / "manifest.json").read_text())["jiraKey"], "ACME-9")
 
     def test_the_orchestrator_is_not_asked_for_twice(self):
-        run_id = self.sb.start("MAX-8 something", orchestrator="codex")
+        run_id = self.sb.start("ACME-8 something", orchestrator="codex")
         r = self.sb.plan(run_id, "intake", "research")
         self.assertIn("Orchestrator: ChatGPT/Codex  (already chosen)", r.stdout)
         self.assertNotIn("--set orchestrator=", r.stdout)
@@ -310,7 +310,7 @@ class TestRoles(FDETest):
 
     def test_roles_are_asked_before_any_connector_or_repo_access(self):
         """1. Once scoped, the very next thing is the role question, verbatim."""
-        run_id = self.sb.start("MAX-1 do a thing")
+        run_id = self.sb.start("ACME-1 do a thing")
         r = self.sb.plan(run_id, "intake", "research", "review", "presentation")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Before I initialize this task, assign the roles.", r.stdout)
@@ -347,9 +347,9 @@ class TestRoles(FDETest):
 
     def test_second_task_asks_again(self):
         """2. A second run asks again and inherits nothing."""
-        first = self.sb.start_full("MAX-1 first")
+        first = self.sb.start_full("ACME-1 first")
         self.assertEqual(self.sb.full_roles(first).returncode, 0)
-        second = self.sb.start_full("MAX-2 second")
+        second = self.sb.start_full("ACME-2 second")
         assigned = json.loads((self.sb.run_dir(second) / "roles.json").read_text())["assignments"]
         self.assertEqual(list(assigned), ["orchestrator"],
                          "a new run must inherit nothing but the orchestrator you just picked")
@@ -361,9 +361,9 @@ class TestRoles(FDETest):
 
     def test_same_as_requires_explicit_flag(self):
         """2. 'Same as last time' only happens when the user says so."""
-        first = self.sb.start_full("MAX-1 first")
+        first = self.sb.start_full("ACME-1 first")
         self.sb.full_roles(first, orchestrator="claude_msc")
-        second = self.sb.start_full("MAX-2 second")
+        second = self.sb.start_full("ACME-2 second")
         r = self.sb.fde("roles", second, "--same-as", first)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads((self.sb.run_dir(second) / "roles.json").read_text())
@@ -381,7 +381,7 @@ class TestRoles(FDETest):
              "implementation": "claude_bedrock"},
         ]
         for combo in combos:
-            run_id = self.sb.start("MAX-9 role matrix", shape="full")
+            run_id = self.sb.start("ACME-9 role matrix", shape="full")
             r = self.sb.full_roles(run_id, **combo)
             # --allow-unavailable: availability is a separate concern from legality
             if r.returncode != 0:
@@ -426,13 +426,28 @@ class TestRoles(FDETest):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("holds no role", r.stderr)
 
+    def test_disabled_tools_are_denied_on_direct_claude_invocations(self):
+        run_id = self.sb.start_full()
+        self.sb.full_roles(run_id, research="claude_work")
+        self.sb.advance_to(run_id, "research")
+        task = self.sb.run_dir(run_id) / "tasks/t.md"
+        task.write_text("look into it")
+        (self.sb.shared / "config/capability-policy.json").write_text(json.dumps({
+            "schemaVersion": 1, "disabled": ["tool:WebSearch"],
+        }))
+        result = self.sb.fde("invoke", run_id, "claude_work", str(task), "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = json.loads(result.stdout)["argv"]
+        self.assertIn("--disallowedTools", argv)
+        self.assertEqual(argv[argv.index("--disallowedTools") + 1], "WebSearch")
+
 
 # -- 4, 5. One Copilot, and it is the Microsoft one --------------------------
 
 class TestCopilotSeparation(FDETest):
     def test_only_microsoft_copilot_is_offered(self):
         """4. Microsoft Copilot is the only Copilot shown."""
-        run_id = self.sb.start("MAX-3 copilot check")
+        run_id = self.sb.start("ACME-3 copilot check")
         r = self.sb.plan(run_id, "intake", "research")
         self.assertIn("Microsoft Copilot", r.stdout)
         self.assertNotIn("GitHub", r.stdout)
@@ -484,7 +499,7 @@ class TestCopilotSeparation(FDETest):
 
 class TestCodexGate(FDETest):
     def _ready(self, stage="implementation"):
-        run_id = self.sb.start("MAX-4 codex gate", shape="full")
+        run_id = self.sb.start("ACME-4 codex gate", shape="full")
         r = self.sb.full_roles(run_id, implementation="chatgpt_codex",
                                solutioning="chatgpt_codex")
         if r.returncode != 0:      # codex CLI is a stub, availability aside
@@ -703,12 +718,12 @@ class TestBedrock(unittest.TestCase):
         body = src.split("cc-bedrock()", 1)[1].split("\n}", 1)[0]
         self.assertNotIn("AWS_PROFILE", body)
         self.assertNotIn("AWS_REGION", body)
-        self.assertNotIn("MAXEDA_AWS", body)
+        self.assertNotIn("FDE_AWS", body)
         self.assertIn("CLAUDE_CODE_USE_BEDROCK=1", body)
 
     def test_example_env_declares_no_aws_defaults(self):
         text = (REPO / "claude-shared/env.sh.example").read_text()
-        self.assertNotIn('export MAXEDA_AWS_PROFILE', text)
+        self.assertNotIn('export FDE_AWS_PROFILE', text)
         self.assertNotIn('export AWS_PROFILE', text)
         self.assertNotIn("eu-central-1", text)
 
@@ -738,6 +753,7 @@ class TestBedrock(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    @unittest.skipUnless(shutil.which("aws"), "no aws CLI on PATH")
     def test_doctor_checks_the_profile_selected_in_the_account_registry(self):
         sb = Sandbox()
         try:
@@ -861,7 +877,7 @@ class TestAtlassian(FDETest):
         run_id = self.sb.start_full()
         self.sb.full_roles(run_id)
         r = self.sb.fde("log", run_id, "--tool", "atlassian.getJiraIssue",
-                        "--detail", "MAX-142")
+                        "--detail", "ACME-142")
         self.assertEqual(r.returncode, 0, r.stderr)
         events = (self.sb.run_dir(run_id) / "events.jsonl").read_text()
         self.assertIn("atlassian.getJiraIssue", events)
@@ -924,7 +940,7 @@ class TestPublication(FDETest):
 
 class TestOutputHygiene(FDETest):
     def research_run(self):
-        run_id = self.sb.start("MAX-150 prepare safe output", shape="research")
+        run_id = self.sb.start("ACME-150 prepare safe output", shape="research")
         r = self.sb.fde(
             "roles", run_id, "--set", "research=claude_work",
             "--set", "microsoftContext=none",
@@ -959,7 +975,7 @@ class TestOutputHygiene(FDETest):
         self.assertIn("output hygiene", self.sb.fde("status", run_id).stdout)
 
     def test_publication_transition_cleans_before_publication_state_is_recorded(self):
-        run_id = self.sb.start("MAX-151 publish a safe brief")
+        run_id = self.sb.start("ACME-151 publish a safe brief")
         self.sb.plan(run_id, "intake", "publication")
         r = self.sb.fde("roles", run_id, "--set", "microsoftContext=none")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1002,12 +1018,12 @@ class TestOutputHygiene(FDETest):
         artifact = self.sb.run_dir(run_id) / "artifacts/presentation/output.pptx"
         core = b'''<?xml version="1.0" encoding="UTF-8"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <dc:creator>Maxeda Design Team</dc:creator>
+  <dc:creator>Acme Design Team</dc:creator>
   <cp:lastModifiedBy>local-user</cp:lastModifiedBy>
 </cp:coreProperties>'''
         app = b'''<?xml version="1.0" encoding="UTF-8"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
-  <Company>Maxeda</Company><Manager>Local Manager</Manager>
+  <Company>Acme</Company><Manager>Local Manager</Manager>
   <HyperlinkBase>/Users/local-user/work</HyperlinkBase>
   <Template>/Users/local-user/template.potx</Template>
 </Properties>'''
@@ -1021,8 +1037,8 @@ class TestOutputHygiene(FDETest):
         with zipfile.ZipFile(artifact) as archive:
             cleaned_core = archive.read("docProps/core.xml").decode()
             cleaned_app = archive.read("docProps/app.xml").decode()
-        self.assertIn("Maxeda Design Team", cleaned_core)
-        self.assertIn("<Company>Maxeda</Company>", cleaned_app)
+        self.assertIn("Acme Design Team", cleaned_core)
+        self.assertIn("<Company>Acme</Company>", cleaned_app)
         self.assertNotIn("lastModifiedBy", cleaned_core)
         self.assertNotIn("<Manager>", cleaned_app)
         self.assertNotIn("HyperlinkBase", cleaned_app)
@@ -1200,7 +1216,7 @@ class TestInstallPreserves(unittest.TestCase):
         shared = self.home / ".claude-shared"
 
         mine = {
-            "shared/clients/maxeda.md": "# Maxeda\nErik, Berend. Same-day refunds.\n",
+            "shared/clients/acme.md": "# Acme\nErik, Rafi. Same-day refunds.\n",
             "runs/RUN-1/manifest.json": '{"runId":"RUN-1","state":"complete"}\n',
             "runs/RUN-1/approvals.jsonl": '{"type":"codex-approval"}\n',
             "intake/2026-01-01-call.md": "pasted from a Teams recap\n",
@@ -1373,7 +1389,7 @@ class TestStateMachine(FDETest):
 
 class TestPlanning(FDETest):
     def test_a_research_only_run_does_not_walk_the_whole_pipeline(self):
-        run_id = self.sb.start("MAX-5 what do we know about returns")
+        run_id = self.sb.start("ACME-5 what do we know about returns")
         r = self.sb.plan(run_id, "intake", "research", intent="just research it")
         self.assertEqual(r.returncode, 0, r.stderr)
         plan = json.loads((self.sb.run_dir(run_id) / "plan.json").read_text())
@@ -1390,7 +1406,7 @@ class TestPlanning(FDETest):
         self.assertEqual(m["state"], "complete")
 
     def test_the_role_question_shrinks_to_the_plan(self):
-        run_id = self.sb.start("MAX-6 slides and a breakdown")
+        run_id = self.sb.start("ACME-6 slides and a breakdown")
         r = self.sb.plan(run_id, "intake", "presentation", "planning")
         self.assertIn("Presentation author:", r.stdout)
         self.assertIn("Delivery planner:", r.stdout)
@@ -1400,7 +1416,7 @@ class TestPlanning(FDETest):
         self.assertIn("Not doing:", r.stdout)
 
     def test_a_role_outside_the_plan_is_refused(self):
-        run_id = self.sb.start("MAX-7 research only")
+        run_id = self.sb.start("ACME-7 research only")
         self.sb.plan(run_id, "intake", "research")
         r = self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
                         "--set", "implementation=claude_work")
@@ -1408,7 +1424,7 @@ class TestPlanning(FDETest):
         self.assertIn("not a role this run needs", r.stderr)
 
     def test_a_stage_outside_the_plan_cannot_be_invoked(self):
-        run_id = self.sb.start("MAX-8 research only")
+        run_id = self.sb.start("ACME-8 research only")
         self.sb.plan(run_id, "intake", "research")
         self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
                     "--set", "research=claude_work", "--set", "microsoftContext=none")
@@ -1421,7 +1437,7 @@ class TestPlanning(FDETest):
         self.assertIn("not in this run's plan", r.stderr)
 
     def test_status_shows_only_in_scope_artifacts(self):
-        run_id = self.sb.start("MAX-9 research and review")
+        run_id = self.sb.start("ACME-9 research and review")
         self.sb.plan(run_id, "intake", "research", "review")
         self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
                     "--set", "research=claude_work", "--set", "review=claude_msc",
@@ -1435,7 +1451,7 @@ class TestPlanning(FDETest):
 
     def test_missing_prerequisites_warn_but_do_not_block(self):
         """Warn, then let you proceed — the input may be in your head."""
-        run_id = self.sb.start("MAX-10 just the deck")
+        run_id = self.sb.start("ACME-10 just the deck")
         r = self.sb.plan(run_id, "intake", "presentation")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("normally follows", r.stdout)
@@ -1451,25 +1467,25 @@ class TestPlanning(FDETest):
         self.assertEqual(r.returncode, 0)
         for name in ("research", "research-to-adr", "presentation", "delivery-plan", "full"):
             self.assertIn(name, r.stdout)
-        run_id = self.sb.start("MAX-11 deck and breakdown", shape="presentation+delivery-plan")
+        run_id = self.sb.start("ACME-11 deck and breakdown", shape="presentation+delivery-plan")
         plan = json.loads((self.sb.run_dir(run_id) / "plan.json").read_text())
         self.assertEqual(plan["stages"], ["intake", "presentation", "planning"])
 
     def test_stage_synonyms_resolve(self):
-        run_id = self.sb.start("MAX-12 synonyms")
+        run_id = self.sb.start("ACME-12 synonyms")
         r = self.sb.fde("plan", run_id, "--stages", "discovery,validate,slides,jira")
         self.assertEqual(r.returncode, 0, r.stderr)
         plan = json.loads((self.sb.run_dir(run_id) / "plan.json").read_text())
         self.assertEqual(plan["stages"], ["research", "review", "presentation", "planning"])
 
     def test_an_unknown_stage_is_named_not_guessed(self):
-        run_id = self.sb.start("MAX-13 nonsense")
+        run_id = self.sb.start("ACME-13 nonsense")
         r = self.sb.fde("plan", run_id, "--stages", "wibble")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("unknown stage 'wibble'", r.stderr)
 
     def test_a_plan_can_be_widened_forwards_but_not_backwards(self):
-        run_id = self.sb.start("MAX-14 research, then maybe more")
+        run_id = self.sb.start("ACME-14 research, then maybe more")
         self.sb.plan(run_id, "intake", "research")
         self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
                     "--set", "research=claude_work", "--set", "microsoftContext=none")
@@ -1489,7 +1505,7 @@ class TestPlanning(FDETest):
         self.assertIn("already been passed", r.stderr)
 
     def test_gates_are_inserted_only_when_their_stage_is_planned(self):
-        no_impl = self.sb.start("MAX-15 no code")
+        no_impl = self.sb.start("ACME-15 no code")
         self.sb.plan(no_impl, "intake", "research")
         self.sb.fde("roles", no_impl, "--set", "orchestrator=claude_alt",
                     "--set", "research=claude_work", "--set", "microsoftContext=none")
@@ -1499,7 +1515,7 @@ class TestPlanning(FDETest):
                   if json.loads(l)["event"] == "state"]
         self.assertNotIn("awaiting_implementation_approval", states)
 
-        with_impl = self.sb.start("MAX-16 build it", shape="build")
+        with_impl = self.sb.start("ACME-16 build it", shape="build")
         self.sb.fde("roles", with_impl, "--set", "orchestrator=claude_alt",
                     "--set", "implementation=chatgpt_codex",
                     "--set", "testEngineering=claude_work",
@@ -1511,7 +1527,7 @@ class TestPlanning(FDETest):
         self.assertIn("no write approval has been granted", r.stderr)
 
     def test_a_non_codex_implementer_passes_the_gate_but_it_is_recorded(self):
-        run_id = self.sb.start("MAX-17 build it myself", shape="build")
+        run_id = self.sb.start("ACME-17 build it myself", shape="build")
         self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
                     "--set", "implementation=claude_work",
                     "--set", "testEngineering=claude_work",
@@ -1522,7 +1538,7 @@ class TestPlanning(FDETest):
         self.assertIn("under the user's own supervision", events)
 
     def test_legacy_runs_without_a_plan_are_treated_as_full(self):
-        run_id = self.sb.start_full("MAX-18 legacy")
+        run_id = self.sb.start_full("ACME-18 legacy")
         (self.sb.run_dir(run_id) / "plan.json").unlink()
         r = self.sb.fde("status", run_id)
         self.assertEqual(r.returncode, 0, r.stderr)

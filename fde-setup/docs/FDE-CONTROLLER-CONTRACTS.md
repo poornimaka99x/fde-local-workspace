@@ -233,13 +233,13 @@ group. Nothing else about run creation changed.
 
 ```json
 {
-  "runId": "20260903-max-142-cd3d",
-  "dir": "/Users/.../.claude-shared/runs/20260903-max-142-cd3d",
+  "runId": "20260903-acme-142-cd3d",
+  "dir": "/Users/.../.claude-shared/runs/20260903-acme-142-cd3d",
   "state": "awaiting_plan",
   "blockedFrom": null,
   "projectId": "returns-modernisation-a1b2",
-  "requirement": "MAX-142 returns orchestration",
-  "jiraKey": "MAX-142",
+  "requirement": "ACME-142 returns orchestration",
+  "jiraKey": "ACME-142",
   "createdAt": "...", "updatedAt": "...",
   "orchestrator": { "agentId": "claude_work", "label": "Claude: work", "kind": "claude" },
   "stages": ["intake", "research"],
@@ -335,7 +335,7 @@ fde attachments <run-id> --json
 {
   "schemaVersion": 1,
   "attachmentId": "9f1c...",
-  "runId": "20260903-max-142-cd3d",
+  "runId": "20260903-acme-142-cd3d",
   "originalName": "requirements.pdf",
   "storedName": "requirements-af3fcf73.pdf",
   "relativePath": "inputs/files/requirements-af3fcf73.pdf",

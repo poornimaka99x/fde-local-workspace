@@ -163,7 +163,7 @@ FAKE_POLICY = {
 
 SIMPLE_REQUEST = "Rename the column header in export.csv from 'qty' to 'quantity'."
 STANDARD_REQUEST = (
-    "MAX-142 Add a paginated /orders endpoint to the existing NestJS API so that the web "
+    "ACME-142 Add a paginated /orders endpoint to the existing NestJS API so that the web "
     "app can page through orders; it must return 50 per page and keep the existing "
     "response envelope.")
 CRITICAL_REQUEST = (
@@ -1311,7 +1311,7 @@ class TestRoutingIntegrity(RoutingTest):
 
 class TestIndependentReviewConsistency(RoutingTest):
     DESTRUCTIVE_REQUEST = (
-        "MAX-702 Purge the archived order rows from the production warehouse and drop "
+        "ACME-702 Purge the archived order rows from the production warehouse and drop "
         "the legacy audit table. This cannot be undone once it runs.")
 
     def test_a_scheduled_check_is_not_also_reported_as_not_scheduled(self):

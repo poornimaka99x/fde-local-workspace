@@ -121,7 +121,7 @@ class ApprovalBoundMutations(FDETest):
 
     def approved_run(self):
         """The shortest plan that still ends at a publication gate."""
-        run_id = self.sb.start("Publish the MAX-142 findings", orchestrator="claude_alt")
+        run_id = self.sb.start("Publish the ACME-142 findings", orchestrator="claude_alt")
         result = self.sb.plan(run_id, "intake", "publication")
         assert result.returncode == 0, result.stderr
         result = self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
@@ -132,7 +132,7 @@ class ApprovalBoundMutations(FDETest):
     def test_a_publication_approval_names_the_connectors_it_covers(self):
         run_id = self.approved_run()
         self.sb.advance_to(run_id, "awaiting_publication_approval")
-        result = self.sb.fde("approve-publish", run_id, "jira", "--summary", "MAX-142",
+        result = self.sb.fde("approve-publish", run_id, "jira", "--summary", "ACME-142",
                              stdin=f"APPROVE PUBLISH {run_id}\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("atlassian", result.stdout)
@@ -180,7 +180,7 @@ class ApprovalBoundMutations(FDETest):
     def test_an_expired_or_consumed_approval_stops_covering_anything(self):
         run_id = self.approved_run()
         self.sb.advance_to(run_id, "awaiting_publication_approval")
-        self.sb.fde("approve-publish", run_id, "jira", "--summary", "MAX-142", "--ttl", "1",
+        self.sb.fde("approve-publish", run_id, "jira", "--summary", "ACME-142", "--ttl", "1",
                     stdin=f"APPROVE PUBLISH {run_id}\n")
         approvals = [json.loads(line) for line in
                      (self.sb.run_dir(run_id) / "approvals.jsonl").read_text().splitlines()
@@ -199,7 +199,7 @@ class CombinedApprovalSummary(FDETest):
     """Access is shown before it is granted, and never widened silently."""
 
     def test_the_proposed_connectors_appear_in_the_approval_summary(self):
-        run_id = self.sb.start("Publish the MAX-142 findings", shape="full",
+        run_id = self.sb.start("Publish the ACME-142 findings", shape="full",
                                orchestrator="claude_alt")
         self.assertEqual(self.sb.fde("plan", run_id, "--shape", "full",
                                      "--require-approval").returncode, 0)

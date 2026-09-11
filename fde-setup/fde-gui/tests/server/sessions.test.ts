@@ -4,8 +4,8 @@ import { authed, makeHarness, seedRunDirectory, type Harness } from './harness'
 import { statusFixture, codexSession } from './fixtures'
 import { FakeTerminal, fakeSpawn } from './fake-terminal'
 
-const RUN = '20260901-max-1-aaaa'
-const CODEX_RUN = '20260902-max-2-bbbb'
+const RUN = '20260901-acme-1-aaaa'
+const CODEX_RUN = '20260902-acme-2-bbbb'
 
 function mutating(token: string): Record<string, string> {
   return { ...authed(token), origin: 'http://127.0.0.1:7317', 'content-type': 'application/json' }

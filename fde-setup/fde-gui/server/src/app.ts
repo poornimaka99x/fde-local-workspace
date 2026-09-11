@@ -7,6 +7,7 @@ import { ZodError } from 'zod'
 import type { GuiConfig } from './config'
 import { problem } from './problem'
 import { registerAuth } from './security/auth'
+import { isTerminalRoute } from './security/terminal-routes'
 import { registerSecurityHeaders } from './security/headers'
 import { registerHealthRoutes } from './routes/health'
 import { registerFsRoutes } from './routes/fs'
@@ -25,6 +26,7 @@ import { registerClaudeRoutes } from './routes/claude'
 import { registerAccountRoutes } from './routes/accounts'
 import { registerConnectionRoutes } from './routes/connections'
 import { registerMcpRoutes } from './routes/mcp'
+import { registerCapabilityRoutes } from './routes/capabilities'
 import { AccountService } from './services/accounts'
 import { ChatService } from './services/chats'
 import { DesignPanelService } from './services/design-panel'
@@ -67,6 +69,21 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     // A local console must be able to stop. A refused upgrade or a held-open
     // connection does not get to keep the process alive.
     forceCloseConnections: true,
+  })
+
+  // Fail at launch, not at the operator's first sign-in. A websocket route the
+  // auth hook does not recognise falls through to the bearer branch, where a
+  // browser cannot present a token, so it refuses every upgrade — silently,
+  // and only on the screen that uses it. Registered before any route, so it
+  // sees them all.
+  app.addHook('onRoute', (route) => {
+    if (route.websocket !== true) return
+    if (!isTerminalRoute(route.path)) {
+      throw new Error(
+        `websocket route ${route.path} is not listed in TERMINAL_ROUTES ` +
+          '(server/src/security/terminal-routes.ts); its upgrade would be refused',
+      )
+    }
   })
 
   // An upload arrives as bytes, not as a parsed body: the stream is handed
@@ -114,6 +131,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     registerAccountRoutes(instance, config, resolved)
     registerConnectionRoutes(instance, config, resolved)
     registerMcpRoutes(instance, config, resolved)
+    registerCapabilityRoutes(instance, config, resolved)
   })
 
   app.addHook('onClose', async () => {

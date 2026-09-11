@@ -56,8 +56,8 @@ describe('general chat UI', () => {
         unassignedRunCount: 0, warnings: [],
       })
       if (url === '/api/connections') return response({ schemaVersion: 1, connections: [{
-        id: 'atlassian-maxeda', name: 'Maxeda', provider: 'atlassian', providerLabel: 'Atlassian REST API',
-        fields: { siteUrl: 'https://maxedadiy.atlassian.net', email: 'user@example.com' },
+        id: 'atlassian-acme', name: 'Acme', provider: 'atlassian', providerLabel: 'Atlassian REST API',
+        fields: { siteUrl: 'https://example.atlassian.net', email: 'user@example.com' },
         configured: true, status: 'connected', oauth: false,
       }] })
       if (url === '/api/chats' && init?.method === 'POST') {
@@ -73,11 +73,11 @@ describe('general chat UI', () => {
     await user.selectOptions(screen.getByLabelText(/Project context/), 'returns-a1b2')
     await user.selectOptions(screen.getByLabelText(/Model/), 'opus')
     await user.selectOptions(screen.getByLabelText(/Effort/), 'xhigh')
-    await user.click(screen.getByText('Maxeda'))
+    await user.click(screen.getByText('Acme'))
     await user.click(screen.getByRole('button', { name: 'Create chat' }))
     await waitFor(() => expect(sent).toEqual([{
       title: 'Architecture question', projectId: 'returns-a1b2', accountId: 'work', model: 'opus', effort: 'xhigh',
-      serviceConnectionIds: ['atlassian-maxeda'],
+      serviceConnectionIds: ['atlassian-acme'],
     }]))
     expect(window.location.pathname).toBe('/chats/chat-20260904-abcdef12')
   })

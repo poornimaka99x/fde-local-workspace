@@ -121,7 +121,7 @@ describe('creating and editing through the controller', () => {
       url === '/api/claude/accounts'
         ? jsonResponse(accountsResponse)
         : init?.method === 'POST'
-        ? jsonResponse({ schemaVersion: 1, run: { runId: '20260903-max-1-aaaa' } }, 201)
+        ? jsonResponse({ schemaVersion: 1, run: { runId: '20260903-acme-1-aaaa' } }, 201)
         : jsonResponse({
             schemaVersion: 1,
             projects: [{ projectId: 'returns-a1b2', name: 'Returns', description: '', repoPaths: [] }],
@@ -134,7 +134,7 @@ describe('creating and editing through the controller', () => {
 
     await waitFor(() => expect(screen.getByLabelText(/Project/)).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/Project/), 'returns-a1b2')
-    await user.type(screen.getByLabelText(/What do you want done/), 'MAX-1 returns research')
+    await user.type(screen.getByLabelText(/What do you want done/), 'ACME-1 returns research')
     await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'work')
     await user.selectOptions(screen.getByLabelText(/Model/), 'sonnet')
     await user.selectOptions(screen.getByLabelText(/Effort/), 'high')
@@ -150,12 +150,12 @@ describe('creating and editing through the controller', () => {
       effort: 'high',
       routing: 'manual',
       projectId: 'returns-a1b2',
-      requirement: 'MAX-1 returns research',
+      requirement: 'ACME-1 returns research',
       shape: 'research',
     })
     expect(JSON.stringify(sent[0]?.body)).not.toContain('role')
     expect(JSON.stringify(sent[0]?.body)).not.toContain('approve')
-    await waitFor(() => expect(window.location.pathname).toBe('/runs/20260903-max-1-aaaa'))
+    await waitFor(() => expect(window.location.pathname).toBe('/runs/20260903-acme-1-aaaa'))
     expect(window.location.search).toBe('?startSession=1')
   })
 
@@ -226,12 +226,12 @@ describe('attaching a file', () => {
 
   it('reports progress and then the stored digest', async () => {
     const onUploaded = vi.fn()
-    render(<AttachmentUpload runId="20260903-max-1-aaaa" onUploaded={onUploaded} />)
+    render(<AttachmentUpload runId="20260903-acme-1-aaaa" onUploaded={onUploaded} />)
     await pickFile()
 
     const request = FakeXHR.last
     expect(request?.url).toBe(
-      '/api/runs/20260903-max-1-aaaa/attachments?name=requirements.pdf',
+      '/api/runs/20260903-acme-1-aaaa/attachments?name=requirements.pdf',
     )
     expect(request?.headers.authorization).toBe('Bearer test-token')
     expect(request?.headers['content-type']).toBe('application/octet-stream')
@@ -254,7 +254,7 @@ describe('attaching a file', () => {
 
   it('shows why an upload was refused and does not claim success', async () => {
     const onUploaded = vi.fn()
-    render(<AttachmentUpload runId="20260903-max-1-aaaa" onUploaded={onUploaded} />)
+    render(<AttachmentUpload runId="20260903-acme-1-aaaa" onUploaded={onUploaded} />)
     await pickFile()
 
     act(() =>

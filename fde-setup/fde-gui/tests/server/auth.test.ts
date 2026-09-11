@@ -72,9 +72,9 @@ describe('local API access control', () => {
 
   it('offers no route for approving, publishing or bypassing session checks', async () => {
     const changes: [string, string][] = [
-      ['POST', '/api/runs/20260901-max-1-aaaa/approve'],
-      ['POST', '/api/runs/20260901-max-1-aaaa/session/resume'],
-      ['POST', '/api/runs/20260901-max-1-aaaa/publish'],
+      ['POST', '/api/runs/20260901-acme-1-aaaa/approve'],
+      ['POST', '/api/runs/20260901-acme-1-aaaa/session/resume'],
+      ['POST', '/api/runs/20260901-acme-1-aaaa/publish'],
     ]
     for (const [method, url] of changes) {
       const response = await harness.app.inject({

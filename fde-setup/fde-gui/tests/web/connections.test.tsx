@@ -132,15 +132,15 @@ describe('service connections panel', () => {
 
   it('shows connection metadata returned by the existing shared inventory', async () => {
     connections = [{
-      id: 'atlassian-maxeda', name: 'Maxeda', provider: 'atlassian',
+      id: 'atlassian-acme', name: 'Acme', provider: 'atlassian',
       providerLabel: 'Atlassian Cloud',
-      fields: { siteUrl: 'https://maxedadiy.atlassian.net', email: 'user@example.test' },
+      fields: { siteUrl: 'https://example.atlassian.net', email: 'user@example.test' },
       configured: true, status: 'configured', oauth: false,
     }]
     render(<ConnectionsView />)
 
-    const card = (await screen.findByRole('heading', { name: 'Maxeda' })).closest('article') as HTMLElement
-    expect(within(card).getByText('https://maxedadiy.atlassian.net')).toBeInTheDocument()
+    const card = (await screen.findByRole('heading', { name: 'Acme' })).closest('article') as HTMLElement
+    expect(within(card).getByText('https://example.atlassian.net')).toBeInTheDocument()
     expect(screen.queryByText('No service connections')).toBeNull()
   })
 })

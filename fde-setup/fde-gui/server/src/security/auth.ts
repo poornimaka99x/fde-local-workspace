@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { GuiConfig } from '../config'
 import { problem } from '../problem'
 import type { Services } from '../services/types'
+import { terminalTarget } from './terminal-routes'
 
 /**
  * Two independent checks on every request that reaches the API.
@@ -45,19 +46,10 @@ export function registerAuth(app: FastifyInstance, config: GuiConfig, services: 
     'http://localhost:5199',
   ])
 
-  const RUN_TERMINAL_PATH = /^\/api\/runs\/([^/?]+)\/session\/terminal(?:\?(.*))?$/
-  const LOGIN_TERMINAL_PATH = /^\/api\/claude\/accounts\/([^/?]+)\/login\/terminal(?:\?(.*))?$/
-
-  const terminalTarget = (url: string): { key: string; query: string } | null => {
-    const run = RUN_TERMINAL_PATH.exec(url)
-    if (run?.[1] !== undefined) return { key: decodeURIComponent(run[1]), query: run[2] ?? '' }
-    const login = LOGIN_TERMINAL_PATH.exec(url)
-    if (login?.[1] !== undefined) {
-      return { key: `login:${decodeURIComponent(login[1])}`, query: login[2] ?? '' }
-    }
-    return null
-  }
-
+  // Which URLs authenticate by ticket rather than bearer comes from the
+  // shared route table, not from regexes maintained here. Two hand-written
+  // patterns used to live at this spot and fell out of step with the routes,
+  // which is how the Accounts sign-in terminal came to refuse every upgrade.
   const isTerminalUpgrade = (request: FastifyRequest): boolean =>
     String(request.headers.upgrade ?? '').toLowerCase() === 'websocket' &&
     terminalTarget(request.url) !== null

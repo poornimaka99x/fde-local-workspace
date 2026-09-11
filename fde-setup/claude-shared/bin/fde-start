@@ -12,6 +12,7 @@ FDE="${FDE_CONTROLLER:-$here/fde}"
 MCP_SYNC="${FDE_MCP_SYNC:-$here/mcp-sync}"
 CLAUDE_BIN="${FDE_CLAUDE_BIN:-claude}"
 RUNS="${FDE_RUNS_DIR:-${CLAUDE_SHARED:-$HOME/.claude-shared}/runs}"
+SHARED="${CLAUDE_SHARED:-$HOME/.claude-shared}"
 
 usage() {
   cat <<'USAGE'
@@ -67,6 +68,41 @@ for part in field.split("."):
 print(value or "")
 PY
 }
+
+# Capability switches are an operator policy, applied only to new processes.
+# Built-in Claude tools get a real CLI deny rule; the remaining disabled
+# harness components are stated in the system prompt so the orchestrator cannot
+# select or delegate to them through FDE.
+capability_note=""
+capability_args=()
+policy_file="$SHARED/config/capability-policy.json"
+if [[ -f "$policy_file" ]]; then
+  capability_note="$(python3 - "$policy_file" <<'PY'
+import json, pathlib, sys
+doc = json.loads(pathlib.Path(sys.argv[1]).read_text())
+disabled = doc.get("disabled")
+if doc.get("schemaVersion") != 1 or not isinstance(disabled, list):
+    raise SystemExit("fde-start: invalid capability policy; refusing to widen availability")
+items = [str(item) for item in disabled if isinstance(item, str)]
+if items:
+    print("Operator capability policy: switched off: " + ", ".join(sorted(items)) +
+          ". Do not invoke, delegate to, or rely on these capabilities.")
+PY
+)"
+  disabled_tools="$(python3 - "$policy_file" <<'PY'
+import json, pathlib, re, sys
+doc = json.loads(pathlib.Path(sys.argv[1]).read_text())
+disabled = doc.get("disabled")
+if doc.get("schemaVersion") != 1 or not isinstance(disabled, list):
+    raise SystemExit("fde-start: invalid capability policy; refusing to widen availability")
+tools = [item[5:] for item in disabled
+         if isinstance(item, str) and item.startswith("tool:")
+         and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", item[5:])]
+print(",".join(sorted(set(tools))))
+PY
+)"
+  [[ -n "$disabled_tools" ]] && capability_args=(--disallowedTools "$disabled_tools")
+fi
 
 # Which identities exist, which of them can hold a continuous conversation, and
 # the environment that selects one, are all the controller's answers. This
@@ -260,13 +296,13 @@ capabilities, not fixed roles. Ask whenever intent, scope, target, authority or
 acceptance criteria are ambiguous. The controller's status is authoritative for
 whether this run already has a request; never claim it is missing when status
 reports requirement.hasFile=true. Do not access connected systems or source
-repositories before combined plan approval."
+repositories before combined plan approval. $capability_note"
   if (( have_session )); then
     run_claude --resume "$session_id" --name "FDE $run_id" \
-      --permission-mode auto --append-system-prompt "$scope_system" "$scope_prompt"
+      --permission-mode auto ${capability_args[@]+"${capability_args[@]}"} --append-system-prompt "$scope_system" "$scope_prompt"
   else
     run_claude --session-id "$session_id" --name "FDE $run_id" \
-      --permission-mode auto --append-system-prompt "$scope_system" "$scope_prompt"
+      --permission-mode auto ${capability_args[@]+"${capability_args[@]}"} --append-system-prompt "$scope_system" "$scope_prompt"
   fi
   # A successful scoping process has now persisted this session. The execution
   # process below must resume it rather than trying to create the UUID again.
@@ -297,15 +333,15 @@ acceptance criterion is ambiguous, stop and ask me before acting."
 execution_system="Execute FDE run $run_id autonomously within its approved plan
 and role assignment. You have the normal configured tool surface and run-scoped
 connectors. Never infer permission for Codex writes, deployments, publication,
-destructive actions or scope expansion; their explicit gates still apply."
+destructive actions or scope expansion; their explicit gates still apply. $capability_note"
 
 if (( have_session )); then
   run_claude --resume "$session_id" --name "FDE $run_id" \
-    --mcp-config "$mcp_file" --permission-mode auto --tools default \
+    --mcp-config "$mcp_file" --permission-mode auto --tools default ${capability_args[@]+"${capability_args[@]}"} \
     --append-system-prompt "$execution_system" "$execution_prompt"
 else
   run_claude --session-id "$session_id" --name "FDE $run_id" \
-    --mcp-config "$mcp_file" --permission-mode auto --tools default \
+    --mcp-config "$mcp_file" --permission-mode auto --tools default ${capability_args[@]+"${capability_args[@]}"} \
     --append-system-prompt "$execution_system" "$execution_prompt"
 fi
 

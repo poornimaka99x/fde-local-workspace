@@ -97,7 +97,7 @@ A profile is a named slice of the catalogue for a kind of work.
 | --- | --- | --- |
 | `coding` | context7, serena | `coding` |
 | `frontend-testing` | context7, playwright, chrome-devtools | `frontend-testing` |
-| `maxeda-delivery` | context7, atlassian, figma | `maxeda-delivery` |
+| `client-delivery` | context7, atlassian, figma | `client-delivery` |
 | `data` | context7, dbhub | `data` |
 | `observability` | context7, langfuse, aws, azure | `observability` |
 
@@ -307,7 +307,7 @@ and Langfuse have not been configured.
   context7         read-only         public-documentation   every tool
   playwright       mutation-capable  browser-session        18 read tool(s)
 
-### maxeda-delivery
+### client-delivery
   atlassian        mutation-capable  tenant-data            every tool   ← unscoped, see below
   context7         read-only         public-documentation   every tool
   figma            mutation-capable  tenant-data            every tool   ← unscoped, see below

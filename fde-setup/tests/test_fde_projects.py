@@ -194,7 +194,7 @@ class TestProjectRegistry(ProjectTest):
 class TestRunProjectLinkage(ProjectTest):
     def test_start_project_records_the_project_on_the_run(self):
         project = self.create_project()
-        result = self.sb.fde("start", "MAX-1 returns", "--orchestrator", "work",
+        result = self.sb.fde("start", "ACME-1 returns", "--orchestrator", "work",
                              "--project", project["projectId"])
         self.assertEqual(result.returncode, 0, result.stderr)
         run_id = next(l.split()[1] for l in result.stdout.splitlines()
@@ -209,7 +209,7 @@ class TestRunProjectLinkage(ProjectTest):
 
     def test_legacy_runs_without_a_project_are_unassigned(self):
         self.create_project()
-        run_id = self.sb.start("MAX-2 legacy run")
+        run_id = self.sb.start("ACME-2 legacy run")
         manifest = json.loads((self.sb.run_dir(run_id) / "manifest.json").read_text())
         self.assertIsNone(manifest["projectId"])
 
@@ -220,14 +220,14 @@ class TestRunProjectLinkage(ProjectTest):
 
     def test_an_unknown_project_creates_no_run(self):
         before = list((self.sb.shared / "runs").iterdir())
-        result = self.sb.fde("start", "MAX-3", "--project", "not-a-project-9999")
+        result = self.sb.fde("start", "ACME-3", "--project", "not-a-project-9999")
         self.assertEqual(result.returncode, 4)
         self.assertIn("no such project", result.stderr)
         self.assertEqual(list((self.sb.shared / "runs").iterdir()), before)
 
     def test_updating_a_project_does_not_rewrite_run_events(self):
         project = self.create_project()
-        result = self.sb.fde("start", "MAX-4", "--orchestrator", "work",
+        result = self.sb.fde("start", "ACME-4", "--orchestrator", "work",
                              "--project", project["projectId"])
         run_id = next(l.split()[1] for l in result.stdout.splitlines()
                       if l.startswith("run "))
@@ -237,7 +237,7 @@ class TestRunProjectLinkage(ProjectTest):
 
     def test_delete_moves_the_complete_run_to_recoverable_trash(self):
         project = self.create_project()
-        result = self.sb.fde("start", "MAX-5 old run", "--orchestrator", "work",
+        result = self.sb.fde("start", "ACME-5 old run", "--orchestrator", "work",
                              "--project", project["projectId"])
         self.assertEqual(result.returncode, 0, result.stderr)
         run_id = next(l.split()[1] for l in result.stdout.splitlines()
@@ -283,7 +283,7 @@ class TestAttachments(ProjectTest):
         return source, hashlib.sha256(body).hexdigest()
 
     def test_a_file_is_copied_hashed_and_recorded(self):
-        run_id = self.sb.start("MAX-5 attach")
+        run_id = self.sb.start("ACME-5 attach")
         source, digest = self.attach_source()
         record = self.json_of("attach", run_id, str(source))["attachment"]
 
@@ -314,7 +314,7 @@ class TestAttachments(ProjectTest):
         self.assertEqual(added[0]["sha256"], digest)
 
     def test_stdin_upload_names_can_never_become_paths(self):
-        run_id = self.sb.start("MAX-6 upload")
+        run_id = self.sb.start("ACME-6 upload")
         result = self.sb.fde("attach", run_id, "--stdin", "--name",
                              "../../etc/pass wd.pdf", "--json", stdin="payload")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -330,13 +330,13 @@ class TestAttachments(ProjectTest):
         self.assertFalse((self.sb.tmp / "etc").exists())
 
     def test_stdin_needs_a_name(self):
-        run_id = self.sb.start("MAX-7")
+        run_id = self.sb.start("ACME-7")
         result = self.sb.fde("attach", run_id, "--stdin", stdin="x")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--name", result.stderr)
 
     def test_symlinked_sources_are_refused(self):
-        run_id = self.sb.start("MAX-8")
+        run_id = self.sb.start("ACME-8")
         secret = self.sb.tmp / "secret.txt"
         secret.write_text("do not copy me")
         link = self.sb.tmp / "innocent.txt"
@@ -347,7 +347,7 @@ class TestAttachments(ProjectTest):
         self.assertFalse((self.sb.run_dir(run_id) / "inputs" / "files").exists())
 
     def test_directories_and_devices_are_refused(self):
-        run_id = self.sb.start("MAX-9")
+        run_id = self.sb.start("ACME-9")
         directory = self.sb.fde("attach", run_id, str(self.sb.repo))
         self.assertNotEqual(directory.returncode, 0)
         self.assertIn("directory", directory.stderr)
@@ -358,7 +358,7 @@ class TestAttachments(ProjectTest):
         self.assertEqual(self.json_of("attachments", run_id)["attachments"], [])
 
     def test_oversize_attachments_are_refused_and_leave_nothing_behind(self):
-        run_id = self.sb.start("MAX-10")
+        run_id = self.sb.start("ACME-10")
         source, _digest = self.attach_source(body=b"x" * 4096)
         result = self.sb.fde("attach", run_id, str(source), "--max-bytes", "16")
         self.assertNotEqual(result.returncode, 0)
@@ -368,7 +368,7 @@ class TestAttachments(ProjectTest):
         self.assertFalse(files_dir.exists() and any(files_dir.iterdir()))
 
     def test_the_size_limit_is_configurable_downward_only(self):
-        run_id = self.sb.start("MAX-11")
+        run_id = self.sb.start("ACME-11")
         source, _digest = self.attach_source(body=b"y" * 512)
         raised = self.sb.fde("attach", run_id, str(source),
                              "--max-bytes", "99999999999",
@@ -378,7 +378,7 @@ class TestAttachments(ProjectTest):
         self.assertIn("limit", raised.stderr)
 
     def test_stdin_uploads_are_truncated_at_the_limit_not_stored(self):
-        run_id = self.sb.start("MAX-12")
+        run_id = self.sb.start("ACME-12")
         result = self.sb.fde("attach", run_id, "--stdin", "--name", "big.bin",
                              "--max-bytes", "8", stdin="x" * 4096)
         self.assertNotEqual(result.returncode, 0)
@@ -386,7 +386,7 @@ class TestAttachments(ProjectTest):
         self.assertFalse(files_dir.exists() and any(files_dir.iterdir()))
 
     def test_records_are_append_only_and_malformed_lines_survive_reading(self):
-        run_id = self.sb.start("MAX-13")
+        run_id = self.sb.start("ACME-13")
         source, _digest = self.attach_source()
         first = self.json_of("attach", run_id, str(source))["attachment"]
         ledger = self.sb.run_dir(run_id) / "inputs" / "attachments.jsonl"
@@ -413,7 +413,7 @@ class TestAttachments(ProjectTest):
 
 class TestJsonViews(ProjectTest):
     def test_json_mode_writes_only_json_to_stdout(self):
-        run_id = self.sb.start("MAX-20 json")
+        run_id = self.sb.start("ACME-20 json")
         for args in (("list",), ("status", run_id), ("projects",),
                      ("attachments", run_id)):
             result = self.sb.fde(*args, "--json")
@@ -428,7 +428,7 @@ class TestJsonViews(ProjectTest):
 
     def test_status_json_carries_what_the_console_needs(self):
         project = self.create_project(repos=[self.sb.repo])
-        start = self.sb.fde("start", "MAX-21 returns research", "--orchestrator", "work",
+        start = self.sb.fde("start", "ACME-21 returns research", "--orchestrator", "work",
                             "--project", project["projectId"])
         run_id = next(l.split()[1] for l in start.stdout.splitlines()
                       if l.startswith("run "))
@@ -444,7 +444,7 @@ class TestJsonViews(ProjectTest):
         self.assertEqual(payload["projectId"], project["projectId"])
         self.assertEqual(payload["project"]["repoPaths"], [str(self.sb.repo.resolve())])
         self.assertEqual(payload["state"], "roles_confirmed")
-        self.assertEqual(payload["requirement"]["jiraKey"], "MAX-21")
+        self.assertEqual(payload["requirement"]["jiraKey"], "ACME-21")
         self.assertTrue(payload["requirement"]["hasFile"])
         self.assertEqual(payload["plan"]["stages"], ["intake", "research"])
         self.assertEqual([s["stage"] for s in payload["stageTimeline"]],
@@ -465,7 +465,7 @@ class TestJsonViews(ProjectTest):
         self.assertEqual(payload["warnings"], [])
 
     def test_events_are_paginated_and_bounded(self):
-        run_id = self.sb.start("MAX-22 events")
+        run_id = self.sb.start("ACME-22 events")
         payload = self.json_of("status", run_id, "--events-limit", "2")
         page = payload["events"]
         self.assertEqual(page["limit"], 2)
@@ -481,7 +481,7 @@ class TestJsonViews(ProjectTest):
         self.assertEqual(first["items"][0]["event"], "run.created")
 
     def test_malformed_ledger_lines_warn_without_blanking_the_run(self):
-        run_id = self.sb.start("MAX-23 malformed")
+        run_id = self.sb.start("ACME-23 malformed")
         events = self.sb.run_dir(run_id) / "events.jsonl"
         with events.open("a") as handle:
             handle.write('{"at": "2026-01-01", "event": "trunc\n')
@@ -491,7 +491,7 @@ class TestJsonViews(ProjectTest):
         self.assertEqual(payload["state"], "awaiting_plan")
 
     def test_the_session_view_is_honest_about_each_orchestrator(self):
-        claude_run = self.sb.start("MAX-24 claude", orchestrator="work")
+        claude_run = self.sb.start("ACME-24 claude", orchestrator="work")
         session = self.json_of("status", claude_run)["session"]
         self.assertEqual(session["provider"], "claude")
         self.assertEqual(session["profile"], "work")
@@ -509,7 +509,7 @@ class TestJsonViews(ProjectTest):
         self.assertIsNone(session["sessionId"], "a session id is opaque, and checked")
         self.assertIn("malformed", session["resumeReason"])
 
-        codex_run = self.sb.start("MAX-25 codex", orchestrator="codex")
+        codex_run = self.sb.start("ACME-25 codex", orchestrator="codex")
         session = self.json_of("status", codex_run)["session"]
         self.assertEqual(session["provider"], "codex")
         self.assertFalse(session["resumable"])
@@ -517,7 +517,7 @@ class TestJsonViews(ProjectTest):
         self.assertEqual(session["resumeReason"],
                          "Resume this run in its original Codex task")
 
-        fresh = self.sb.fde("start", "MAX-26 no orchestrator")
+        fresh = self.sb.fde("start", "ACME-26 no orchestrator")
         no_orchestrator = next(l.split()[1] for l in fresh.stdout.splitlines()
                                if l.startswith("run "))
         session = self.json_of("status", no_orchestrator)["session"]
@@ -525,7 +525,7 @@ class TestJsonViews(ProjectTest):
         self.assertIsNone(session["provider"])
 
     def test_json_views_carry_no_secret_values(self):
-        run_id = self.sb.start("MAX-27 secrets")
+        run_id = self.sb.start("ACME-27 secrets")
         secrets_env = {
             "CONFLUENCE_API_TOKEN": "confluence-token-must-not-appear",
             "COPILOT_DIRECTLINE_SECRET": "directline-secret-must-not-appear",
@@ -541,7 +541,7 @@ class TestJsonViews(ProjectTest):
 
     def test_list_json_reports_state_project_and_resumability_per_run(self):
         project = self.create_project()
-        start = self.sb.fde("start", "MAX-28 grouped", "--orchestrator", "work",
+        start = self.sb.fde("start", "ACME-28 grouped", "--orchestrator", "work",
                             "--project", project["projectId"])
         run_id = next(l.split()[1] for l in start.stdout.splitlines()
                       if l.startswith("run "))
@@ -550,10 +550,10 @@ class TestJsonViews(ProjectTest):
         self.assertEqual(row["projectId"], project["projectId"])
         self.assertEqual(row["orchestrator"]["label"], "Claude: work")
         self.assertTrue(row["session"]["resumable"])
-        self.assertEqual(row["requirement"], "MAX-28 grouped")
+        self.assertEqual(row["requirement"], "ACME-28 grouped")
 
     def test_a_run_naming_an_unknown_project_warns_instead_of_failing(self):
-        run_id = self.sb.start("MAX-29 orphan")
+        run_id = self.sb.start("ACME-29 orphan")
         manifest_path = self.sb.run_dir(run_id) / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         manifest["projectId"] = "deleted-project-0000"
@@ -574,14 +574,14 @@ class TestStartJson(ProjectTest):
 
     def test_start_json_returns_the_created_run_and_narrates_to_stderr(self):
         project = self.create_project()
-        payload = self.start_json("MAX-60 returns research",
+        payload = self.start_json("ACME-60 returns research",
                                   "--orchestrator", "work",
                                   "--project", project["projectId"])
         self.assertEqual(payload["schemaVersion"], 1)
         run = payload["run"]
         self.assertEqual(run["projectId"], project["projectId"])
-        self.assertEqual(run["requirement"], "MAX-60 returns research")
-        self.assertEqual(run["jiraKey"], "MAX-60")
+        self.assertEqual(run["requirement"], "ACME-60 returns research")
+        self.assertEqual(run["jiraKey"], "ACME-60")
         self.assertEqual(run["state"], "awaiting_plan")
         self.assertEqual(run["orchestrator"]["agentId"], "claude_work")
         self.assertTrue(run["session"]["resumable"])
@@ -589,7 +589,7 @@ class TestStartJson(ProjectTest):
         self.assertTrue((self.sb.run_dir(run["runId"]) / "manifest.json").is_file())
 
     def test_a_shape_is_recorded_without_confirming_roles(self):
-        payload = self.start_json("MAX-61 research only",
+        payload = self.start_json("ACME-61 research only",
                                   "--orchestrator", "work", "--shape", "research")
         run = payload["run"]
         self.assertEqual(run["stages"], ["intake", "research"])
@@ -605,17 +605,17 @@ class TestStartJson(ProjectTest):
                          "--require-approval is part of my sentence")
 
     def test_refusals_leave_stdout_empty(self):
-        unknown = self.sb.fde("start", "MAX-62", "--project", "no-such-project", "--json")
+        unknown = self.sb.fde("start", "ACME-62", "--project", "no-such-project", "--json")
         self.assertEqual(unknown.returncode, 4)
         self.assertEqual(unknown.stdout, "")
 
-        cannot = self.sb.fde("start", "MAX-63", "--orchestrator", "gemini", "--json")
+        cannot = self.sb.fde("start", "ACME-63", "--orchestrator", "gemini", "--json")
         self.assertNotEqual(cannot.returncode, 0)
         self.assertEqual(cannot.stdout, "")
         self.assertIn("cannot orchestrate", cannot.stderr)
 
     def test_the_human_output_of_start_is_unchanged(self):
-        result = self.sb.fde("start", "MAX-64 human", "--orchestrator", "work")
+        result = self.sb.fde("start", "ACME-64 human", "--orchestrator", "work")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Nothing has been read", result.stdout)
         self.assertNotIn("schemaVersion", result.stdout)
@@ -689,7 +689,7 @@ class TestContainment(ProjectTest):
         self.assertEqual(result.stdout, "")
 
     def test_attachments_refuse_a_symlinked_destination(self):
-        run_id = self.sb.start("MAX-40 symlinked inputs")
+        run_id = self.sb.start("ACME-40 symlinked inputs")
         source = self.sb.tmp / "payload.txt"
         source.write_text("payload")
         target = self.sb.tmp / "escape-target"
@@ -707,7 +707,7 @@ class TestContainment(ProjectTest):
                          "bytes were written through a symlinked destination")
 
     def test_attachments_refuse_a_symlinked_inputs_directory(self):
-        run_id = self.sb.start("MAX-41 symlinked inputs parent")
+        run_id = self.sb.start("ACME-41 symlinked inputs parent")
         source = self.sb.tmp / "payload2.txt"
         source.write_text("payload")
         target = self.sb.tmp / "escape-parent"
@@ -749,7 +749,7 @@ class TestContainment(ProjectTest):
         self.assertEqual(result.returncode, 4)
 
     def test_a_manifest_project_id_is_data_not_a_path(self):
-        run_id = self.sb.start("MAX-42 poisoned manifest")
+        run_id = self.sb.start("ACME-42 poisoned manifest")
         manifest_path = self.sb.run_dir(run_id) / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         manifest["projectId"] = "../../../../etc"
@@ -762,7 +762,7 @@ class TestContainment(ProjectTest):
 
     def test_valid_json_of_the_wrong_shape_is_malformed_not_fatal(self):
         """A bare string or list is JSON. It is not a record."""
-        run_id = self.sb.start("MAX-43 wrong shape")
+        run_id = self.sb.start("ACME-43 wrong shape")
         for name in ("events.jsonl", "approvals.jsonl", "checkpoints.jsonl"):
             with (self.sb.run_dir(run_id) / name).open("a") as handle:
                 handle.write('"just a string"\n')
@@ -790,7 +790,7 @@ class TestContainment(ProjectTest):
 
 class TestBackwardCompatibility(ProjectTest):
     def test_human_list_and_status_are_unchanged(self):
-        run_id = self.sb.start("MAX-30 human output")
+        run_id = self.sb.start("ACME-30 human output")
         listing = self.sb.fde("list")
         self.assertEqual(listing.returncode, 0, listing.stderr)
         self.assertIn(run_id, listing.stdout)
@@ -804,7 +804,7 @@ class TestBackwardCompatibility(ProjectTest):
         self.assertNotIn("schemaVersion", status.stdout)
 
     def test_empty_projects_and_attachments_say_so_in_human_mode(self):
-        run_id = self.sb.start("MAX-31 empty")
+        run_id = self.sb.start("ACME-31 empty")
         self.assertIn("no projects yet", self.sb.fde("projects").stdout)
         self.assertIn("no attachments", self.sb.fde("attachments", run_id).stdout)
 

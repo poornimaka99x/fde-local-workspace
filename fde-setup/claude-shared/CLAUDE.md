@@ -1,4 +1,4 @@
-# Working with Poornima
+# Working with the operator
 
 Forward-Deployed Engineering Lead. Works across many client repositories at once,
 usually as the person who has to make an architecture decision defensible to both
@@ -22,6 +22,10 @@ a CTO and the engineers who will maintain it.
 - When touching an unfamiliar repo, delegate the survey to `repo-cartographer`
   rather than reading the tree into the main context.
 - Do not commit or push unless asked.
+- Treat `~/.claude-shared/config/capability-policy.json` as the operator's
+  availability decision. A capability id in `disabled` must not be invoked,
+  delegated to or used as a fallback. New FDE sessions also enforce disabled
+  built-in tools through the CLI's deny list.
 - Run tests and builds through `quiet <cmd>` (e.g. `quiet npm test`). It prints
   failures and a summary instead of the whole log, and always names the full log
   file if you need more. Never re-run a command just to see the output again.

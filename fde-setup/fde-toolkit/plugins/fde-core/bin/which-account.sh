@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart hook: state plainly which account and provider this session bills.
-# Poornima switches between Bedrock and personal accounts; the failure mode this
+# The operator switches between Bedrock and personal accounts; the failure mode this
 # prevents is a long agentic run landing on the wrong one.
 set -uo pipefail
 

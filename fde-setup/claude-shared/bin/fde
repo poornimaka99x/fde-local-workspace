@@ -80,6 +80,7 @@ CONNECTION_SECRETS_DIR = pathlib.Path(os.environ.get(
 MCP_SRC = SHARED / "mcp" / "mcp-servers.json"
 TOOLKIT_ROOT = pathlib.Path(os.environ.get(
     "FDE_TOOLKIT_ROOT", SHARED / "fde-toolkit" / "plugins" / "fde-core"))
+CAPABILITY_POLICY = SHARED / "config" / "capability-policy.json"
 
 ATLASSIAN_MCP_URL = "https://mcp.atlassian.com/v2/mcp"
 
@@ -5490,7 +5491,7 @@ def cmd_shapes(args):
     for name, stages in SHAPES.items():
         chain = "  →  ".join(STAGE_LABEL[s] for s in stages)
         print(f"  {name:<{width}}  {chain}")
-    print("\nCombine them with '+':  fde start MAX-1 --shape presentation+delivery-plan")
+    print("\nCombine them with '+':  fde start ACME-1 --shape presentation+delivery-plan")
     print("Or name stages directly: fde plan <run-id> --stages research,review,presentation")
     print(f"\nStages: {', '.join(STAGE_ORDER)}\n")
     return 0
@@ -6240,7 +6241,13 @@ def cmd_consume_approval(args):
             "repositoryPath": a["repositoryPath"],
             "writableRoot": a["writableRoot"],
             "network": bool(a.get("network")),
+            # The RESOLVED absolute path, plus the digest that was just checked
+            # against it. The caller must launch from this path and re-verify
+            # this digest: a relative --task-file resolved again from a
+            # different working directory is a different file, and re-reading
+            # without the digest reopens the gap this hash is here to close.
             "taskFile": str(task),
+            "taskFileSha256": digest,
         }))
         return 0
 
@@ -6476,7 +6483,21 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
             env.update(_run_mcp_env(run, agent_id))
             _catalog, _user, _health, chosen, _refused = run_mcp_effective(run, agent_id)
             env.update(fde_mcp.claude_launch_env(chosen))
-        return ["claude"] + options + claude_options + ["-p", body], env
+        capability_options = []
+        policy = {}
+        if CAPABILITY_POLICY.exists():
+            try:
+                policy = json.loads(CAPABILITY_POLICY.read_text())
+            except (OSError, json.JSONDecodeError):
+                die("the capability policy is invalid; refusing to widen availability", 8)
+            if policy.get("schemaVersion") != 1 or not isinstance(policy.get("disabled"), list):
+                die("the capability policy is invalid; refusing to widen availability", 8)
+        disabled_tools = sorted({item[5:] for item in policy.get("disabled", [])
+                                 if isinstance(item, str) and item.startswith("tool:")
+                                 and re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", item[5:])})
+        if disabled_tools:
+            capability_options = ["--disallowedTools", ",".join(disabled_tools)]
+        return ["claude"] + options + claude_options + capability_options + ["-p", body], env
     if kind == "codex":
         mcp_options = _run_mcp_options(run, agent_id, a)
         if mcp_options:

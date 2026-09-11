@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authed, makeHarness, type Harness } from './harness'
 import { runRows, statusFixture } from './fixtures'
 
-const RUN = '20260901-max-1-aaaa'
+const RUN = '20260901-acme-1-aaaa'
 
 describe('controller boundary', () => {
   let harness: Harness
@@ -26,7 +26,7 @@ describe('controller boundary', () => {
     expect(response.statusCode).toBe(200)
     const body = response.json()
     expect(body.runs.map((run: { runId: string }) => run.runId)).toEqual([
-      '20260902-max-2-bbbb',
+      '20260902-acme-2-bbbb',
       RUN,
     ])
     expect(body.warnings).toHaveLength(1)
@@ -36,8 +36,8 @@ describe('controller boundary', () => {
     expect((await get('/api/runs?projectId=unassigned')).json().runs).toHaveLength(1)
     expect((await get('/api/runs?projectId=returns-a1b2')).json().runs).toHaveLength(1)
     expect((await get('/api/runs?state=complete')).json().runs).toHaveLength(1)
-    expect((await get('/api/runs?resumable=false')).json().runs[0].runId).toBe('20260902-max-2-bbbb')
-    expect((await get('/api/runs?query=MAX-1')).json().runs).toHaveLength(1)
+    expect((await get('/api/runs?resumable=false')).json().runs[0].runId).toBe('20260902-acme-2-bbbb')
+    expect((await get('/api/runs?query=ACME-1')).json().runs).toHaveLength(1)
     expect((await get('/api/runs?query=nothing-matches')).json().runs).toHaveLength(0)
   })
 

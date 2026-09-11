@@ -211,8 +211,8 @@ describe('Claude accounts and general chats', () => {
 
   it('persists explicit service access and injects controller-resolved content without credentials', async () => {
     harness.fixture('connections-list', { schemaVersion: 1, connections: [{
-      id: 'atlassian-maxeda', name: 'Maxeda', provider: 'atlassian', providerLabel: 'Atlassian REST API',
-      fields: { siteUrl: 'https://maxedadiy.atlassian.net', email: 'user@example.com' },
+      id: 'atlassian-acme', name: 'Acme', provider: 'atlassian', providerLabel: 'Atlassian REST API',
+      fields: { siteUrl: 'https://example.atlassian.net', email: 'user@example.com' },
       configured: true, status: 'connected', oauth: false,
     }] })
     harness.fixture('connections-context', {
@@ -224,19 +224,19 @@ describe('Claude accounts and general chats', () => {
     const created = await harness.app.inject({
       method: 'POST', url: '/api/chats', headers: mutating(harness.token), payload: {
         accountId: 'work', model: 'sonnet', effort: 'high',
-        serviceConnectionIds: ['atlassian-maxeda'],
+        serviceConnectionIds: ['atlassian-acme'],
       },
     })
     expect(created.statusCode).toBe(201)
-    expect(created.json().chat.serviceConnectionIds).toEqual(['atlassian-maxeda'])
+    expect(created.json().chat.serviceConnectionIds).toEqual(['atlassian-acme'])
     const chatId = created.json().chat.chatId as string
     const sent = await harness.app.inject({
       method: 'POST', url: `/api/chats/${chatId}/messages`, headers: mutating(harness.token),
-      payload: { message: 'Read https://maxedadiy.atlassian.net/wiki/spaces/IDT/pages/6722617382/FAQ' },
+      payload: { message: 'Read https://example.atlassian.net/wiki/spaces/DOCS/pages/1234567890/FAQ' },
     })
     expect(sent.statusCode).toBe(200)
     expect(sent.json().chat.messages.at(-1).content).toContain('Internal FAQ')
-    expect(harness.stdinFor('connections-context')?.toString()).toContain('/pages/6722617382/')
+    expect(harness.stdinFor('connections-context')?.toString()).toContain('/pages/1234567890/')
     expect(JSON.stringify(harness.calls())).not.toContain('Safe page text')
     const revoked = await harness.app.inject({
       method: 'PATCH', url: `/api/chats/${chatId}/services`, headers: mutating(harness.token),

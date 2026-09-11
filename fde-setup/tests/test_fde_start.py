@@ -84,6 +84,10 @@ class FdeStartTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_same_claude_session_resumes_with_run_scoped_mcp(self):
+        (self.shared / "config/capability-policy.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "disabled": ["skill:fde-core:crosscheck", "tool:WebSearch"],
+        }))
         env = dict(os.environ)
         env.update({
             "HOME": str(self.home),
@@ -112,6 +116,9 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("ARG=--mcp-config", log)
         self.assertIn("ARG=--permission-mode", log)
         self.assertIn("ARG=auto", log)
+        self.assertGreaterEqual(log.count("ARG=--disallowedTools"), 2)
+        self.assertGreaterEqual(log.count("ARG=WebSearch"), 2)
+        self.assertIn("skill:fde-core:crosscheck", log)
         self.assertGreaterEqual(log.count("ARG=--model"), 2)
         self.assertGreaterEqual(log.count("ARG=opus"), 2)
         self.assertGreaterEqual(log.count("ARG=--effort"), 2)

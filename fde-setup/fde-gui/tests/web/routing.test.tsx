@@ -158,7 +158,7 @@ describe('the new-run routing preview', () => {
         return jsonResponse(answer ?? previewResponse)
       }
       if (url === '/api/runs' && init?.method === 'POST') {
-        return jsonResponse({ schemaVersion: 1, run: { runId: '20260907-max-1-aaaa' } }, 201)
+        return jsonResponse({ schemaVersion: 1, run: { runId: '20260907-acme-1-aaaa' } }, 201)
       }
       return jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] })
     }))
@@ -190,7 +190,7 @@ describe('the new-run routing preview', () => {
 
     await waitFor(() => expect(window.location.pathname).toBe('/design-panel/new'))
     expect(new URLSearchParams(window.location.search).get('runId'))
-      .toBe('20260907-max-1-aaaa')
+      .toBe('20260907-acme-1-aaaa')
   })
 
   it('offers the three strategies with what each one does', async () => {
@@ -222,7 +222,7 @@ describe('the new-run routing preview', () => {
     await screen.findByLabelText(/Automatic model and effort/)
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     expect(sent.filter((call) => call.url === '/api/routing/preview')).toHaveLength(0)
     vi.advanceTimersByTime(700)
@@ -237,7 +237,7 @@ describe('the new-run routing preview', () => {
     await screen.findByLabelText(/Automatic model and effort/)
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     vi.advanceTimersByTime(700)
     await screen.findByText(/complexity: standard/)
@@ -260,7 +260,7 @@ describe('the new-run routing preview', () => {
     await screen.findByLabelText(/Automatic model and effort/)
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     vi.advanceTimersByTime(700)
     const why = await screen.findByText('Why this choice?')
@@ -290,7 +290,7 @@ describe('the new-run routing preview', () => {
     await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'msc')
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     vi.advanceTimersByTime(700)
     expect(await screen.findByText(/Sign in to/)).toBeInTheDocument()
@@ -339,7 +339,7 @@ describe('the new-run routing preview', () => {
     await screen.findByLabelText(/Automatic model and effort/)
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     vi.advanceTimersByTime(700)
     expect(await screen.findByText(/No preview/)).toBeInTheDocument()
@@ -353,7 +353,7 @@ describe('the new-run routing preview', () => {
     await screen.findByLabelText(/Automatic model and effort/)
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     vi.advanceTimersByTime(2000)
     await waitFor(() =>
@@ -371,7 +371,7 @@ describe('the new-run routing preview', () => {
     await user.selectOptions(screen.getByLabelText(/Strategy/), 'quality_first')
     await user.type(
       screen.getByLabelText(/What do you want done/),
-      'MAX-1 add a paginated orders endpoint to the existing API',
+      'ACME-1 add a paginated orders endpoint to the existing API',
     )
     await user.click(screen.getByRole('button', { name: 'Create run' }))
     await waitFor(() =>
@@ -456,7 +456,7 @@ describe('the new-run routing preview', () => {
 
 const matrixRouting = {
   schemaVersion: 1,
-  runId: '20260907-max-1-aaaa',
+  runId: '20260907-acme-1-aaaa',
   routing: {
     ...previewResponse.preview,
     approvedAt: '2026-09-07T11:00:00+00:00',
@@ -531,7 +531,7 @@ const matrixRouting = {
     ],
     overrides: [{
       at: '2026-09-07T12:00:00+00:00',
-      operator: 'poornima',
+      operator: 'operator',
       target: 'task:solutioning-1',
       field: 'model',
       from: 'sonnet',
@@ -547,7 +547,7 @@ const matrixRouting = {
 
 const matrixAttempts = {
   schemaVersion: 1,
-  runId: '20260907-max-1-aaaa',
+  runId: '20260907-acme-1-aaaa',
   attempts: [{
     at: '2026-09-07T11:30:00+00:00',
     taskId: 'solutioning-1',
@@ -577,7 +577,7 @@ const matrixAttempts = {
 
 function runWithRouting(overrides: Record<string, unknown> = {}): RunStatus {
   return {
-    runId: '20260907-max-1-aaaa',
+    runId: '20260907-acme-1-aaaa',
     routing: {
       present: true,
       readable: true,
@@ -614,7 +614,7 @@ describe('the run view execution matrix', () => {
       if (url.includes('/routing/explain')) {
         return jsonResponse({
           schemaVersion: 1,
-          runId: '20260907-max-1-aaaa',
+          runId: '20260907-acme-1-aaaa',
           policyRevision: '2026-09-07.1',
           policyRevisionOnDisk: '2026-09-07.1',
           policyDrift: null,
@@ -675,7 +675,7 @@ describe('the run view execution matrix', () => {
     render(<RoutingMatrix run={runWithRouting()} />)
     const summary = await screen.findByText(/Overrides and superseded approvals/)
     await user.click(summary)
-    expect(screen.getByText('poornima')).toBeInTheDocument()
+    expect(screen.getByText('operator')).toBeInTheDocument()
     expect(screen.getByText(/an auth design needs the stronger model/)).toBeInTheDocument()
     expect(screen.getByText(/raised what was approved/)).toBeInTheDocument()
   })
@@ -784,7 +784,7 @@ describe('the run view execution matrix', () => {
           ...matrixAttempts.attempts[0],
           at: '2026-09-07T11:35:00+00:00',
           supersedes: { attempt: 1 },
-          recordedBy: 'poornima',
+          recordedBy: 'operator',
         },
       ],
     })
@@ -793,7 +793,7 @@ describe('the run view execution matrix', () => {
     await user.click(await screen.findByText(/^Attempts \(/))
     await user.click(screen.getByText(/Full ledger \(2 lines\)/))
     expect(screen.getByText(/attempt 1 recorded/)).toBeInTheDocument()
-    expect(screen.getByText(/attempt 1 judged.*invalid-contract.*by poornima/))
+    expect(screen.getByText(/attempt 1 judged.*invalid-contract.*by operator/))
       .toBeInTheDocument()
     expect(screen.getByText(/Nothing here was\s+rewritten/)).toBeInTheDocument()
   })

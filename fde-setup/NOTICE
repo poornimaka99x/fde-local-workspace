@@ -1,0 +1,41 @@
+FDE Setup
+Copyright (c) 2026 Poornima Kahatapitiya
+
+This product is licensed under the MIT License. See LICENSE.
+
+--------------------------------------------------------------------------
+Third-party material
+--------------------------------------------------------------------------
+
+This repository vendors third-party design references under
+`fde-toolkit/plugins/fde-core/vendor/`. Each is pinned to an immutable
+upstream commit and imported as data, not as executable code. Per-source
+provenance — upstream URL, pinned commit, SPDX identifier, imported paths,
+and the SHA-256 of every file — is recorded in
+`fde-toolkit/plugins/fde-core/vendor/design-sources.lock.json` and can be
+re-verified with `vendor/bin/design-sources audit`.
+
+1. awesome-design-md
+   https://github.com/voltagent/awesome-design-md
+   Copyright (c) 2026 VoltAgent
+   Licensed under the MIT License.
+   Full text: fde-toolkit/plugins/fde-core/vendor/awesome-design-md/LICENSE
+
+2. taste-skill
+   https://github.com/leonxlnx/taste-skill
+   Copyright (c) 2026 Leonxlnx
+   Licensed under the MIT License.
+   Full text: fde-toolkit/plugins/fde-core/vendor/taste-skill/LICENSE
+
+3. impeccable
+   https://github.com/pbakaus/impeccable
+   Licensed under the Apache License, Version 2.0.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Full text: fde-toolkit/plugins/fde-core/vendor/impeccable/LICENSE
+   Upstream attribution notice, preserved as required by section 4(d) of
+   the Apache License:
+       fde-toolkit/plugins/fde-core/vendor/impeccable/NOTICE-upstream.md
+
+Each vendored work remains under its own licence. Nothing in this
+repository's MIT licence supersedes those terms.

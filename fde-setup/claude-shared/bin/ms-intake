@@ -15,7 +15,7 @@ What it does:
   3. prints the path, so you can hand it straight to a Claude session
 
 Typical use — paste from a Copilot Notebook or a Teams recap:
-  pbpaste | ms-intake - --title "Maxeda returns call 14 Mar" --kind meeting
+  pbpaste | ms-intake - --title "Acme returns call 14 Mar" --kind meeting
   ms-intake ~/Downloads/CopilotNotebook.docx --title "Returns policy review"
 
 .docx is converted if pandoc or python-docx is available; otherwise it tells you

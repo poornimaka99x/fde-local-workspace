@@ -8,7 +8,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Task
 # Repo init
 
 Goal: leave the repository with roughly 40 lines of Claude config that say only
-what is **true of this repo and nothing else**. Everything general — how Poornima
+what is **true of this repo and nothing else**. Everything general — how the operator
 works, review standards, shared MCP servers — already lives in the toolkit and
 must not be copied here.
 

@@ -137,7 +137,7 @@ a business operation, and it is what turns "read-only" from a claim into a fact 
 the tool names it collects become the allowlist each client is given.
 
 The **Profile** selector narrows the list to one kind of work — coding,
-frontend testing, Maxeda delivery, data, observability. It never widens it: role,
+frontend testing, Acme delivery, data, observability. It never widens it: role,
 stage and readiness still all have to agree before a run sees a server.
 
 Three banners are worth reading rather than dismissing:
@@ -154,6 +154,38 @@ Three banners are worth reading rather than dismissing:
 **Service connections and MCP servers are different things** and stay on separate
 tabs. A connection is a credential for a system; an MCP server is a governed
 capability with a lifecycle, a profile and a tool scope.
+
+## Capabilities and extensions
+
+**Configuration → Capabilities** is the complete local inventory of the FDE
+agent harness: plugins, skills, sub-agents, MCP servers, declared tools,
+commands, hooks and runtime utilities. Use the type chips or search box to find
+a capability. Every card says whether the item is built in or user owned, which
+plugin supplies it, and where its definition lives. Skill and sub-agent cards
+also expose their declared tools; MCP cards expose their tool-scope policy.
+
+Every switch is persisted in
+`~/.claude-shared/config/capability-policy.json`. Skill, sub-agent and plugin
+states constrain what a new FDE session may select or delegate to. Disabled
+built-in tools are also passed to Claude as explicit CLI deny rules. MCP
+switches go through the existing `fde mcp enable|disable` controller path, and
+hook switches remove or restore the event in the plugin hook manifest. The
+required `fde-core` plugin and inventory-only commands/utilities cannot be
+switched off. Existing processes keep the capability set they started with.
+
+**Create skill** writes a new `SKILL.md` under the separately managed
+`fde-user` plugin. Its name, trigger description, instructions and allowed tools
+are explicit, and updates to `fde-core` do not overwrite it. **Import local
+plugin** accepts an absolute path to a plugin containing
+`.claude-plugin/plugin.json`, validates its manifest and bounded file tree,
+rejects symbolic links, then copies it into the local `fde-toolkit` marketplace.
+It never replaces an existing plugin with the same name.
+
+Adding an extension changes the marketplace source, not a session that is
+already running. Refresh or install the plugin in every AI account that should
+use it, then start a new session. This keeps extension authorship separate from
+run authority: a new capability does not grant a role, activate an MCP server,
+or bypass an approval.
 
 ## Service access in a chat
 
@@ -187,7 +219,11 @@ read-only something it has not asked.
 | Runs | `~/.claude-shared/runs/<run-id>` |
 | Projects | `~/.claude-shared/projects/<project-id>` |
 | The launcher | `~/.claude-shared/bin/fde-gui` |
+| User skills | `~/.claude-shared/fde-toolkit/plugins/fde-user/skills/` |
+| Imported plugins | `~/.claude-shared/fde-toolkit/plugins/<plugin-name>/` |
 
-The console reads and writes nothing itself: every change goes through an `fde`
-command, and every fact on screen came from one. If the console is not running,
-nothing about your runs changes.
+Run, project, account, connection and MCP lifecycle changes continue to go
+through the `fde` controller. Capability authoring is the narrow exception: the
+console writes user-owned plugin files and the local marketplace directly after
+validation. It does not edit `fde-core`, install executable dependencies, or
+change a running session. If the console is not running, nothing changes.

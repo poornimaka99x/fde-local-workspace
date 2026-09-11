@@ -15,7 +15,7 @@ working — jump to *When something is refused* at the bottom.
 ## 1. Install (5 min)
 
 ```bash
-cd ~/Library/CloudStorage/OneDrive-MaxedaDIYGroup/Maxeda/FDE-Agent/fde-local-workspace/fde-setup
+cd ~/Library/CloudStorage/OneDrive-AcmeDIYGroup/Acme/FDE-Agent/fde-local-workspace/fde-setup
 ./install.sh --update --dry-run     # look first — nothing is written
 ./install.sh --update
 exec $SHELL -l
@@ -31,29 +31,26 @@ not touched.
 
 ## 2. The one thing that will bite you (2 min)
 
-The installer used to copy `claude-shared/.env.sh` — the file with your real
-Atlassian token — into `~/.claude-shared/`. It no longer does, because a secret
-should not travel in a synced folder. But your shell only ever sourced
-`~/.claude-shared/env.sh`, so check that the live one actually has your token:
+The installer deliberately does **not** copy any `.env.sh` out of this
+repository: a secret should never travel with the source, and never into a
+cloud-synced folder. Your shell sources `~/.claude-shared/env.sh`, which you
+create once, by hand, from the template:
 
 ```bash
-grep CONFLUENCE_API_TOKEN ~/.claude-shared/env.sh
-```
-
-Empty? Put it in and re-source:
-
-```bash
+cp claude-shared/env.sh.example ~/.claude-shared/env.sh
+chmod 600 ~/.claude-shared/env.sh
 open -e ~/.claude-shared/env.sh        # CONFLUENCE_BASE_URL, EMAIL, API_TOKEN
 source ~/.claude-shared/env.sh
 confluence spaces                      # should list your spaces
 ```
 
-Your site is `https://maxedadiy.atlassian.net`, your email
-`Poornima.Kahatapitiya@diymaxeda.com`.
+Get an Atlassian API token at id.atlassian.com → Security → API tokens. Set
+`CONFLUENCE_BASE_URL` to your own site (`https://your-site.atlassian.net`) and
+`CONFLUENCE_EMAIL` to the account that token belongs to.
 
-While you are in there: that token has been sitting in plaintext in a
-OneDrive-synced folder. Rotating it at
-id.atlassian.com → Security → API tokens takes two minutes and I would do it.
+`~/.claude-shared/env.sh` is the only place a live credential belongs. It is
+gitignored here, it is never read into an agent prompt, and `fde doctor` will
+warn you if its permissions are looser than `600`.
 
 ## 3. Check what you have (2 min)
 
@@ -183,7 +180,7 @@ hear you say by accident:
 ```bash
 fde approve-codex <run-id> implementation \
   --task-file ~/.claude-shared/runs/<run-id>/artifacts/implementation/implementation-task.md \
-  --repo ~/work/maxeda-returns \
+  --repo ~/work/client-returns \
   --commands "pytest -q"
 ```
 
@@ -212,7 +209,7 @@ The other typed approval. `jira-plan.json` is a **preview** — a plan existing 
 not a reason to create anything.
 
 ```bash
-fde approve-publish <run-id> jira --summary "8 stories under MAX-142"
+fde approve-publish <run-id> jira --summary "8 stories under ACME-142"
 # type: APPROVE PUBLISH <run-id>
 
 confluence create ENG "ADR 004: Token exchange" \
@@ -348,13 +345,13 @@ credentials. Symlinks and unknown binary metadata are left untouched.
 - **Bitbucket via the Atlassian connector** — depends on token scopes and whether
   the site is linked to your org. Ask your admin. Local git works regardless, and
   is still the right way to touch repositories.
-- **`/client-context maxeda`** — RUNBOOK Phase 3. Do not skip it. It is why agent
-  output either sounds like Maxeda or sounds like nobody.
+- **`/client-context acme`** — RUNBOOK Phase 3. Do not skip it. It is why agent
+  output either sounds like Acme or sounds like nobody.
 
 ## Checking it still works
 
 ```bash
-cd ~/Library/CloudStorage/OneDrive-MaxedaDIYGroup/Maxeda/FDE-Agent/fde-local-workspace/fde-setup
+cd ~/Library/CloudStorage/OneDrive-AcmeDIYGroup/Acme/FDE-Agent/fde-local-workspace/fde-setup
 python3 -m unittest discover -s tests
 fde doctor
 ```
