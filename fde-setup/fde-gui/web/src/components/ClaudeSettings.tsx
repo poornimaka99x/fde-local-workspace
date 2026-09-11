@@ -62,6 +62,9 @@ export function ClaudeSettings({
   }, [effort, managedCodex, model, models, onEffort, onModel, selectedModel])
 
   const statusLabel = selected?.authState.replace('_', ' ') ?? null
+  // A state without its reason sends the operator to the sign-in button for a
+  // problem no sign-in can fix.
+  const statusDetail = selected?.authDetail ?? null
   const canLogin = (selected?.provider === 'anthropic' || selected?.provider === 'codex' || selected?.provider === 'gemini') &&
     selected.authState !== 'authenticated'
 
@@ -123,6 +126,7 @@ export function ClaudeSettings({
             {statusLabel}
           </span>
           {selected.authMethod ? <span className="muted">{selected.authMethod}</span> : null}
+          {statusDetail ? <span className="muted">{statusDetail}</span> : null}
           {canLogin ? (
             <button className="action" type="button" onClick={() => setShowLogin((value) => !value)}>
               {showLogin ? 'Hide login' : selected.authState === 'login_required' ? 'Login' : 'Configure login'}

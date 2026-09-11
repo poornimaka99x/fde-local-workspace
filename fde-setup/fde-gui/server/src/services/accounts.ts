@@ -136,6 +136,8 @@ export interface ClaudeAccount {
   profilePresent: boolean
   authState: AuthState
   authMethod: string | null
+  /** Why, when the state is not a plain "authenticated". Null when it is. */
+  authDetail: string | null
   models: ModelOption[]
   /** Registry capabilities, verbatim. Identities are not roles; this is what an
    *  identity is *allowed to be given*, and the run still decides who does what. */
@@ -158,6 +160,13 @@ interface RegistryAgent {
 interface AuthResult {
   state: AuthState
   method: string | null
+  /**
+   * Why, when the answer is not a plain yes. "Could not tell" and "signed out"
+   * are different facts and used to collapse into the same one here, which
+   * told the operator to sign in to an account that was already signed in and
+   * named nothing they could act on.
+   */
+  detail: string | null
 }
 
 type StatusRunner = (
@@ -165,6 +174,37 @@ type StatusRunner = (
   args: string[],
   options: { cwd: string; env: NodeJS.ProcessEnv; timeout: number },
 ) => Promise<{ stdout: string; stderr: string }>
+
+/** The CLI answered, but not in a shape this console can read. */
+class UnreadableStatus extends Error {}
+
+/**
+ * Why a status command could not be started, in words the operator can act on.
+ *
+ * `which` finding the file is not the same as the file running: a stub script
+ * whose native binary was never downloaded, a guest/VM build on the wrong
+ * architecture, a lost execute bit and a missing `#!` interpreter all fail
+ * here, and each has a different fix. This reports the OS's complaint about
+ * starting the process; it is not the provider's output and carries no
+ * account data.
+ */
+function describeSpawnFailure(error: NodeJS.ErrnoException): string {
+  const where = error.path ?? ''
+  switch (error.code) {
+    case 'ENOENT':
+      return where === ''
+        ? 'the CLI could not be found on this PATH'
+        : `${where} could not be started — it exists, so this is most likely its ` +
+          'interpreter (the #! line) missing from PATH'
+    case 'ENOEXEC':
+      return `${where} is not runnable on this machine's architecture — check it is ` +
+        'the native CLI and not a guest or VM build'
+    case 'EACCES':
+      return `${where} is not executable`
+    default:
+      return `the CLI could not be started (${error.code ?? 'unknown error'})`
+  }
+}
 
 const defaultStatusRunner: StatusRunner = async (file, args, options) =>
   await new Promise((resolve, reject) => {
@@ -202,7 +242,7 @@ export class AccountService {
     private readonly runStatus: StatusRunner = defaultStatusRunner,
   ) {}
 
-  configured(): Omit<ClaudeAccount, 'authState' | 'authMethod'>[] {
+  configured(): Omit<ClaudeAccount, 'authState' | 'authMethod' | 'authDetail'>[] {
     const found = new Map<string, {
       label: string
       provider: Exclude<ChatProvider, 'codex'>
@@ -382,26 +422,34 @@ export class AccountService {
         ...account,
         authState: status.state,
         authMethod: status.method,
+        authDetail: status.detail,
       }
     }))
   }
 
-  getConfigured(id: string): Omit<ClaudeAccount, 'authState' | 'authMethod'> | null {
+  getConfigured(id: string): Omit<ClaudeAccount, 'authState' | 'authMethod' | 'authDetail'> | null {
     return this.configured().find((account) => account.id === id) ?? null
   }
 
   async status(id: string, refresh = false): Promise<AuthResult> {
     const account = this.getConfigured(id)
-    if (account === null) return { state: 'unavailable', method: null }
-    if (!this.binaryAvailable(account.provider)) return { state: 'unavailable', method: null }
+    if (account === null) {
+      return { state: 'unavailable', method: null, detail: 'no such account on this machine' }
+    }
+    if (!this.binaryAvailable(account.provider)) {
+      return { state: 'unavailable', method: null,
+        detail: `the ${account.provider} CLI is not installed on this machine` }
+    }
     if (account.provider === 'bedrock') {
       return {
         state: account.profilePresent ? 'external' : 'unavailable',
         method: 'AWS credentials',
+        detail: account.profilePresent ? null : 'this profile has no settings.json yet',
       }
     }
     if (account.provider !== 'codex' && account.provider !== 'gemini' && !account.profilePresent) {
-      return { state: 'login_required', method: null }
+      return { state: 'login_required', method: null,
+        detail: 'this profile directory does not exist yet' }
     }
     const cached = this.cache.get(id)
     if (!refresh && cached !== undefined && Date.now() - cached.at < 15_000) return cached.result
@@ -421,29 +469,59 @@ export class AccountService {
         },
       )
       if (account.provider === 'gemini') {
-        result = { state: 'authenticated', method: 'Antigravity' }
+        result = { state: 'authenticated', method: 'Antigravity', detail: null }
       } else if (account.provider === 'codex') {
         const statusText = `${stdout}\n${stderr}`
         const loggedIn = /logged in/i.test(statusText)
         result = {
           state: loggedIn ? 'authenticated' : 'login_required',
           method: loggedIn && /chatgpt/i.test(statusText) ? 'ChatGPT' : null,
+          detail: loggedIn ? null : 'the CLI reports this account is not signed in',
         }
       } else {
-        const parsed = JSON.parse(stdout) as Record<string, unknown>
+        let parsed: Record<string, unknown>
+        try {
+          parsed = JSON.parse(stdout) as Record<string, unknown>
+        } catch {
+          // The CLI ran and said something this console cannot read. That is
+          // not evidence of being signed out — reporting it as such is how a
+          // working account came to show "login required" with no way to tell
+          // the difference. A stub CLI that prints an install error, or a
+          // version whose output shape changed, lands here.
+          throw new UnreadableStatus(
+            `${this.config.claudeBin} answered, but not in the JSON this console expects`,
+          )
+        }
         const loggedIn = parsed.loggedIn === true || parsed.authenticated === true
         const method = [parsed.authMethod, parsed.method, parsed.subscriptionType]
           .find((value) => typeof value === 'string')
         result = {
           state: loggedIn ? 'authenticated' : 'login_required',
           method: typeof method === 'string' ? method : null,
+          detail: loggedIn ? null : 'the CLI reports this profile is not signed in',
         }
       }
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      result = code === 'ENOENT'
-        ? { state: 'unavailable', method: null }
-        : { state: 'login_required', method: null }
+      // execFile rejects for two very different reasons, and the exit code is
+      // what tells them apart: a NUMBER means the CLI ran and refused, which
+      // is a real "not signed in"; a STRING means the process could not be
+      // started at all, which is an installation fault and says nothing about
+      // whether this account has a credential.
+      if (error instanceof UnreadableStatus) {
+        result = { state: 'unavailable', method: null, detail: error.message }
+        this.cache.set(id, { at: Date.now(), result })
+        return result
+      }
+      const failure = error as NodeJS.ErrnoException & { killed?: boolean }
+      const code = failure.code
+      if (failure.killed === true) {
+        result = { state: 'unavailable', method: null,
+          detail: 'the status check did not answer in time' }
+      } else if (typeof code === 'number') {
+        result = { state: 'login_required', method: null, detail: null }
+      } else {
+        result = { state: 'unavailable', method: null, detail: describeSpawnFailure(failure) }
+      }
     }
     this.cache.set(id, { at: Date.now(), result })
     return result

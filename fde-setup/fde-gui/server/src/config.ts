@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { accessSync, constants, readFileSync, statSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -154,6 +154,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GuiConfig {
 
 export function isExecutable(candidate: string): boolean {
   try {
+    // The execute bit, not just existence. This used to answer isFile(), so a
+    // non-executable file named `claude` earlier on PATH won the search and
+    // every spawn then failed with EACCES — reported, unhelpfully, as the
+    // account being signed out.
+    accessSync(candidate, constants.X_OK)
     return statSync(candidate).isFile()
   } catch {
     return false

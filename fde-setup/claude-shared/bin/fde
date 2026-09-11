@@ -992,7 +992,12 @@ def _account_verify_command(verify, fields, env, timeout=10):
     if not argv:
         return {"mode": "argv", "ran": False, "ok": None,
                 "detail": "the provider template has no status command"}
-    if not shutil.which(requires):
+    # Resolve against the PATH the command will actually run with, not this
+    # process's. account_env may change PATH, and a which/run disagreement
+    # reports "not installed" for a CLI that is about to run fine, or the
+    # reverse.
+    resolved = shutil.which(requires, path=env.get("PATH") if env else None)
+    if not resolved:
         return {"mode": "argv", "ran": False, "ok": None,
                 "detail": f"{requires} is not installed on this machine — sign-in could not be confirmed either way"}
     concrete = []
@@ -1011,10 +1016,31 @@ def _account_verify_command(verify, fields, env, timeout=10):
                            else f"{requires} reports this account is not signed in")}
     except subprocess.TimeoutExpired:
         return {"mode": "argv", "ran": False, "ok": None,
-                "detail": "the status check did not answer in time — sign-in could not be confirmed"}
-    except (OSError, subprocess.SubprocessError):
+                "detail": f"{requires} did not answer within {timeout}s — sign-in could not be confirmed"}
+    except OSError as exc:
+        # Say WHY. `which` already found this file, so a failure to launch it is
+        # an installation fault with a specific cause — a wrong-architecture
+        # binary, a shebang whose interpreter is not on PATH, a lost execute
+        # bit — and each has a different fix. The previous message named none
+        # of them, which made the one screen that reports the problem useless
+        # for solving it. This is the OS's complaint about starting the
+        # process, not the provider's output: it carries no account data.
+        reason = exc.strerror or exc.__class__.__name__
+        hint = ""
+        if exc.errno == errno.ENOEXEC:
+            hint = (" — that file is not runnable on this machine's architecture."
+                    " Check it is the native CLI and not a guest/VM build")
+        elif exc.errno == errno.ENOENT:
+            hint = (f" — {resolved} exists, so this is most likely its interpreter"
+                    " (the #! line) missing from PATH, not the CLI itself")
+        elif exc.errno == errno.EACCES:
+            hint = f" — {resolved} is not executable (chmod +x it)"
         return {"mode": "argv", "ran": False, "ok": None,
-                "detail": "the provider status check could not be completed"}
+                "errno": exc.errno,
+                "detail": f"could not run {resolved}: {reason}{hint}"}
+    except subprocess.SubprocessError as exc:
+        return {"mode": "argv", "ran": False, "ok": None,
+                "detail": f"the {requires} status check failed to run: {exc.__class__.__name__}"}
 
 
 def account_login_state(templates, agents, aid: str):

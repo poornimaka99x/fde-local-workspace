@@ -629,6 +629,8 @@ export interface ClaudeAccount {
   profilePresent: boolean
   authState: 'authenticated' | 'login_required' | 'external' | 'unavailable'
   authMethod: string | null
+  /** Why the state is what it is, when that is not obvious. Older servers omit it. */
+  authDetail?: string | null
   models: ClaudeModelOption[]
   capabilities: string[]
   /** Optional only for compatibility with servers predating role-aware account lists. */
