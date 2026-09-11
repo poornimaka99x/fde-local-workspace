@@ -149,8 +149,6 @@
       ],
       "common": {
         "enable": [
-          "agent:feature-dev:code-architect",
-          "agent:feature-dev:code-explorer",
           "mcp:fde:context7",
           "mcp:fde:figma",
           "mcp:fde:serena",
@@ -191,7 +189,9 @@
       "optional": [
         "mcp:fde:aws",
         "mcp:fde:azure",
-        "mcp:fde:dbhub"
+        "mcp:fde:dbhub",
+        "skill:ponytail:ponytail-audit",
+        "skill:ponytail:ponytail-debt"
       ],
       "mcpScopes": {
         "mcp:fde:serena": [
@@ -231,8 +231,6 @@
       ],
       "common": {
         "enable": [
-          "agent:feature-dev:code-architect",
-          "agent:feature-dev:code-explorer",
           "mcp:fde:atlassian",
           "mcp:fde:context7",
           "mcp:fde:serena",
@@ -248,6 +246,7 @@
       "primary": {
         "enable": [
           "agent:fde:delivery-manager",
+          "agent:fde:repo-cartographer",
           "agent:fde:reviewer",
           "agent:fde:solutioner",
           "agent:fde:test-engineer",
@@ -282,6 +281,9 @@
           "read",
           "search"
         ]
+      },
+      "notes": {
+        "substitution": "repo-cartographer covers the codebase-discovery role here. The Anthropic feature-dev plugin was considered for it and rejected on licence grounds; this is a recorded substitution with a narrower agent, not a silent one."
       }
     },
     {
@@ -292,11 +294,10 @@
       ],
       "common": {
         "enable": [
-          "agent:feature-dev:code-architect",
-          "agent:feature-dev:code-explorer",
           "mcp:fde:context7",
           "mcp:fde:playwright",
           "mcp:fde:serena",
+          "plugin:ponytail",
           "skill:fde:implementation",
           "skill:fde:quality-gates",
           "skill:fde:tdd-evidence",
@@ -310,6 +311,9 @@
         "enable": [
           "agent:fde:implementation-engineer",
           "agent:fde:tdd-guide",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
+          "hook:ponytail:UserPromptSubmit",
           "tool:fde:Bash",
           "tool:fde:Edit",
           "tool:fde:Task",
@@ -319,6 +323,8 @@
       "reviewer": {
         "enable": [
           "agent:fde:tdd-guide",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
           "tool:fde:Write"
         ],
         "disable": [
@@ -332,7 +338,8 @@
         "agent:fde:security-reviewer",
         "mcp:fde:figma",
         "skill:fde:design-system",
-        "skill:fde:design-to-code"
+        "skill:fde:design-to-code",
+        "skill:ponytail:ponytail-help"
       ],
       "mcpScopes": {
         "mcp:fde:serena": [
@@ -355,7 +362,8 @@
       "notes": {
         "design": "design-to-code, design-system, design-system-steward and figma are offered when designs are in scope.",
         "security": "security-reviewer is offered, and should be switched on, for security-sensitive changes.",
-        "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate."
+        "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate.",
+        "ponytailPlugin": "plugin:ponytail is enabled here and in quality-review only. Everywhere else it stays off, which is what keeps its lifecycle hooks out of the stages it has no business in."
       }
     },
     {
@@ -367,11 +375,11 @@
       ],
       "common": {
         "enable": [
-          "agent:feature-dev:code-reviewer",
           "mcp:fde:chrome-devtools",
           "mcp:fde:context7",
           "mcp:fde:playwright",
           "mcp:fde:serena",
+          "plugin:ponytail",
           "skill:fde:ci-diagnose",
           "skill:fde:quality-gates",
           "skill:fde:tdd-evidence",
@@ -389,6 +397,8 @@
           "agent:fde:reviewer",
           "agent:fde:security-reviewer",
           "agent:fde:test-engineer",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
           "tool:fde:Bash",
           "tool:fde:Write"
         ]
@@ -398,6 +408,8 @@
           "agent:fde:reliability-reviewer",
           "agent:fde:reviewer",
           "agent:fde:security-reviewer",
+          "hook:ponytail:SessionStart",
+          "hook:ponytail:SubagentStart",
           "tool:fde:Write"
         ],
         "disable": [
@@ -407,7 +419,10 @@
         ]
       },
       "optional": [
-        "mcp:fde:langfuse"
+        "mcp:fde:langfuse",
+        "skill:ponytail:ponytail-audit",
+        "skill:ponytail:ponytail-debt",
+        "skill:ponytail:ponytail-gain"
       ],
       "mcpScopes": {
         "mcp:fde:playwright": [
@@ -431,7 +446,8 @@
       },
       "notes": {
         "langfuse": "Offered when AI observability is in scope."
-      }
+      },
+      "ponytailMode": "lite"
     },
     {
       "name": "documentation",
@@ -642,5 +658,34 @@
         "bash": "Offered, not enabled: an investigation that needs a shell is a decision the operator makes, once, in the open."
       }
     }
-  ]
+  ],
+  "_featureDev": "Anthropic's feature-dev plugin is deliberately not integrated. It is distributed under Anthropic's commercial terms with all rights reserved, and this toolkit is MIT. Its code-explorer, code-architect and code-reviewer roles are held by fde-core's repo-cartographer, solutioner and reviewer/test-engineer respectively.",
+  "ponytail": {
+    "plugin": "plugin:ponytail",
+    "modes": [
+      "off",
+      "lite",
+      "full",
+      "ultra"
+    ],
+    "defaultMode": "off",
+    "_modes": "The mode is per stage, and selectable per workflow and stage. A stage that does not name one gets defaultMode, which is off: Ponytail changes how code gets written, and that is not something a stage should inherit by accident.",
+    "_optIn": "ponytail-audit, ponytail-debt and ponytail-gain are offered, never enabled. They scan whole repositories and reason about debt across them, which is expensive and reaches well outside the deliverable unit a stage is scoped to.",
+    "_hooks": "The three lifecycle hooks are separate, individually switchable capabilities and are enabled only in the stages where Ponytail itself is on."
+  },
+  "governance": {
+    "statement": "FDE governance and the project's own instructions take precedence whenever instructions conflict. Guidance from any imported plugin \u2014 Ponytail's minimal-code guidance included \u2014 is advice about how to write code, not permission to deliver less than what was agreed.",
+    "neverOverridden": [
+      "business acceptance criteria",
+      "security requirements",
+      "privacy requirements",
+      "accessibility requirements",
+      "required error handling",
+      "data-loss protection",
+      "regulatory controls",
+      "recorded architectural decisions",
+      "required testing",
+      "human approval gates"
+    ]
+  }
 }

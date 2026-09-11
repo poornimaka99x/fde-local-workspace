@@ -104,6 +104,9 @@ PRESERVE=(
   "mcp/health.json"             # what verification last learned about each server
   "mcp/events.jsonl"            # the catalogue's own append-only record
   "mcp/agy-managed.json"
+  # Plugins you imported yourself, and the trees kept so an update can be rolled
+  # back. Neither is toolkit material and neither is ours to replace.
+  "fde-toolkit/plugins/.versions/*"
 )
 CONFIRM=(
   "config/agents.json"          # you may add or relabel identities
@@ -122,6 +125,10 @@ CONFIRM=(
   # You may have pinned a different upstream commit with `design-sources update`.
   # Replacing that silently would move a supply-chain pin behind your back.
   "fde-toolkit/plugins/fde-core/vendor/design-sources.lock.json"
+  # Same reasoning for the vendored Ponytail plugin: you may have re-pinned it
+  # with `fde plugins update`, and replacing that silently would move a
+  # supply-chain pin behind your back. `fde plugins verify` re-checks the tree.
+  "fde-toolkit/plugins/ponytail/*"
 )
 
 matches() {  # matches <relpath> <array-name>

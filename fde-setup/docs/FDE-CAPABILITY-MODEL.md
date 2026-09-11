@@ -24,7 +24,7 @@ proxy over `fde capabilities --json` and `fde config show --json`.
 A capability id is `<kind>:<namespace>:<name>`.
 
     skill:fde:crosscheck
-    agent:feature-dev:code-explorer
+    skill:ponytail:ponytail-review
     mcp:fde:serena
     tool:fde:Read
     hook:ponytail:SessionStart
@@ -39,8 +39,15 @@ A capability id is `<kind>:<namespace>:<name>`.
 |----------------|-------------------------------------------------------|
 | `fde`          | the built-in fde-core plugin, the MCP catalogue, the built-in tool set |
 | `ponytail`     | the pinned external Ponytail plugin                   |
-| `feature-dev`  | the pinned Anthropic feature-dev plugin               |
 | `user:<plugin>`| anything the operator imported                        |
+
+Anthropic's feature-dev plugin was considered for a reserved namespace and is
+deliberately absent: it is distributed under Anthropic's commercial terms with
+all rights reserved, and this toolkit is MIT, so vendoring it was not available
+to us. Its code-explorer, code-architect and code-reviewer roles are held by
+fde-core's repo-cartographer, solutioner and reviewer/test-engineer — which is
+what the requirement asks for anyway wherever an imported agent overlaps one of
+ours.
 
 One deliberate exception to the three-part rule: a plugin *defines* a namespace
 rather than living in one, so a plugin's id is `plugin:<namespace>` —
@@ -48,7 +55,7 @@ rather than living in one, so a plugin's id is `plugin:<namespace>` —
 because the kind is always the first segment and a name never contains a colon.
 
 Every record also carries `ref`, the short namespaced form the UI shows:
-`fde:crosscheck`, `ponytail:review`, `feature-dev:code-architect`.
+`fde:crosscheck`, `ponytail:ponytail-review`, `user:acme:deploy-check`.
 
 ## 3. The capability record
 
@@ -269,7 +276,88 @@ from the plugin's `hooks.json` and stashing the payload, while `fde config set`
 only records the decision. Until runtime enforcement lands, a hook switched off
 through the CLI is recorded but still fires.
 
-## 9. Commands
+## 9. Importing a plugin
+
+An imported plugin is code from outside the trust boundary, and there is one
+door it comes through:
+
+    stage  ->  inspect  ->  validate  ->  approve  ->  activate  ->  lock
+
+Nothing is executed at any point in that sequence — not an installation script,
+not a hook, not a postinstall. A plugin is read, hashed and described; whether
+any of it ever runs is a separate decision the operator makes afterwards, per
+capability, through the layers in §4.
+
+Refused before anything is copied into place: symbolic links, paths that
+resolve outside the tree, anything that is not a regular file or a directory, a
+tree over the file-count or byte caps, a manifest that does not parse, a name
+that is reserved (`fde-core`, or a pinned namespace claimed by an unrelated
+plugin), and a git source without an explicit 40-character commit — because a
+branch is a name that means something different tomorrow.
+
+Hooks and executables are not refusals in themselves; they are the parts an
+operator has to actually look at. They become refusals only when nobody has:
+`--accept-hooks` and `--accept-executables` are how the operator says they read
+them, and what was accepted is recorded in the lock.
+
+### The lock
+
+Each plugin carries its own `.claude-plugin/fde-lock.json` — beside its
+manifest, not in a central index, because a central file would be written by
+the installer for the vendored plugins and by the import path for the
+operator's, and those two owners would fight on every upgrade.
+
+It records the source URL, ref, commit, licence, the imported paths, and the
+SHA-256 of every file plus a digest over the whole tree. `fde plugins verify`
+re-hashes what is on disk and answers `valid`, `drifted` (naming what changed,
+was added or was removed) or `unpinned`.
+
+Two claims are kept apart. The **checksum** pins the tree: it is recomputed
+from the files on disk. The **commit** says where those files came from, and
+`commitVerified` says whether FDE fetched them itself or is repeating what the
+importer wrote down. A vendored tree is checksum-pinned with an unverified
+commit; a `fde plugins add <url> --commit <sha>` tree has both.
+
+### Reversibility
+
+Activation is atomic: the tree it replaces is moved aside first, and only then
+is the new one renamed in. The three most recent superseded versions are kept,
+so `fde plugins rollback` restores one without going near the network.
+`fde plugins remove` keeps the tree too.
+
+### Ponytail
+
+Ponytail is vendored at `v4.9.0`, commit `356918eb`, MIT, as a reviewed subset:
+the manifest, six skills, six commands, three lifecycle hooks and the
+JavaScript modules they require. Artwork, benchmarks, tests, translated
+READMEs, the MCP server and the packaging for other agents are not imported.
+
+It is enabled in two stages only — `vertical-slice` in `full` mode and
+`quality-review` in `lite` — which is what keeps its lifecycle hooks out of the
+stages they have no business in. `ponytail-audit`, `ponytail-debt` and
+`ponytail-gain` are offered and never enabled: they scan whole repositories and
+reach well outside the deliverable unit a stage is scoped to.
+
+The mode is a **setting**, not a switch, and settings take the same precedence
+walk as capabilities (§4) at the same scopes — so "the reviewer runs Ponytail in
+lite mode on this one run" is expressible, and it lands in the run snapshot with
+everything else.
+
+### Governance
+
+The template carries a `governance` block, and resolution and every run snapshot
+carry it forward. It says that FDE governance and the project's own instructions
+take precedence whenever instructions conflict, and it names what no plugin's
+guidance may override: business acceptance criteria, security, privacy,
+accessibility, required error handling, data-loss protection, regulatory
+controls, recorded architectural decisions, required testing, and human approval
+gates.
+
+That is a statement the runtime hands to the agent. The mechanism that makes it
+binding is the layer order: a plugin contributes at layer 8, and security policy
+is layer 1.
+
+## 10. Commands
 
 ```
 fde capabilities [--kind K] [--namespace N] [--json]
@@ -283,18 +371,26 @@ fde config import <file> [--json]
 fde workflows [--json]
 fde workflow show <name> [--json]
 fde capabilities snapshot <run-id> [--role primary|reviewer] [--json]
+fde config set-option <name> <value> [--scope SCOPE]
+fde plugins [list|show <name>]
+fde plugins add <source> [--name N] [--commit SHA] [--ref R] [--url U]
+                         [--subdirectory P] [--include GLOB]...
+                         [--accept-hooks] [--accept-executables] [--note T] [--dry-run]
+fde plugins update <source> --name N [same options]
+fde plugins verify [<name>]
+fde plugins rollback <name> [--version V]
+fde plugins remove <name>
 ```
 
 `SCOPE` is `global`, `workspace:<name>`, `workflow:<name>`, `stage:<workflow>/<stage>`,
 `role:primary`, `role:reviewer` or `run:<id>`. It defaults to `global`.
 
-## 10. Out of scope for this phase
+## 11. Out of scope for this phase
 
 Deliberately not done yet, in the order they are planned:
 
 - the nine stage bundles wired to real installed capabilities, and degraded
   workflow diagnostics
-- Ponytail and feature-dev import, pinning and validation
 - MCP permission scopes and the six connection states
 - runtime enforcement in `fde-start` and `mcp-sync`, including the fact that
   `fde-start` currently passes `--mcp-config` without `--settings`, so the tool

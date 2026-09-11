@@ -99,8 +99,12 @@ class DiscoveryTest(CapabilityTestCase):
         # The inventory is discovered, not hardcoded: the skills on disk and the
         # skills reported are the same set.
         on_disk = {path.name for path in (self.plugins / "fde-core" / "skills").iterdir() if path.is_dir()}
-        reported = {item["name"] for item in catalog["items"] if item["kind"] == "skill"}
+        reported = {item["name"] for item in catalog["items"]
+                    if item["kind"] == "skill" and item["namespace"] == "fde"}
         self.assertEqual(on_disk, reported)
+        vendored = {path.name for path in (self.plugins / "ponytail" / "skills").iterdir() if path.is_dir()}
+        self.assertEqual(vendored, {item["name"] for item in catalog["items"]
+                                    if item["kind"] == "skill" and item["namespace"] == "ponytail"})
 
     def test_a_newly_installed_plugin_appears_without_any_registration(self):
         before = json.loads(self.fde("capabilities", "--json").stdout)["counts"]["skill"]
@@ -163,32 +167,36 @@ class DefaultsTest(CapabilityTestCase):
             self.assertIn("agent", kinds, f"{stage['name']} has no sub-agent")
             for tool in ("tool:fde:Read", "tool:fde:Grep", "tool:fde:Glob"):
                 self.assertIn(tool, document["enabled"], f"{stage['name']} lacks {tool}")
-            # Nothing in a bundle may be invented. Until the pinned external
-            # plugins are imported, the only thing a stage may be missing is
-            # one of theirs — and it must be reported, not silently dropped.
-            for entry in document["missing"]:
-                namespace = cap.parse_id(entry["id"])[1]
-                self.assertIn(namespace, cap.PINNED_NAMESPACES,
-                              f"{stage['name']} names {entry['id']}, which is not installed")
+            self.assertEqual(document["missing"], [],
+                             f"{stage['name']} names capabilities that are not installed")
+            self.assertEqual(document["inconsistent"], [],
+                             f"{stage['name']} enables a capability whose plugin it leaves off")
+
+    def _template(self, name, stage):
+        target = cap.workflows_root(self.shared) / f"{name}.json"
+        target.write_text(json.dumps({
+            "schemaVersion": 1, "name": name, "revision": "test.1",
+            "stages": [{"name": "only", "controllerStages": ["intake"], **stage}]}),
+            encoding="utf-8")
 
     def test_a_bundle_entry_that_is_not_installed_is_reported_never_invented(self):
-        # Ponytail and feature-dev are pinned external plugins, imported in a
-        # later phase. Until then every stage that names one says so, and no
-        # substitute is chosen for it.
-        named = set()
-        for stage in ("technical-architecture", "development-planning", "vertical-slice",
-                      "quality-review"):
-            document, entries = self.resolved("--workflow", "forward-deployed-engineer",
-                                              "--stage", stage)
-            for entry in document["missing"]:
-                named.add(entry["id"])
-                self.assertEqual(entry["reason"], "not installed")
-                self.assertNotIn(entry["id"], entries,
-                                 "a capability that is not installed must not appear as resolved")
-        self.assertEqual(named, {
-            "agent:feature-dev:code-architect", "agent:feature-dev:code-explorer",
-            "agent:feature-dev:code-reviewer", "skill:ponytail:ponytail",
-            "skill:ponytail:ponytail-review"})
+        self._template("probe", {"common": {"enable": ["skill:fde:nonexistent",
+                                                       "agent:user:ghost:missing"]}})
+        document, entries = self.resolved("--workflow", "probe", "--stage", "only")
+        self.assertEqual({entry["id"] for entry in document["missing"]},
+                         {"skill:fde:nonexistent", "agent:user:ghost:missing"})
+        for entry in document["missing"]:
+            self.assertEqual(entry["reason"], "not installed")
+            self.assertNotIn(entry["id"], entries,
+                             "a capability that is not installed must not appear as resolved")
+
+    def test_a_bundle_that_forgets_the_parent_plugin_is_named_not_swallowed(self):
+        self._template("probe", {"common": {"enable": ["skill:ponytail:ponytail"]}})
+        document, entries = self.resolved("--workflow", "probe", "--stage", "only")
+        self.assertNotIn("skill:ponytail:ponytail", document["enabled"])
+        self.assertEqual(entries["skill:ponytail:ponytail"]["effective"], "parent-disabled")
+        self.assertEqual([entry["id"] for entry in document["inconsistent"]],
+                         ["skill:ponytail:ponytail"])
 
     def test_a_stage_bundle_is_a_selection_not_the_whole_installation(self):
         document, _ = self.resolved("--workflow", "forward-deployed-engineer",
@@ -387,15 +395,27 @@ class FailClosedTest(CapabilityTestCase):
     def test_a_forbidden_capability_cannot_be_enabled_by_any_layer(self):
         self._corrupt("config/security-policy.json", json.dumps(
             {"schemaVersion": 1, "required": ["plugin:fde"], "forbidden": ["tool:fde:Bash"]}))
-        self.fde("config", "set", "tool:fde:Bash", "enabled")
+        # The command refuses outright, because a decision layer 1 overrides is
+        # worse than useless: it looks like it worked.
+        result = self.fde("config", "set", "tool:fde:Bash", "enabled", expected=2)
+        self.assertIn("forbidden by the runtime security policy", result.stderr)
+        # And resolution refuses again, for anything written another way.
+        config = cap.Config.load(self.shared)
+        config.doc["global"]["tool:fde:Bash"] = "enabled"
+        config.save()
         document, entries = self.resolved("--workflow", "forward-deployed-engineer",
                                           "--stage", "vertical-slice")
         self.assertNotIn("tool:fde:Bash", document["enabled"])
         self.assertEqual(entries["tool:fde:Bash"]["effective"], "blocked")
         self.assertEqual(entries["tool:fde:Bash"]["layer"], "security")
 
-    def test_an_unreadable_plugin_lock_file_refuses_to_discover(self):
-        self._corrupt("config/plugin-locks.json", "{ not json")
+    def test_an_unreadable_plugin_lock_refuses_to_discover(self):
+        self._corrupt("fde-toolkit/plugins/ponytail/.claude-plugin/fde-lock.json", "{ not json")
+        self.fde("capabilities", "--json", expected=2)
+
+    def test_a_wrong_schema_plugin_lock_refuses_to_discover(self):
+        self._corrupt("fde-toolkit/plugins/ponytail/.claude-plugin/fde-lock.json",
+                      json.dumps({"schemaVersion": 99}))
         self.fde("capabilities", "--json", expected=2)
 
     def test_an_invalid_workflow_template_is_skipped_and_named(self):
@@ -602,7 +622,7 @@ class IdentityTest(unittest.TestCase):
 
     def test_ids_round_trip(self):
         for kind, namespace, name in (("skill", "fde", "crosscheck"),
-                                      ("agent", "feature-dev", "code-explorer"),
+                                      ("skill", "ponytail", "ponytail-review"),
                                       ("skill", "user:acme", "deploy-check"),
                                       ("tool", "fde", "Read")):
             cid = cap.make_id(kind, namespace, name)
@@ -619,7 +639,6 @@ class IdentityTest(unittest.TestCase):
     def test_reserved_namespaces_are_not_reachable_by_an_imported_plugin(self):
         self.assertEqual(cap.plugin_namespace("fde-core"), "fde")
         self.assertEqual(cap.plugin_namespace("ponytail"), "ponytail")
-        self.assertEqual(cap.plugin_namespace("feature-dev"), "feature-dev")
         self.assertEqual(cap.plugin_namespace("anything-else"), "user:anything-else")
 
 

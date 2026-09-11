@@ -24,6 +24,7 @@ import pathlib
 import sys
 
 import fde_capabilities as cap
+import fde_plugin_import as imports
 
 # The controller sets this. It is the only thing that knows how to turn a run id
 # into a directory safely — a run id is a name, never a path — so the command
@@ -211,6 +212,18 @@ def cmd_config_show(args):
             print(f"{kind}s")
             _print_rows(rows)
             print()
+    if resolution["settings"]:
+        print("settings")
+        for name, entry in sorted(resolution["settings"].items()):
+            mark = "you" if entry["overridden"] else entry["layer"]
+            print(f"  {name:<22} {str(entry['value']):<10} ({mark})"
+                  + (f"  — {entry['reason']}" if entry.get("reason") else ""))
+        print()
+    if resolution.get("governance"):
+        print("governance")
+        print(f"  {resolution['governance']['statement']}")
+        print(f"  never overridden: {', '.join(resolution['governance']['neverOverridden'])}")
+        print()
     if resolution["missing"]:
         print("named by this workflow but not installed")
         for entry in resolution["missing"]:
@@ -236,6 +249,18 @@ def cmd_config_set(args):
         raise cap.CapabilityError("protected-capability",
                                   f"{item['ref']} is required by the FDE control plane.",
                                   detail="Protected capabilities are named in config/security-policy.json.")
+    # Security policy is layer 1, so a decision against it would be recorded and
+    # then ignored at every resolution. Refusing here means the operator learns
+    # that now, instead of wondering later why their switch does nothing.
+    security = cap.load_security_policy(catalog.shared)
+    if args.state == cap.DISABLED and args.id in security.get("required", ()):
+        raise cap.CapabilityError("required-by-policy",
+                                  f"{args.id} is required by the runtime security policy.",
+                                  detail=f"See {security.get('source')}.")
+    if args.state == cap.ENABLED and args.id in security.get("forbidden", ()):
+        raise cap.CapabilityError("forbidden-by-policy",
+                                  f"{args.id} is forbidden by the runtime security policy.",
+                                  detail=f"See {security.get('source')}.")
     kind, key = cap.parse_scope(args.scope)
     if kind == "run":
         current = cap.set_run_override(_run_dir(key), args.id, args.state)
@@ -256,6 +281,28 @@ def cmd_config_set(args):
 def cmd_config_reset(args):
     args.state = cap.INHERIT
     return cmd_config_set.__wrapped__(args)
+
+
+@command
+def cmd_config_set_option(args):
+    """Set something that is not on/off — a Ponytail mode, a permission scope."""
+    shared = _shared()
+    if args.workflow and args.value != "inherit":
+        template = cap.load_template(shared, args.workflow)
+        if args.name == "ponytail.mode":
+            modes = (template.get("ponytail") or {}).get("modes", [])
+            if modes and args.value not in modes:
+                raise cap.CapabilityError(
+                    "invalid-value", f"{args.value!r} is not a Ponytail mode.",
+                    detail=f"{args.workflow} offers: {', '.join(modes)}.")
+    config = cap.Config.load(shared)
+    config.set_setting(args.name, None if args.value == "inherit" else args.value, args.scope).save()
+    payload = {"schemaVersion": cap.SCHEMA_VERSION, "scope": args.scope,
+               "name": args.name, "value": args.value, "config": config.explicit()}
+    if args.json:
+        return _emit(payload)
+    print(f"{args.name} is {args.value} at {args.scope}")
+    return 0
 
 
 @command
@@ -352,6 +399,156 @@ def cmd_capabilities_snapshot(args):
     return 0
 
 
+# -------------------------------------------------------------- plugins --
+
+def _plugin_rows(plugins):
+    if not plugins:
+        print("  (none)")
+        return
+    width = max(len(entry["name"]) for entry in plugins)
+    for entry in plugins:
+        pin = ("pinned " + entry["commit"][:12]) if entry.get("commit") else (
+            "built-in" if entry["origin"] == "built-in" else "UNPINNED")
+        print(f"  {entry['name']:<{width}}  {entry['origin']:<8}  {pin:<20}"
+              f"  {entry.get('license') or 'licence unknown'}")
+        contributes = ", ".join(f"{count} {kind}s" for kind, count in sorted(entry["contributes"].items()))
+        if contributes:
+            print(f"  {'':<{width}}  {contributes}")
+        if entry["health"]["state"] != "ok":
+            print(f"  {'':<{width}}  {entry['health']['state']}: {entry['health'].get('message')}")
+
+
+@command
+def cmd_plugins_list(args):
+    payload = imports.list_plugins(_shared())
+    if args.json:
+        return _emit(payload)
+    print(f"\n{len(payload['plugins'])} plugins  (root {payload['pluginsRoot']})\n")
+    _plugin_rows(payload["plugins"])
+    print()
+    for warning in payload["warnings"]:
+        print(f"  warning  {warning}", file=sys.stderr)
+    return 0
+
+
+@command
+def cmd_plugins_show(args):
+    payload = imports.list_plugins(_shared())
+    entry = next((row for row in payload["plugins"] if row["name"] == args.name), None)
+    if entry is None:
+        raise cap.CapabilityError("unknown-plugin", f"No plugin named {args.name!r} is installed.",
+                                  detail="see: fde plugins list")
+    if args.json:
+        return _emit({"schemaVersion": cap.SCHEMA_VERSION, "plugin": entry})
+    print(f"\n{entry['name']}  ({entry['namespace']})\n")
+    print(f"  {entry['description']}\n")
+    print(f"  origin      {entry['origin']}"
+          + (f"  version {entry['version']}" if entry["version"] else ""))
+    print(f"  source      {entry.get('url') or 'this installation'}")
+    print(f"  pinned      {entry['commit'][:12] if entry.get('commit') else 'no'}"
+          + ("  (fetched and checked)" if entry.get("commitVerified")
+             else "  (recorded by the importer, not re-fetched)" if entry.get("commit") else "")
+          + (f"  ref {entry['ref']}" if entry.get("ref") else ""))
+    print(f"  checksum    {entry.get('checksum') or '(none)'}")
+    print(f"  licence     {entry.get('license') or 'unknown'}")
+    print(f"  installed   {entry.get('installedAt') or '(with the toolkit)'}")
+    print(f"  validated   {entry.get('validatedAt') or 'never'}  {entry.get('validationStatus') or ''}")
+    print(f"  health      {entry['health']['state']}"
+          + (f" — {entry['health']['message']}" if entry["health"].get("message") else ""))
+    if entry["dependencies"]:
+        print("  depends on")
+        for dependency in entry["dependencies"]:
+            print(f"    {dependency.get('name') or dependency.get('id')}  {dependency.get('state')}")
+    if entry["versionsKept"]:
+        print(f"  rollback    {len(entry['versionsKept'])} kept: {', '.join(entry['versionsKept'])}")
+    print()
+    return 0
+
+
+def _import(args, *, expect_existing):
+    shared = _shared()
+    installed = {row["name"] for row in imports.list_plugins(shared)["plugins"]}
+    name = args.name
+    if expect_existing and name not in installed:
+        raise cap.CapabilityError("unknown-plugin", f"No plugin named {name!r} is installed.",
+                                  detail="Use `fde plugins add` to install one.")
+    summary = imports.import_plugin(
+        shared, args.source, name=name, commit=args.commit, ref=args.ref,
+        subdirectory=args.subdirectory, include=args.include or None,
+        accept_hooks=args.accept_hooks, accept_executables=args.accept_executables, url=args.url,
+        expect_namespace=name if name in cap.PINNED_NAMESPACES else None,
+        review_note=args.note, dry_run=args.dry_run)
+    if args.json:
+        return _emit(summary)
+    verb = "would import" if args.dry_run else "imported"
+    print(f"\n{verb} {summary['name']}  ({summary['namespace']})\n")
+    print(f"  files       {summary['fileCount']}  ({summary['totalBytes']} bytes)")
+    print(f"  checksum    sha256:{summary['treeSha256']}")
+    print(f"  licence     {summary['license'] or 'unknown'}")
+    if summary["source"].get("commit"):
+        print(f"  pinned      {summary['source']['commit'][:12]}  {summary['source'].get('url')}")
+    if summary["hooks"]:
+        print(f"  hooks       {', '.join(summary['hooks'])}  (off until you switch each one on)")
+    if summary["installFiles"]:
+        print(f"  not run     {', '.join(summary['installFiles'])}")
+    for dependency in summary["dependencies"]:
+        if dependency.get("state") == "missing":
+            print(f"  MISSING     {dependency['name']} is not on PATH")
+    print()
+    return 0
+
+
+@command
+def cmd_plugins_add(args):
+    return _import(args, expect_existing=False)
+
+
+@command
+def cmd_plugins_update(args):
+    return _import(args, expect_existing=True)
+
+
+@command
+def cmd_plugins_verify(args):
+    shared = _shared()
+    names = [args.name] if args.name else [row["name"] for row in imports.list_plugins(shared)["plugins"]]
+    results = [imports.verify_plugin(shared, name) for name in names]
+    if args.json:
+        return _emit({"schemaVersion": cap.SCHEMA_VERSION, "results": results})
+    drifted = 0
+    for result in results:
+        print(f"\n{result['name']}  {result['state']}")
+        if result["state"] == "drifted":
+            drifted += 1
+            for label, paths in (("changed", result["changed"]), ("added", result["added"]),
+                                 ("removed", result["removed"])):
+                for path in paths:
+                    print(f"    {label:<8} {path}")
+        elif result["state"] == "unpinned":
+            print(f"    {result['message']}")
+    print()
+    return 1 if drifted else 0
+
+
+@command
+def cmd_plugins_rollback(args):
+    payload = imports.rollback_plugin(_shared(), args.name, version=args.version)
+    if args.json:
+        return _emit(payload)
+    print(f"{args.name} rolled back to {payload['restored']}"
+          + (f"  ({payload['commit'][:12]})" if payload.get("commit") else ""))
+    return 0
+
+
+@command
+def cmd_plugins_remove(args):
+    payload = imports.remove_plugin(_shared(), args.name)
+    if args.json:
+        return _emit(payload)
+    print(f"{args.name} removed; its tree is kept at {payload['keptAs']}")
+    return 0
+
+
 # -------------------------------------------------------------- registration --
 
 def register(sub):
@@ -418,6 +615,15 @@ def register(sub):
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_config_reset)
 
+    c = gsub.add_parser("set-option", help="set a non-boolean option at one scope")
+    c.add_argument("name", help="for example ponytail.mode")
+    c.add_argument("value", help="a value, or 'inherit' to clear it")
+    c.add_argument("--scope", default="global")
+    c.add_argument("--workflow", default="forward-deployed-engineer",
+                   help="validate the value against this workflow's template")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_config_set_option)
+
     c = gsub.add_parser("export", help="every explicit decision, as a portable document")
     c.add_argument("--out")
     c.add_argument("--run")
@@ -429,6 +635,57 @@ def register(sub):
     c.add_argument("--merge", action="store_true", help="keep decisions the export does not mention")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_config_import)
+
+    s = sub.add_parser("plugins", help="installed plugins, their pins and their provenance")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_plugins_list)
+    psub = s.add_subparsers(dest="plugin_command")
+
+    c = psub.add_parser("list", help="every installed plugin with its pin and licence")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_plugins_list)
+
+    c = psub.add_parser("show", help="one plugin, its provenance and its dependencies")
+    c.add_argument("name")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_plugins_show)
+
+    for verb, handler, helptext in (
+            ("add", cmd_plugins_add, "stage, validate and install a plugin"),
+            ("update", cmd_plugins_update, "re-pin an installed plugin, keeping the old version")):
+        c = psub.add_parser(verb, help=helptext)
+        c.add_argument("source", help="an absolute local directory, or a git URL")
+        c.add_argument("--name", help="install under this name (defaults to the manifest's)")
+        c.add_argument("--commit", help="the 40-character commit to pin; required for a git source")
+        c.add_argument("--ref", help="the tag or release the commit corresponds to")
+        c.add_argument("--url", help="the upstream URL, when importing a local copy of it")
+        c.add_argument("--subdirectory", help="the plugin's path inside the source")
+        c.add_argument("--include", action="append", metavar="GLOB",
+                       help="import only these paths; repeatable")
+        c.add_argument("--accept-hooks", action="store_true",
+                       help="you have read the lifecycle hooks this plugin defines")
+        c.add_argument("--accept-executables", action="store_true",
+                       help="you have read the executable files this plugin ships")
+        c.add_argument("--note", help="what your review of this import found")
+        c.add_argument("--dry-run", action="store_true", help="report, install nothing")
+        c.add_argument("--json", action="store_true")
+        c.set_defaults(fn=handler)
+
+    c = psub.add_parser("verify", help="re-hash installed trees against their pins")
+    c.add_argument("name", nargs="?")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_plugins_verify)
+
+    c = psub.add_parser("rollback", help="restore the version an update replaced")
+    c.add_argument("name")
+    c.add_argument("--version")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_plugins_rollback)
+
+    c = psub.add_parser("remove", help="uninstall a plugin, keeping its tree")
+    c.add_argument("name")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_plugins_remove)
 
     s = sub.add_parser("workflows", help="the installed workflow configurations")
     s.add_argument("--json", action="store_true")

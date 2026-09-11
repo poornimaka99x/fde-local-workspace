@@ -54,7 +54,13 @@ BUILTIN_NAMESPACE = "fde"
 # Namespaces reserved for pinned external plugins. The directory name is the
 # namespace, so an imported plugin cannot claim one of these by accident: the
 # import path checks this set and refuses.
-PINNED_NAMESPACES = ("ponytail", "feature-dev")
+#
+# Anthropic's feature-dev plugin was considered and is deliberately absent: it
+# ships under "all rights reserved" commercial terms, and this repository is
+# MIT. Its four roles are covered by fde-core agents that already exist, which
+# is what the requirement asks for anyway where an imported agent overlaps one
+# of ours.
+PINNED_NAMESPACES = ("ponytail",)
 
 # The built-in tool surface. Discovery seeds these rather than inferring the
 # whole set from front matter, because a tool nobody happens to declare is still
@@ -230,48 +236,64 @@ def security_policy_file(shared):
     return shared / "config" / "security-policy.json"
 
 
-def locks_file(shared):
-    return shared / "config" / "plugin-locks.json"
+# One lock per plugin, stored with the plugin rather than in a central index.
+# A central file would be written by the installer for the vendored plugins and
+# by the import path for the operator's, and those two owners would fight on
+# every upgrade. Beside the manifest, each record travels with the tree it
+# describes and is replaced exactly when that tree is.
+LOCK_NAME = "fde-lock.json"
+
+
+def plugin_lock_path(plugin_root):
+    return pathlib.Path(plugin_root) / ".claude-plugin" / LOCK_NAME
 
 
 # ---------------------------------------------------------------- provenance --
 
-def _load_locks(shared):
-    """Pinned provenance for imported plugins, written by the import path.
+def load_plugin_lock(plugin_root):
+    """One plugin's pinned provenance, or None if it has none.
 
-    Absent for a fresh install, which is not an error: the built-in plugin's
-    provenance is the installation itself. A lock file that exists and is
-    invalid IS an error — a supply-chain record that cannot be read is not a
-    record, and pretending otherwise is how an unpinned tree gets treated as
-    pinned.
+    Absent is not an error: fde-core's provenance is the installation itself,
+    and a plugin somebody dropped in by hand is simply unpinned and says so. A
+    lock that exists and cannot be read IS an error — a supply-chain record that
+    cannot be read is not a record, and treating it as absent is how an
+    unverified tree comes to be reported as pinned.
     """
-    target = locks_file(shared)
+    target = plugin_lock_path(plugin_root)
     try:
         raw = _read_json(target)
     except FileNotFoundError:
-        return {}
+        return None
     except (json.JSONDecodeError, OSError, CapabilityError) as exc:
-        raise CapabilityError("invalid-locks", f"{target} could not be read as a plugin lock file.",
+        raise CapabilityError("invalid-lock", f"{target} could not be read as a plugin lock.",
                               detail=str(exc))
     if not isinstance(raw, dict) or raw.get("schemaVersion") != SCHEMA_VERSION:
-        raise CapabilityError("invalid-locks", f"{target} is not a schema {SCHEMA_VERSION} lock file.")
-    plugins = raw.get("plugins")
-    return plugins if isinstance(plugins, dict) else {}
+        raise CapabilityError("invalid-lock", f"{target} is not a schema {SCHEMA_VERSION} plugin lock.")
+    return raw
 
 
-def _provenance(plugin_name, manifest, locks, source_root, shared):
-    lock = locks.get(plugin_name)
+def _provenance(plugin_name, manifest, lock, source_root, shared):
     if isinstance(lock, dict):
+        checksum = lock.get("checksum") or lock.get("treeSha256")
+        if checksum and not str(checksum).startswith("sha256:"):
+            checksum = f"sha256:{checksum}"
         return {
             "type": lock.get("type") or "git",
             "url": lock.get("url"),
             "ref": lock.get("ref"),
             "commit": lock.get("commit"),
-            "checksum": lock.get("checksum"),
+            "checksum": checksum,
             "license": lock.get("license") or manifest.get("license"),
             "installedAt": lock.get("installedAt"),
             "validatedAt": lock.get("validatedAt"),
-            "pinned": bool(lock.get("commit")),
+            "validationStatus": lock.get("validationStatus"),
+            "reviewNote": lock.get("reviewNote"),
+            # Two different claims, kept apart. The checksum is what pins the
+            # tree — it is recomputed from the files on disk. The commit says
+            # where those files came from, and `commitVerified` says whether
+            # FDE fetched them itself or is repeating what the importer wrote.
+            "commitVerified": bool(lock.get("commitVerified")),
+            "pinned": bool(lock.get("commit") and checksum),
         }
     builtin = plugin_name == BUILTIN_PLUGIN
     return {
@@ -279,8 +301,9 @@ def _provenance(plugin_name, manifest, locks, source_root, shared):
         "url": None, "ref": None, "commit": None, "checksum": None,
         "license": manifest.get("license"),
         "installedAt": None, "validatedAt": None,
-        # An external plugin with no lock entry is unpinned, and says so. It is
-        # not silently treated as if somebody had pinned it.
+        "validationStatus": None, "reviewNote": None, "commitVerified": False,
+        # An external plugin with no lock is unpinned, and says so. It is not
+        # silently treated as if somebody had pinned it.
         "pinned": builtin,
     }
 
@@ -469,7 +492,6 @@ def _script_items(plugin_root, *, namespace, plugin, origin, shared, provenance)
 
 def _plugin_items(shared, warnings):
     root = plugins_root(shared)
-    locks = _load_locks(shared)
     items = []
     try:
         entries = sorted(root.iterdir(), key=lambda p: p.name)
@@ -500,7 +522,7 @@ def _plugin_items(shared, warnings):
         namespace = plugin_namespace(plugin)
         origin = ("built-in" if plugin == BUILTIN_PLUGIN
                   else "external" if namespace in PINNED_NAMESPACES else "user")
-        provenance = _provenance(plugin, manifest, locks, entry, shared)
+        provenance = _provenance(plugin, manifest, load_plugin_lock(entry), entry, shared)
         if origin == "external" and not provenance["pinned"]:
             errors.append("an external plugin with no recorded commit is not pinned")
         runtime_dependencies = set()
@@ -768,6 +790,23 @@ def validate_template(template):
                 if not valid_id(cid):
                     raise CapabilityError("invalid-template",
                                           f"stage {stage['name']!r} names {cid!r}, which is not a capability id")
+    ponytail = template.get("ponytail")
+    if ponytail is not None:
+        if not isinstance(ponytail, dict) or not isinstance(ponytail.get("modes"), list):
+            raise CapabilityError("invalid-template", "the ponytail block declares no modes")
+        modes = ponytail["modes"]
+        if ponytail.get("defaultMode") not in modes:
+            raise CapabilityError("invalid-template",
+                                  f"ponytail defaultMode {ponytail.get('defaultMode')!r} is not one of {modes}")
+        for stage in stages:
+            mode = stage.get("ponytailMode")
+            if mode is not None and mode not in modes:
+                raise CapabilityError("invalid-template",
+                                      f"stage {stage['name']!r} asks for ponytail mode {mode!r}, "
+                                      f"which is not one of {modes}")
+    governance = template.get("governance")
+    if governance is not None and not isinstance(governance.get("neverOverridden"), list):
+        raise CapabilityError("invalid-template", "the governance block lists nothing it protects")
     return template
 
 
@@ -831,7 +870,13 @@ def template_defaults(template, stage=None, role="primary"):
 
 _EMPTY_CONFIG = {"schemaVersion": SCHEMA_VERSION, "global": {}, "workspaces": {},
                  "workflows": {}, "stages": {}, "roles": {}, "hookPayloads": {},
-                 "legacySpellings": {}, "legacyDigest": None}
+                 "settings": {}, "legacySpellings": {}, "legacyDigest": None}
+
+# Some things a stage needs are not on/off — Ponytail's mode is lite, full,
+# ultra or off, and an MCP's permission scope is a set. They are configured at
+# the same scopes and resolved by the same precedence walk as capabilities, so
+# they live beside them rather than in a second configuration system.
+SETTING_KEY = re.compile(r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9-]*){1,3}$")
 
 # scope string -> (document section, key or None)
 _SCOPE_SECTIONS = {"workspace": "workspaces", "workflow": "workflows",
@@ -860,6 +905,19 @@ def _write_json_atomic(path, data, mode=0o600):
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+def _clean_settings(raw, where):
+    if not isinstance(raw, dict):
+        raise CapabilityError("invalid-config", f"{where} is not an object of settings.")
+    out = {}
+    for key, value in raw.items():
+        if not SETTING_KEY.match(str(key)):
+            raise CapabilityError("invalid-config", f"{where} names {key!r}, which is not a setting.")
+        if not isinstance(value, (str, int, float, bool, list)):
+            raise CapabilityError("invalid-config", f"{where} gives {key} an unusable value.")
+        out[key] = value
+    return out
 
 
 def _clean_states(raw, where):
@@ -966,6 +1024,18 @@ class Config:
         for role in doc["roles"]:
             if role not in ROLES:
                 raise CapabilityError("invalid-config", f"{target}: {role!r} is not a role.")
+        settings = raw.get("settings", {})
+        if not isinstance(settings, dict):
+            raise CapabilityError("invalid-config", f"{target}: settings is not an object.")
+        doc["settings"] = {}
+        for layer, block in settings.items():
+            if layer == "global":
+                doc["settings"]["global"] = _clean_settings(block, "settings/global")
+                continue
+            if layer not in ("workspaces", "workflows", "stages", "roles") or not isinstance(block, dict):
+                raise CapabilityError("invalid-config", f"{target}: settings/{layer} is not a scope.")
+            doc["settings"][layer] = {key: _clean_settings(value, f"settings/{layer}/{key}")
+                                      for key, value in block.items()}
         payloads = raw.get("hookPayloads", {})
         doc["hookPayloads"] = payloads if isinstance(payloads, dict) else {}
         spellings = raw.get("legacySpellings", {})
@@ -991,12 +1061,43 @@ class Config:
             return {}
         return dict(self.doc[section].get(key, {}))
 
+    def setting_section(self, layer, key=None):
+        settings = self.doc.get("settings", {})
+        if layer == "global":
+            return dict(settings.get("global", {}))
+        section = _SCOPE_SECTIONS.get(layer)
+        if section is None or key is None:
+            return {}
+        return dict(settings.get(section, {}).get(key, {}))
+
+    def set_setting(self, name, value, scope="global"):
+        if not SETTING_KEY.match(str(name)):
+            raise CapabilityError("invalid-setting", f"{name!r} is not a setting name.")
+        kind, key = parse_scope(scope)
+        if kind == "run":
+            raise CapabilityError("wrong-store", "A run setting is stored with the run.")
+        settings = self.doc.setdefault("settings", {})
+        if kind == "global":
+            target = settings.setdefault("global", {})
+        else:
+            if kind == "role" and key not in ROLES:
+                raise CapabilityError("invalid-role", f"{key!r} is not a role.")
+            target = settings.setdefault(_SCOPE_SECTIONS[kind], {}).setdefault(key, {})
+        if value is None:
+            target.pop(name, None)
+        else:
+            target[name] = value
+        return self
+
     def explicit(self):
         """Every explicit decision, flattened, for export and for auditing."""
         out = {"global": dict(self.doc["global"])}
         for section in ("workspaces", "workflows", "stages", "roles"):
             if self.doc[section]:
                 out[section] = {key: dict(value) for key, value in self.doc[section].items()}
+        settings = {layer: block for layer, block in self.doc.get("settings", {}).items() if block}
+        if settings:
+            out["settings"] = settings
         return out
 
     # -- writing ------------------------------------------------------------
@@ -1042,6 +1143,7 @@ class Config:
                "stages": {k: v for k, v in self.doc["stages"].items() if v},
                "roles": {k: v for k, v in self.doc["roles"].items() if v},
                "hookPayloads": self.doc["hookPayloads"],
+               "settings": {layer: block for layer, block in self.doc.get("settings", {}).items() if block},
                "legacySpellings": self.doc["legacySpellings"],
                "legacyDigest": self.doc["legacyDigest"]}
         _write_json_atomic(config_file(self.shared), doc)
@@ -1217,6 +1319,19 @@ def _decide(cid, *, security, layers, builtin_default, unlisted):
     return DISABLED, "not-selected", "default", INHERIT
 
 
+def _template_settings(template, stage):
+    """Layer 8 for settings: what the template says for this stage."""
+    settings = {}
+    ponytail = template.get("ponytail") if template else None
+    if isinstance(ponytail, dict):
+        settings["ponytail.mode"] = ponytail.get("defaultMode", "off")
+        if stage:
+            for entry in template["stages"]:
+                if entry["name"] == stage and entry.get("ponytailMode") is not None:
+                    settings["ponytail.mode"] = entry["ponytailMode"]
+    return settings
+
+
 def resolve(catalog, config, *, workflow=None, stage=None, role="primary", workspace=None,
             run_overrides=None, security=None, template=None):
     """The effective configuration, and why each answer is what it is.
@@ -1294,11 +1409,62 @@ def resolve(catalog, config, *, workflow=None, stage=None, role="primary", works
         if entry["state"] == ENABLED and not entry["active"]:
             degraded.append({"id": cid, "ref": entry["ref"], "reason": entry["reason"]})
 
+    # Settings take the same precedence walk as capabilities, so "the reviewer
+    # runs Ponytail in lite mode on this one run" is expressible in the same
+    # way, at the same scopes, with the same audit trail.
+    setting_layers = [
+        ("role", config.setting_section("role", role)),
+        ("stage", config.setting_section("stage", f"{workflow}/{stage}" if workflow and stage else None)),
+        ("workflow", config.setting_section("workflow", workflow)),
+        ("workspace", config.setting_section("workspace", workspace)),
+        ("global", config.setting_section("global")),
+    ]
+    defaults = _template_settings(template, stage)
+    settings = {}
+    for name in sorted(set(defaults) | {key for _layer, block in setting_layers for key in block}):
+        for layer, block in setting_layers:
+            if name in block:
+                settings[name] = {"value": block[name], "layer": layer, "overridden": True}
+                break
+        else:
+            settings[name] = {"value": defaults.get(name), "layer": "builtin", "overridden": False}
+
+    # A mode only means anything while the plugin it belongs to is actually
+    # usable. Reporting "full" for a stage where Ponytail is switched off would
+    # be a number with nothing behind it.
+    if "ponytail.mode" in settings:
+        # The mode is read by the plugin's hooks, so it means something wherever
+        # the plugin is on and something of its own is running — the core skill
+        # during implementation, the review skill during QA.
+        plugin_active = next((entry["active"] for entry in resolved.values()
+                              if entry["id"] == "plugin:ponytail"), False)
+        any_skill = any(entry["active"] for entry in resolved.values()
+                        if entry["namespace"] == "ponytail" and entry["kind"] == "skill")
+        if not (plugin_active and any_skill):
+            settings["ponytail.mode"] = {"value": "off", "layer": "unavailable",
+                                         "overridden": False,
+                                         "reason": "Ponytail is not switched on for this stage."}
+
     # A bundle that names something this installation does not have is reported,
     # never invented. The stage runs degraded and says what is missing.
     missing = [{"id": cid, "reason": "not installed"}
                for cid, state in sorted(builtin.items())
                if state == ENABLED and cid not in catalog.items]
+
+    # A bundle that switches on a skill without switching on the plugin that
+    # supplies it is a template mistake, and the parent cascade would otherwise
+    # swallow it as a quiet "not selected". Named, so it gets fixed.
+    inconsistent = []
+    for cid, state in sorted(builtin.items()):
+        if state != ENABLED or cid not in catalog.items:
+            continue
+        item = catalog.items[cid]
+        if item["kind"] == "plugin" or item["plugin"] is None:
+            continue
+        parent = make_id("plugin", item["namespace"])
+        if parent in resolved and resolved[parent]["state"] != ENABLED:
+            inconsistent.append({"id": cid, "parent": parent,
+                                 "reason": f"the bundle enables it but leaves {parent} off"})
 
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -1308,10 +1474,13 @@ def resolve(catalog, config, *, workflow=None, stage=None, role="primary", works
         "role": role,
         "workspace": workspace,
         "securityPolicy": security.get("source"),
+        "settings": settings,
+        "governance": (template or {}).get("governance"),
         "capabilities": [resolved[cid] for cid in sorted(resolved)],
         "enabled": sorted(cid for cid, entry in resolved.items() if entry["active"]),
         "degraded": degraded,
         "missing": missing,
+        "inconsistent": inconsistent,
         "warnings": list(catalog.warnings),
     }
 
@@ -1352,6 +1521,11 @@ def snapshot_document(resolution, catalog, *, run_id, role):
         "workflowRevision": resolution["workflowRevision"],
         "stage": resolution["stage"],
         "securityPolicy": resolution["securityPolicy"],
+        # The mode a plugin ran in and the governance it ran under are part of
+        # what the run was allowed to do. A snapshot that records the capability
+        # list but not "Ponytail was in ultra mode" does not reproduce the run.
+        "settings": resolution.get("settings", {}),
+        "governance": resolution.get("governance"),
         "capabilities": entries,
         "decisions": decisions,
         "degraded": resolution["degraded"],
@@ -1451,6 +1625,9 @@ def import_config(config, document, *, replace=True):
         raise CapabilityError("invalid-import", "The export has no config object.")
     incoming = {"global": _clean_states(body.get("global", {}), "global"),
                 "workspaces": {}, "workflows": {}, "stages": {}, "roles": {}}
+    incoming_settings = body.get("settings", {})
+    if not isinstance(incoming_settings, dict):
+        raise CapabilityError("invalid-import", "The export's settings are not an object.")
     for section in ("workspaces", "workflows", "stages", "roles"):
         block = body.get(section, {})
         if not isinstance(block, dict):
@@ -1463,11 +1640,22 @@ def import_config(config, document, *, replace=True):
     if replace:
         for section in ("global", "workspaces", "workflows", "stages", "roles"):
             config.doc[section] = incoming[section] if section != "global" else dict(incoming["global"])
+        config.doc["settings"] = {}
     else:
         config.doc["global"].update(incoming["global"])
         for section in ("workspaces", "workflows", "stages", "roles"):
             for key, states in incoming[section].items():
                 config.doc[section].setdefault(key, {}).update(states)
+    for layer, block in incoming_settings.items():
+        if layer == "global":
+            config.doc.setdefault("settings", {}).setdefault("global", {}).update(
+                _clean_settings(block, "settings/global"))
+            continue
+        if layer not in ("workspaces", "workflows", "stages", "roles") or not isinstance(block, dict):
+            raise CapabilityError("invalid-import", f"The export's settings/{layer} is not a scope.")
+        for key, value in block.items():
+            config.doc.setdefault("settings", {}).setdefault(layer, {}).setdefault(key, {}).update(
+                _clean_settings(value, f"settings/{layer}/{key}"))
     payloads = document.get("hookPayloads")
     if isinstance(payloads, dict):
         config.doc["hookPayloads"].update(payloads)
