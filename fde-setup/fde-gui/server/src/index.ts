@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     [
       '',
-      '  FDE Control Center — local agent workspace',
+      '  FLOW — Forward-deployed Local Operations Workspace',
       `  runs      ${config.runsRoot}`,
       `  projects  ${config.projectsRoot}`,
       `  chats     ${config.chatsRoot}`,

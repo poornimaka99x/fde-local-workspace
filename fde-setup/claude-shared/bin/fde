@@ -60,6 +60,13 @@ for _lib in (_here.parent / "lib",
 try:
     import fde_mcp  # noqa: E402
     import fde_mcp_commands  # noqa: E402
+    # Capabilities have the property the MCP catalogue has: `fde`, `fde-start`,
+    # `mcp-sync` and the console must all answer "may this run use X" the same
+    # way, so discovery and resolution live in one library rather than in each
+    # caller. See docs/FDE-CAPABILITY-MODEL.md.
+    import fde_capabilities  # noqa: E402
+    import fde_capability_commands  # noqa: E402
+    import fde_plugin_import  # noqa: E402
 except ImportError as _exc:  # pragma: no cover — an install missing half of itself
     sys.exit(f"fde: the MCP catalogue library is missing ({_exc}).\n"
              f"       It belongs at {_here.parent / 'lib' / 'fde_mcp.py'}.\n"
@@ -80,7 +87,12 @@ CONNECTION_SECRETS_DIR = pathlib.Path(os.environ.get(
 MCP_SRC = SHARED / "mcp" / "mcp-servers.json"
 TOOLKIT_ROOT = pathlib.Path(os.environ.get(
     "FDE_TOOLKIT_ROOT", SHARED / "fde-toolkit" / "plugins" / "fde-core"))
+# The v1 boolean policy. Read once and migrated into CAPABILITY_CONFIG, which
+# is three-valued so an upgrade can tell "the operator switched this off" apart
+# from "the operator never said".
 CAPABILITY_POLICY = SHARED / "config" / "capability-policy.json"
+CAPABILITY_CONFIG = SHARED / "config" / "capability-config.json"
+WORKFLOWS_DIR = SHARED / "config" / "workflows"
 
 ATLASSIAN_MCP_URL = "https://mcp.atlassian.com/v2/mcp"
 
@@ -5419,6 +5431,42 @@ def cmd_plan(args):
                             amend and (run.plan() or {}).get("approvalRequired"))))
 
 
+CAPABILITY_CONTRACTS = [
+    "capabilities --json",
+    "capabilities show --json",
+    "capabilities validate --json",
+    "capabilities snapshot --json",
+    "config show --json",
+    "config set --scope",
+    "config reset --scope",
+    "config export --json",
+    "config import",
+    "workflows --json",
+    "workflow show --json",
+    "plugins list --json",
+    "plugins show --json",
+    "plugins add --commit --include --json",
+    "plugins update --commit --json",
+    "plugins verify --json",
+    "plugins rollback --json",
+    "plugins remove --json",
+]
+
+CAPABILITY_CAPABILITIES = [
+    "capabilities.catalog.v1",
+    "capabilities.provenance",
+    "capabilities.validate",
+    "capabilities.snapshot",
+    "config.inheritance.v1",
+    "config.scopes",
+    "config.export-import",
+    "workflow.templates.v1",
+    "plugins.import.v1",
+    "plugins.pinning",
+    "plugins.verify",
+    "plugins.rollback",
+]
+
 CONTRACTS = [
     "list --json",
     "routing preview --json",
@@ -5426,6 +5474,7 @@ CONTRACTS = [
     "routing outcome --json",
     "routing report --json",
     "design-panel create --routing --strategy",
+    *CAPABILITY_CONTRACTS,
     "routing propose --json",
     "routing show --json",
     "routing explain --json",
@@ -5490,7 +5539,7 @@ def cmd_version(args):
         # Capability strings exist so a client can ask "can this controller do
         # X" instead of parsing a version and guessing. They are additive: a
         # capability is added when its contract ships and never repurposed.
-        "capabilities": ROUTING_CAPABILITIES,
+        "capabilities": ROUTING_CAPABILITIES + CAPABILITY_CAPABILITIES,
         "routingPolicy": _routing_policy_capability(),
     }
     if getattr(args, "json", False):
@@ -13295,6 +13344,31 @@ def _mcp_event(kind, **fields):
                  {"at": iso(), "event": kind, **fde_mcp.redact(fields)})
 
 
+def _capability_event(kind, **fields):
+    """A capability snapshot belongs to its run; anything else to the install.
+
+    Same rule as the MCP record: what was decided and why, never an argument and
+    never a credential."""
+    run_id = fields.get("runId")
+    record = {"at": iso(), "event": kind, **fde_mcp.redact(fields)}
+    if run_id:
+        try:
+            append_jsonl(Run(run_id).events_path, record)
+            return
+        except SystemExit:
+            pass
+    append_jsonl(SHARED / "config" / "capability-events.jsonl", record)
+
+
+def _capability_run_dir(run_id):
+    """The one safe run id -> directory conversion, shared rather than repeated.
+
+    Run() is where "a run id is a name, never a path" is enforced. The command
+    layer asks for it instead of writing that check a second time and getting
+    it subtly wrong."""
+    return Run(run_id).dir
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="fde", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -13308,6 +13382,14 @@ def main(argv=None):
     # into a second, more generous opinion of what a run may reach.
     fde_mcp_commands.EVENT_HOOK = _mcp_event
     fde_mcp_commands.register(sub)
+
+    # ---- capabilities, configuration and workflow templates -------------
+    # What is installed, what the operator has switched off, and which of it a
+    # given workflow, stage and role may use. The console reads these and
+    # writes nothing of its own.
+    fde_capability_commands.EVENT_HOOK = _capability_event
+    fde_capability_commands.RUN_DIR_RESOLVER = _capability_run_dir
+    fde_capability_commands.register(sub)
 
     # ---- accounts -------------------------------------------------------
     # An account is a provider plus a name plus a credential directory. This

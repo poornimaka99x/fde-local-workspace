@@ -4,7 +4,7 @@ import { z } from 'zod'
  * The governed MCP catalogue, as the controller reports it.
  *
  * Four words mean four different things here and the console must never blur
- * them: a server is in the *catalogue* (FDE knows how to run it), *configured*
+ * them: a server is in the *catalogue* (FLOW knows how to run it), *configured*
  * (the operator supplied what it needs), *ready* (available, configured and
  * verified) or *active* (part of a specific run or chat's effective set).
  * Nothing in this file ever carries a credential value — only whether one is

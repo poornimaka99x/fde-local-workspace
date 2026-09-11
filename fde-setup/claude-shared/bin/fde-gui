@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the FDE Control Center — the local operator console for this toolkit.
+# Start FLOW (Forward-deployed Local Operations Workspace) — the local operator console for this toolkit.
 #
 #   fde-gui                 build if needed, start, open the browser
 #   fde-gui --port 7400     listen somewhere else
@@ -84,7 +84,7 @@ if (( OPEN )); then
   ) &
 fi
 
-say "FDE Control Center on http://127.0.0.1:$PORT"
+say "FLOW on http://127.0.0.1:$PORT"
 note "runs      ${FDE_RUNS_DIR:-$SHARED/runs}"
 note "stop with Ctrl-C; a running orchestrator session is hung up with it"
 FDE_GUI_TOKEN="$token" FDE_GUI_PORT="$PORT" exec npx tsx server/src/index.ts

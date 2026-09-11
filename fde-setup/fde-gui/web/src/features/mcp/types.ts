@@ -130,7 +130,7 @@ export function mcpStateClass(state: McpLifecycle): string {
 
 /**
  * The one sentence that matters on a card: what this server can do to the world
- * once it is active, and whether FDE can prove the limit.
+ * once it is active, and whether FLOW can prove the limit.
  */
 export function mcpScopeSummary(server: McpServer): string {
   if (server.mutation === 'read-only') return 'Read-only'

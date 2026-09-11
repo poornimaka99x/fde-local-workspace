@@ -20,7 +20,7 @@ import { SessionManager, type SpawnTerminal } from '../../server/src/services/se
 import { ChangeWatcher } from '../../server/src/services/watch'
 
 /**
- * Every server test runs against a throwaway FDE root and a stub controller.
+ * Every server test runs against a throwaway FLOW root and a stub controller.
  * Nothing here reads or writes the operator's real ~/.claude-shared, profiles,
  * credentials or runs, and no real `fde`, `claude` or `codex` is ever executed.
  */

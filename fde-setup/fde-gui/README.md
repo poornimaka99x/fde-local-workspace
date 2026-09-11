@@ -1,11 +1,21 @@
-# FDE Control Center
+# FLOW
 
-A local workspace for the `fde` controller and configured Claude Code accounts.
+**F**orward-deployed **L**ocal **O**perations **W**orkspace — a local console for the `fde` controller and configured Claude Code accounts.
 
 It shows projects, runs, plans, roles, approvals, checkpoints, events, input
 attachments, artifacts and output-hygiene evidence. It can create a project,
 edit one, create a run and attach a file — each one a controller command, with
-the console writing nothing itself.
+the console writing no controller-owned run state itself. Reusable system
+profiles and the index that identifies which executor created a run live under
+`~/.claude-shared/config`; lifecycle state remains controller-owned.
+
+The **Systems** screen exposes **Forward Deployed Engineer** as a first-class
+system. It has named, versioned configurations, a dedicated start wizard and a
+separate run history. Its executor starts the controller's full lifecycle by
+default, from business intent through observability, while retaining the
+controller's role selection and exact approval gates. A configuration can turn
+stages off, choose its default orchestrator, and point to the existing
+capability catalogue for skill, sub-agent, MCP, tool, plugin and hook controls.
 
 It can also resume a Claude-led run: Resume starts exactly
 `fde-start --resume <run-id>` in an embedded terminal, one process per run, and
@@ -18,7 +28,7 @@ recommendation. The console runs the accounts; the controller owns the sealed
 context, the participant lifecycle, the information barrier and every artifact.
 See `docs/FDE-DESIGN-PANEL.md`.
 
-General chats are deliberately separate from FDE runs. A chat stores its own
+General chats are deliberately separate from FLOW runs. A chat stores its own
 metadata and messages under `~/.claude-shared/chats`, resumes one opaque Claude
 conversation, and starts Claude in restricted plan mode with permission prompts
 denied. Tools remain disabled unless the user explicitly selects an OAuth MCP
@@ -31,7 +41,7 @@ never receives a password, OAuth token or credential file.
 Old records can be removed from their list with an explicit confirmation.
 Deleting a chat moves its JSON record to `~/.claude-shared/chats/.trash` and
 never touches attached source files. Deleting a finished console session only
-forgets its in-memory terminal history; it does not delete the FDE run. Deleting
+forgets its in-memory terminal history; it does not delete the FLOW run. Deleting
 a run is controller-owned and moves its complete directory, including inputs,
 events and artifacts, to `~/.claude-shared/runs/.trash`; a running terminal or
 design-panel worker must be stopped first. Deleting a project is also
@@ -95,7 +105,7 @@ tab and sends it as a bearer header. A new launch invalidates the old link.
 | `FDE_GUI_HOST` | `127.0.0.1` | loopback only; any other value is refused |
 | `FDE_GUI_TOKEN` | random | fixed token, for tests and scripted launches |
 | `FDE_CONTROLLER` | `$CLAUDE_SHARED/bin/fde` | the controller binary |
-| `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `FDE_CHATS_DIR`, `CLAUDE_PROFILES_DIR` | as the controller's | which FDE roots to use |
+| `CLAUDE_SHARED`, `FDE_RUNS_DIR`, `FDE_PROJECTS_DIR`, `FDE_CHATS_DIR`, `CLAUDE_PROFILES_DIR` | as the controller's | which FLOW roots to use |
 | `FDE_CLAUDE_BIN` | `claude` from `PATH` | native Claude Code CLI used for status, login, chat and design panels |
 | `FDE_GUI_PANEL_TIMEOUT_MS` | `900000` | wall-clock ceiling for one design-panel participant |
 | `FDE_GUI_PANEL_CONCURRENCY` | `3` | participant subprocesses at once; may only be lowered |
@@ -132,7 +142,7 @@ The rules it is built to:
   machine, no cache of approvals, and no opinion about whether a run is finished.
 - **Spawn, never shell.** `execFile` with an argument array. Run and project ids
   are pattern-checked before they go anywhere near `argv`, and the child gets
-  only the environment the FDE profiles need.
+  only the environment the FLOW profiles need.
 - **Loopback only, token on every API call**, plus `Origin`/`Sec-Fetch-Site`
   checks. There is no CORS.
 - **Files are read inside one run or not at all.** The run directory itself must
@@ -164,7 +174,7 @@ The rules it is built to:
   rendered by building React elements — the app contains no `innerHTML` anywhere.
 - **Malformed data is shown, not swallowed.** A half-written JSONL line becomes a
   warning banner; the rest of the run still renders.
-- **Changes are narrow and honest.** FDE mutations map to controller commands;
+- **Changes are narrow and honest.** FLOW mutations map to controller commands;
   chat and account actions have their own validated stores and fixed commands.
   A change needs an `Origin` as well as the token; uploads go
   to `fde attach --stdin --name`, so a browser filename never becomes a path; and
@@ -189,7 +199,7 @@ The rules it is built to:
   browser, and never logs provider output — only an exit code. Three
   participants at most, each with a timeout, an output ceiling and a real kill
   on Stop; work orphaned by a restart becomes a retryable interruption.
-- **General chat has no FDE authority.** Claude starts with `--restricted`,
+- **General chat has no FLOW authority.** Claude starts with `--restricted`,
   `--strict-mcp-config`, `--tools ""`, `--permission-prompts none`,
   `--no-chrome`, disabled slash commands and plan-only permissions. This keeps
   profile OAuth/Keychain login available without loading run-scoped MCP tools.
@@ -232,7 +242,7 @@ npm run typecheck
 npm test
 ```
 
-Server tests run against a temporary FDE root and a stub controller; component
+Server tests run against a temporary FLOW root and a stub controller; component
 tests run in jsdom. Nothing in the suite reads or writes the operator's real
 `~/.claude-shared`, profiles, credentials or runs, and no real `fde`, `claude` or
 `codex` process is ever started.

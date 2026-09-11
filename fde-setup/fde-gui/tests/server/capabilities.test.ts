@@ -11,7 +11,7 @@ function seedCore(harness: Harness): void {
   mkdirSync(path.join(root, 'hooks'), { recursive: true })
   mkdirSync(path.join(harness.config.sharedRoot, 'mcp'), { recursive: true })
   writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'fde-core', version: '0.4.0', description: 'Core FDE capabilities.',
+    name: 'fde-core', version: '0.4.0', description: 'Core FLOW capabilities.',
   }))
   writeFileSync(path.join(root, 'skills', 'implementation', 'SKILL.md'), [
     '---', 'name: implementation', 'description: Implement an approved change.',

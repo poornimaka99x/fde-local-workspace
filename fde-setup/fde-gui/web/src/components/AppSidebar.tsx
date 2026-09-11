@@ -122,8 +122,8 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
       <Link to="/runs" className="brand">
         <Icon name="spark" size={18} className="spark" />
         <span>
-          FDE Control Center
-          <small>local agent workspace</small>
+          FLOW
+          <small>Forward-deployed Local Operations Workspace</small>
         </span>
       </Link>
 
@@ -133,6 +133,7 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
           New run
         </Link>
         <div className="rail-quick" style={{ marginTop: 8 }}>
+          <Link to="/systems/forward-deployed-engineer/new">New FDE lifecycle</Link>
           <Link to="/chats/new">New chat</Link>
           <Link to="/design-panel/new">Design panel</Link>
         </div>
@@ -216,6 +217,10 @@ export function AppSidebar({ path }: { path: string }): JSX.Element {
       </div>
 
       <div className="rail-section rail-footer">
+        <Link to="/systems" className="rail-item" current={path.startsWith('/systems')}>
+          <Icon name="spark" className="rail-icon" />
+          <span className="rail-label">Systems</span>
+        </Link>
         <Link to="/runs" className="rail-item" current={path === '/runs'}>
           <Icon name="run" className="rail-icon" />
           <span className="rail-label">All runs</span>

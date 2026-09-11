@@ -62,7 +62,7 @@ async function readPolicy(config: GuiConfig): Promise<CapabilityPolicy> {
   try {
     const raw = await jsonFile(policyPath(config)) as Partial<CapabilityPolicy>
     if (!raw || raw.schemaVersion !== 1 || !Array.isArray(raw.disabled)) {
-      throw new Error('The capability policy is invalid; FDE will not silently enable capabilities.')
+      throw new Error('The capability policy is invalid; FLOW will not silently enable capabilities.')
     }
     const hooks = raw.disabledHooks && typeof raw.disabledHooks === 'object'
       ? raw.disabledHooks as Record<string, DisabledHook> : {}
@@ -185,7 +185,7 @@ async function pluginItems(config: GuiConfig, warnings: string[]): Promise<Capab
       tools: [],
       enabled: true,
       toggleable: manifest.name !== 'fde-core',
-      ...(manifest.name === 'fde-core' ? { disabledReason: 'fde-core is required by the FDE control plane.' } : {}),
+      ...(manifest.name === 'fde-core' ? { disabledReason: 'fde-core is required by the FLOW control plane.' } : {}),
       ...(manifest.version ? { detail: `Version ${manifest.version}` } : {}),
     })
     for (const [directory, kind] of [
@@ -278,7 +278,7 @@ export async function readCapabilityCatalog(config: GuiConfig): Promise<Capabili
     const inherited = item.plugin !== null && item.kind !== 'plugin' && disabledPlugins.has(item.plugin)
     if (disabled.has(item.id) || inherited) {
       item.enabled = false
-      item.disabledReason = inherited ? `The ${item.plugin} plugin is switched off.` : 'Switched off in the FDE capability policy.'
+      item.disabledReason = inherited ? `The ${item.plugin} plugin is switched off.` : 'Switched off in the FLOW capability policy.'
       if (inherited) item.toggleable = false
     }
     if (item.kind === 'command' || item.kind === 'script') {
@@ -331,15 +331,15 @@ async function ensureMarketplace(config: GuiConfig, manifest: PluginManifest): P
   try {
     const raw = await jsonFile(target) as typeof marketplace
     marketplace = { name: typeof raw.name === 'string' ? raw.name : 'fde-toolkit',
-      owner: raw.owner && typeof raw.owner.name === 'string' ? raw.owner : { name: 'FDE user' },
+      owner: raw.owner && typeof raw.owner.name === 'string' ? raw.owner : { name: 'FLOW user' },
       plugins: Array.isArray(raw.plugins) ? raw.plugins : [] }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('The existing marketplace.json is invalid; it was left unchanged.')
-    marketplace = { name: 'fde-toolkit', owner: { name: 'FDE user' }, plugins: [] }
+    marketplace = { name: 'fde-toolkit', owner: { name: 'FLOW user' }, plugins: [] }
   }
   if (!marketplace.plugins.some((plugin) => plugin.name === manifest.name)) {
     marketplace.plugins.push({ name: manifest.name, source: `./plugins/${manifest.name}`,
-      description: manifest.description ?? 'User-provided FDE plugin.' })
+      description: manifest.description ?? 'User-provided FLOW plugin.' })
   }
   const temporary = `${target}.${randomUUID()}.tmp`
   await writeFile(temporary, `${JSON.stringify(marketplace, null, 2)}\n`, { mode: 0o600 })
@@ -353,7 +353,7 @@ export async function createUserSkill(config: GuiConfig, input: {
   const skillRoot = path.join(pluginRoot, 'skills', input.name)
   await mkdir(path.join(pluginRoot, '.claude-plugin'), { recursive: true })
   const manifest: PluginManifest = { name: 'fde-user', version: '1.0.0',
-    description: 'User-defined skills managed from the FDE Control Center.' }
+    description: 'User-defined skills managed from FLOW.' }
   await mkdir(path.join(pluginRoot, 'skills'), { recursive: true })
   try { await access(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), constants.F_OK) } catch {
     await writeFile(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 })

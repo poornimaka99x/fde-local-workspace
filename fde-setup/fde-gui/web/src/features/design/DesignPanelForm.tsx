@@ -291,7 +291,7 @@ export function DesignPanelForm({ projectId }: { projectId?: string }): JSX.Elem
       <h1>Start a design panel</h1>
       <p className="lede">
         Two or three Claude accounts are given the same sealed project context, work
-        independently, and are then reconciled into one recommendation. It is a normal FDE run:
+        independently, and are then reconciled into one recommendation. It is a normal FLOW run:
         it appears in the project, it needs your plan and role approval, and every account keeps
         its own credentials.
       </p>
