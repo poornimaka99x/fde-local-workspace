@@ -1,0 +1,2110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FLOW Operations Workspace — Forward-deployed Local Operations Workspace</title>
+<meta name="description" content="FLOW is a local console and controller for governed, multi-agent delivery work through Claude Code, Codex, Gemini and Microsoft Copilot.">
+<meta property="og:title" content="FLOW — Forward-deployed Local Operations Workspace">
+<meta property="og:description" content="Several AI coding agents, one governed lifecycle, and not a single boundary crossed without you saying so.">
+<meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{color-scheme:light dark}
+  html,body{margin:0}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<style>
+/* ============================================================
+   FLOW — launch page
+   Palette derives from the console's own design tokens.
+   ============================================================ */
+
+:root{
+  /* page */
+  --bg:#faf9f5;
+  --bg-sunk:#f2f0e8;
+  --surface:#ffffff;
+  --border:#e5e3d9;
+  --border-strong:#d5d2c5;
+  --ink:#1f1e1d;
+  --ink-muted:#6f6e68;
+  --ink-subtle:#91908a;
+  --accent:#b0553a;
+  --accent-deep:#8e4028;
+  --accent-wash:#f6ebe5;
+  --ok:#2c6e49;
+  --ok-wash:#e8f2ec;
+  --warn:#8a5a12;
+  --warn-wash:#faf0dd;
+  --danger:#a03530;
+  --danger-wash:#fbeceb;
+
+  /* console inset — deliberately fixed in both themes, like a screenshot */
+  --c-bg:#262624;
+  --c-rail:#1f1e1c;
+  --c-surface:#2e2d2a;
+  --c-surface-2:#353431;
+  --c-border:#3d3c38;
+  --c-ink:#f5f4ee;
+  --c-muted:#a5a29a;
+  --c-subtle:#7e7c75;
+  --c-accent:#d97757;
+  --c-ok:#7fbe9b;
+  --c-ok-bg:#22332a;
+  --c-warn:#e0b467;
+  --c-warn-bg:#352b18;
+
+  --display:"Newsreader","Iowan Old Style",Palatino,Georgia,ui-serif,serif;
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  --measure:66ch;
+  --wide:1080px;
+  --r:10px;
+  --r-lg:14px;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1a1917;
+    --bg-sunk:#141311;
+    --surface:#232220;
+    --border:#34322e;
+    --border-strong:#45433d;
+    --ink:#f2f1ea;
+    --ink-muted:#a29f96;
+    --ink-subtle:#807d75;
+    --accent:#d97757;
+    --accent-deep:#e89a7f;
+    --accent-wash:#33231c;
+    --ok:#7fbe9b;
+    --ok-wash:#1d2c24;
+    --warn:#e0b467;
+    --warn-wash:#2f2718;
+    --danger:#e08a83;
+    --danger-wash:#33201e;
+  }
+}
+
+:root[data-theme="dark"]{
+  --bg:#1a1917;
+  --bg-sunk:#141311;
+  --surface:#232220;
+  --border:#34322e;
+  --border-strong:#45433d;
+  --ink:#f2f1ea;
+  --ink-muted:#a29f96;
+  --ink-subtle:#807d75;
+  --accent:#d97757;
+  --accent-deep:#e89a7f;
+  --accent-wash:#33231c;
+  --ok:#7fbe9b;
+  --ok-wash:#1d2c24;
+  --warn:#e0b467;
+  --warn-wash:#2f2718;
+  --danger:#e08a83;
+  --danger-wash:#33201e;
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---------- layout scaffolding ---------- */
+
+.wrap{
+  max-width:var(--wide);
+  margin-inline:auto;
+  padding-inline:24px;
+}
+@media (max-width:640px){ .wrap{padding-inline:16px} }
+
+.prose{max-width:var(--measure)}
+
+section{padding-block:clamp(56px,7vw,96px)}
+section + section{border-top:1px solid var(--border)}
+
+h1,h2,h3,h4{font-family:var(--display);font-weight:600;text-wrap:balance;margin:0}
+h2{font-size:clamp(1.75rem,3.4vw,2.5rem);line-height:1.15;letter-spacing:-0.01em}
+h3{font-size:1.3rem;line-height:1.3;margin-block:0}
+h4{font-size:1.02rem;font-family:var(--sans);font-weight:600;letter-spacing:0}
+p{margin:0}
+
+.eyebrow{
+  font-family:var(--mono);
+  font-size:.72rem;
+  font-weight:500;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--accent);
+  display:flex;
+  align-items:baseline;
+  gap:.7em;
+}
+.eyebrow::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:var(--border-strong);
+  transform:translateY(-.25em);
+}
+
+.stack{display:flex;flex-direction:column;gap:20px;min-width:0}
+.stack-lg{display:flex;flex-direction:column;gap:36px;min-width:0}
+.stack-sm{display:flex;flex-direction:column;gap:10px;min-width:0}
+.stack>*,.stack-lg>*,.stack-sm>*{min-width:0}
+.c-scroll{min-width:0}
+
+.lede{font-size:1.14rem;line-height:1.6;color:var(--ink-muted)}
+strong{font-weight:600;color:var(--ink)}
+a{color:var(--accent);text-underline-offset:3px;text-decoration-thickness:1px}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+
+code{
+  font-family:var(--mono);
+  font-size:.86em;
+  background:var(--bg-sunk);
+  border:1px solid var(--border);
+  border-radius:5px;
+  padding:.1em .38em;
+  word-break:break-word;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.topbar-inner{
+  max-width:var(--wide);margin-inline:auto;padding:10px 24px;
+  display:flex;align-items:center;gap:20px;
+}
+@media (max-width:640px){ .topbar-inner{padding-inline:16px} }
+.brandmark{
+  display:flex;align-items:center;gap:9px;
+  font-family:var(--display);font-weight:600;font-size:1.05rem;
+  letter-spacing:.02em;color:var(--ink);text-decoration:none;flex:none;
+}
+.brandmark .dot{
+  width:9px;height:9px;border-radius:50%;
+  background:var(--accent);flex:none;
+}
+.topnav{
+  display:flex;gap:18px;margin-left:auto;
+  font-size:.82rem;font-family:var(--mono);letter-spacing:.02em;
+  overflow-x:auto;scrollbar-width:none;
+}
+.topnav::-webkit-scrollbar{display:none}
+.topnav a{color:var(--ink-muted);text-decoration:none;white-space:nowrap}
+.topnav a:hover{color:var(--accent)}
+@media (max-width:1040px){
+  .topnav a:nth-child(2),.topnav a:nth-child(3),.topnav a:nth-child(5),
+  .topnav a:nth-child(7),.topnav a:nth-child(9),.topnav a:nth-child(10){display:none}
+}
+@media (max-width:760px){ .topnav{display:none} }
+
+/* ---------- hero ---------- */
+
+.hero{padding-block:clamp(48px,7vw,84px) clamp(44px,6vw,72px)}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(32px,5vw,64px);align-items:start}
+@media (max-width:900px){ .hero-grid{grid-template-columns:1fr;gap:40px} }
+
+.wordmark{
+  font-family:var(--display);
+  font-size:clamp(3.2rem,9vw,5.4rem);
+  line-height:.92;
+  font-weight:600;
+  letter-spacing:-0.02em;
+  margin:0;
+}
+.expansion{
+  font-family:var(--mono);
+  font-size:.78rem;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+  color:var(--ink-subtle);
+  margin-top:14px;
+}
+.expansion b{color:var(--accent);font-weight:500}
+
+.thesis{
+  font-family:var(--display);
+  font-size:clamp(1.3rem,2.4vw,1.65rem);
+  line-height:1.4;
+  margin-top:28px;
+  max-width:30ch;
+}
+
+.hero-meta{
+  display:flex;flex-wrap:wrap;gap:8px;margin-top:28px;
+}
+.tag{
+  font-family:var(--mono);font-size:.72rem;letter-spacing:.04em;
+  padding:4px 10px;border-radius:999px;
+  border:1px solid var(--border-strong);color:var(--ink-muted);
+  background:var(--surface);
+}
+.repo-link{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:var(--mono);font-size:.8rem;
+  padding:9px 15px;border-radius:8px;
+  background:var(--ink);color:var(--bg);
+  text-decoration:none;border:1px solid var(--ink);
+  max-width:100%;overflow-wrap:anywhere;
+}
+.repo-link:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+.repo-link svg{flex:none}
+
+/* the three phrases — the emotional core of the product */
+.gates{
+  display:flex;flex-direction:column;gap:0;
+  border:1px solid var(--border-strong);
+  border-radius:var(--r-lg);
+  background:var(--surface);
+  overflow:hidden;
+}
+.gates-head{
+  padding:14px 18px;
+  border-bottom:1px solid var(--border);
+  background:var(--bg-sunk);
+  font-family:var(--mono);font-size:.72rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-subtle);
+}
+.gate{
+  display:grid;grid-template-columns:auto 1fr;gap:4px 14px;
+  padding:16px 18px;
+  border-bottom:1px solid var(--border);
+}
+.gate:last-child{border-bottom:0}
+.gate-phrase{
+  grid-column:1/-1;
+  font-family:var(--mono);font-size:clamp(.82rem,1.7vw,.95rem);
+  font-weight:500;color:var(--accent-deep);
+  background:var(--accent-wash);
+  border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);
+  border-radius:6px;padding:7px 11px;
+  overflow-x:auto;white-space:nowrap;
+}
+.gate-note{grid-column:1/-1;font-size:.86rem;color:var(--ink-muted);line-height:1.5}
+.gates-foot{
+  padding:13px 18px;background:var(--bg-sunk);
+  border-top:1px solid var(--border);
+  font-size:.82rem;color:var(--ink-muted);
+}
+
+/* ---------- console recreation ---------- */
+
+.console{
+  background:var(--c-bg);
+  color:var(--c-ink);
+  border:1px solid var(--c-border);
+  border-radius:var(--r-lg);
+  overflow:hidden;
+  font-size:13px;
+  line-height:1.5;
+  box-shadow:0 14px 40px rgba(20,18,16,.16);
+}
+.console *{font-family:var(--sans)}
+.console .mono,.console code{font-family:var(--mono);background:none;border:0;padding:0}
+
+.c-chrome{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:9px 14px;
+  background:var(--c-rail);
+  border-bottom:1px solid var(--c-border);
+}
+.c-path{
+  font-family:var(--mono);font-size:11px;color:var(--c-subtle);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;
+}
+.c-pill{
+  font-size:10.5px;padding:2.5px 9px;border-radius:999px;
+  border:1px solid var(--c-border);color:var(--c-muted);flex:none;
+  font-family:var(--mono);letter-spacing:.02em;
+}
+.c-pill.ok{color:var(--c-ok);background:var(--c-ok-bg);border-color:transparent}
+.c-pill.warn{color:var(--c-warn);background:var(--c-warn-bg);border-color:transparent}
+
+.c-body{padding:18px 20px;display:flex;flex-direction:column;gap:16px}
+.c-title{font-family:var(--display)!important;font-size:20px;font-weight:600;line-height:1.2}
+.c-sub{color:var(--c-muted);font-size:12.5px;max-width:62ch}
+.c-kicker{
+  font-family:var(--mono)!important;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--c-accent);
+}
+
+.c-crumb{font-family:var(--mono)!important;font-size:11px;color:var(--c-subtle)}
+.c-crumb b{color:var(--c-accent);font-weight:400}
+
+.c-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--c-border);padding-bottom:12px}
+.c-tab{
+  font-size:12px;padding:5px 12px;border-radius:999px;
+  border:1px solid var(--c-border);color:var(--c-muted);white-space:nowrap;
+}
+.c-tab.on{background:var(--c-surface-2);color:var(--c-ink);border-color:#4c4a45}
+.c-tab .n{font-family:var(--mono);font-size:10px;color:var(--c-subtle);margin-left:5px}
+
+.c-card{
+  background:var(--c-surface);border:1px solid var(--c-border);
+  border-radius:var(--r);padding:14px 16px;
+}
+.c-cmd{
+  font-family:var(--mono)!important;font-size:11.5px;color:var(--c-ink);
+  background:var(--c-rail);border:1px solid var(--c-border);border-radius:8px;
+  padding:11px 13px;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+.c-cmd .flag{color:var(--c-accent)}
+.c-cmd .ph{color:var(--c-muted)}
+
+.c-scroll{overflow-x:auto}
+.c-table{width:100%;border-collapse:collapse;font-size:12px;min-width:520px}
+.c-table th{
+  text-align:left;font-weight:600;font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--c-subtle);
+  padding:0 12px 8px 0;border-bottom:1px solid var(--c-border);
+}
+.c-table td{padding:10px 12px 10px 0;border-bottom:1px solid var(--c-border);vertical-align:top;color:var(--c-muted)}
+.c-table tr:last-child td{border-bottom:0}
+.c-table td.id{font-family:var(--mono);color:var(--c-accent);font-size:11px;white-space:nowrap}
+.c-table td.k{color:var(--c-ink)}
+
+.c-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.c-list li{display:flex;align-items:baseline;gap:10px;font-size:12.5px;color:var(--c-muted)}
+.c-list li::before{
+  content:"";width:5px;height:5px;border-radius:50%;
+  background:var(--c-subtle);flex:none;transform:translateY(-2px);
+}
+.c-list li.done::before{background:var(--c-ok)}
+.c-list li.now::before{background:var(--c-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--c-accent) 25%,transparent)}
+.c-list li.now{color:var(--c-ink)}
+
+.c-log{display:flex;flex-direction:column;gap:0;font-family:var(--mono)!important;font-size:11.5px}
+.c-log-row{
+  display:grid;grid-template-columns:150px 1fr;gap:14px;
+  padding:8px 0;border-bottom:1px solid var(--c-border);
+}
+.c-log-row:last-child{border-bottom:0}
+.c-log-row time{color:var(--c-subtle);white-space:nowrap}
+.c-log-row .ev{color:var(--c-accent)}
+.c-log-row .note{color:var(--c-muted);font-family:var(--sans)!important;font-size:12px;line-height:1.5}
+@media (max-width:620px){ .c-log-row{grid-template-columns:1fr;gap:3px} }
+
+.c-kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:12px}
+.c-kv dt{color:var(--c-subtle)}
+.c-kv dd{margin:0;color:var(--c-ink);font-family:var(--mono)!important;font-size:11.5px}
+
+.c-toggle{
+  display:inline-flex;align-items:center;gap:7px;
+  font-size:11px;color:var(--c-ok);
+}
+.c-toggle .sw{
+  width:26px;height:15px;border-radius:999px;background:var(--c-ok);
+  position:relative;flex:none;
+}
+.c-toggle .sw::after{
+  content:"";position:absolute;top:2px;right:2px;
+  width:11px;height:11px;border-radius:50%;background:var(--c-bg);
+}
+
+.c-caption{
+  font-size:.84rem;color:var(--ink-muted);
+  margin-top:12px;max-width:64ch;line-height:1.55;
+}
+/* a console + its caption is one column: the console takes the slack,
+   the caption always sits inside the grid item rather than spilling past it */
+.grid-2>div:has(>.console){display:flex;flex-direction:column}
+.grid-2>div:has(>.console)>.console{flex:1 1 auto}
+.grid-2>div:has(>.console)>.c-caption{flex:none}
+.c-caption b{color:var(--ink)}
+
+/* ---------- generic page components ---------- */
+
+.grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
+.grid-2>*,.grid-3>*{min-width:0}
+@media (max-width:860px){
+  .grid-3{grid-template-columns:minmax(0,1fr)}
+  .grid-2{grid-template-columns:minmax(0,1fr)}
+}
+
+.panel{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--r-lg);
+  padding:22px 24px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.panel h4{margin:0}
+.panel p{font-size:.9rem;color:var(--ink-muted);line-height:1.55}
+
+.rule-list{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--border)}
+.rule-item{
+  display:grid;grid-template-columns:minmax(0,210px) minmax(0,1fr);
+  gap:6px 32px;padding:20px 0;border-bottom:1px solid var(--border);
+}
+@media (max-width:720px){ .rule-item{grid-template-columns:1fr;gap:6px} }
+.rule-item dt{font-family:var(--display);font-size:1.08rem;font-weight:600;line-height:1.35}
+.rule-item dd{margin:0;font-size:.94rem;color:var(--ink-muted);line-height:1.6}
+.rule-item dd code{font-size:.84em}
+
+/* numbered steps — the setup really is a sequence */
+.steps{counter-reset:step;display:flex;flex-direction:column;gap:0}
+.step{
+  counter-increment:step;
+  display:grid;grid-template-columns:auto minmax(0,1fr);
+  gap:0 24px;
+  padding-bottom:36px;
+  position:relative;
+}
+.step::before{
+  content:counter(step,decimal-leading-zero);
+  font-family:var(--mono);font-size:.78rem;font-weight:500;
+  color:var(--accent);
+  width:34px;height:34px;border-radius:50%;
+  border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
+  background:var(--accent-wash);
+  display:grid;place-items:center;
+  grid-row:span 2;
+}
+.step::after{
+  content:"";position:absolute;left:17px;top:38px;bottom:2px;
+  width:1px;background:var(--border-strong);
+}
+.step:last-child{padding-bottom:0}
+.step:last-child::after{display:none}
+.step-body{display:flex;flex-direction:column;gap:12px;min-width:0}
+.step-body h3{font-size:1.18rem}
+.step-body p{font-size:.94rem;color:var(--ink-muted);line-height:1.6;max-width:62ch}
+@media (max-width:560px){
+  .step{grid-template-columns:1fr;gap:12px}
+  .step::before{grid-row:auto}
+  .step::after{display:none}
+}
+
+pre{
+  margin:0;
+  font-family:var(--mono);
+  font-size:.82rem;
+  line-height:1.7;
+  background:var(--c-rail);
+  color:#e8e6de;
+  border:1px solid var(--c-border);
+  border-radius:var(--r);
+  padding:14px 16px;
+  overflow-x:auto;
+}
+pre .cm{color:#96938a}
+pre .kw{color:#d97757}
+pre .st{color:#9dbf9a}
+pre .ph{color:#c9a98f}
+
+.callout{
+  border-left:3px solid var(--accent);
+  background:var(--accent-wash);
+  padding:14px 18px;
+  border-radius:0 var(--r) var(--r) 0;
+  font-size:.92rem;
+  line-height:1.6;
+  color:var(--ink);
+}
+.callout.warnbox{border-left-color:var(--warn);background:var(--warn-wash)}
+.callout b{font-weight:600}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface)}
+table.data{width:100%;border-collapse:collapse;font-size:.88rem;min-width:560px}
+table.data th{
+  text-align:left;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-subtle);font-weight:600;
+  padding:12px 16px;border-bottom:1px solid var(--border-strong);
+  background:var(--bg-sunk);white-space:nowrap;
+}
+table.data td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--ink-muted);line-height:1.55}
+table.data tr:last-child td{border-bottom:0}
+table.data td:first-child{color:var(--ink)}
+table.data code{white-space:nowrap}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  font-family:var(--mono);font-size:.74rem;
+  padding:5px 11px;border-radius:6px;
+  background:var(--surface);border:1px solid var(--border-strong);
+  color:var(--ink-muted);
+}
+.chip.opt{color:var(--ink-subtle);border-style:dashed}
+.chip.core{color:var(--accent-deep);border-color:color-mix(in srgb,var(--accent) 40%,transparent);background:var(--accent-wash)}
+
+.pipeline{
+  display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+  font-family:var(--mono);font-size:.76rem;
+}
+.pipeline span{
+  padding:5px 10px;border-radius:6px;
+  background:var(--surface);border:1px solid var(--border-strong);color:var(--ink-muted);
+}
+.pipeline span.gate{
+  background:var(--accent-wash);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  color:var(--accent-deep);font-weight:500;
+}
+.pipeline i{color:var(--ink-subtle);font-style:normal}
+
+[id]{scroll-margin-top:72px}
+.option-grid{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;
+}
+.option-link{
+  display:flex;flex-direction:column;gap:8px;min-height:150px;padding:18px;
+  color:var(--ink);text-decoration:none;background:var(--surface);
+  border:1px solid var(--border-strong);border-radius:var(--r-lg);
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.option-link:hover{
+  transform:translateY(-2px);border-color:var(--accent);
+  box-shadow:0 10px 28px rgba(40,34,28,.08);
+}
+.option-link b{font-family:var(--display);font-size:1.15rem}
+.option-link span:last-child{color:var(--ink-muted);font-size:.86rem;line-height:1.55}
+.option-number{
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);
+}
+@media (max-width:900px){.option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.option-grid{grid-template-columns:1fr}.option-link{min-height:0}}
+
+footer{
+  border-top:1px solid var(--border);
+  background:var(--bg-sunk);
+  padding-block:44px;
+}
+.foot-grid{display:flex;flex-wrap:wrap;gap:28px;justify-content:space-between;align-items:flex-start}
+.foot-grid p{font-size:.86rem;color:var(--ink-muted);max-width:46ch;line-height:1.6}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+html{scroll-behavior:smooth}
+</style>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brandmark" href="#top"><span class="dot"></span>FLOW</a>
+    <nav class="topnav">
+      <a href="#idea">The idea</a>
+      <a href="#console">Console</a>
+      <a href="#configuration">Configuration</a>
+      <a href="#workspace">Workspace</a>
+      <a href="#run">A run</a>
+      <a href="#gates">Approvals</a>
+      <a href="#governance">Governance</a>
+      <a href="#start">Get started</a>
+      <a href="#cheatsheet">Commands</a>
+      <a href="#refused">Refusals</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============================ HERO ============================ -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1 class="wordmark">FLOW</h1>
+      <p class="expansion"><b>F</b>orward-deployed <b>L</b>ocal <b>O</b>perations <b>W</b>orkspace</p>
+
+      <p class="thesis">Several AI coding agents, one governed lifecycle, and not a single boundary crossed without you saying so.</p>
+
+      <p class="lede prose" style="margin-top:22px;font-size:1rem">
+        FLOW is a local console and controller for running real delivery work through Claude Code, Codex,
+        Gemini and Microsoft Copilot. It keeps the plan, the roles, the approvals and the evidence in one
+        auditable record on your own machine — and it refuses, loudly, when something tries to skip a step.
+      </p>
+
+      <div class="hero-meta">
+        <span class="tag">runs on 127.0.0.1</span>
+        <span class="tag">your credentials never leave the machine</span>
+        <span class="tag">no agent self-authorises</span>
+      </div>
+
+      <p style="margin-top:20px">
+        <a class="repo-link" href="https://github.com/poornimaka99x/fde-local-workspace">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          github.com/poornimaka99x/fde-local-workspace
+        </a>
+      </p>
+    </div>
+
+    <div class="gates">
+      <div class="gates-head">The only three things you ever have to type</div>
+      <div class="gate">
+        <div class="gate-phrase">APPROVE PLAN &lt;run-id&gt;</div>
+        <p class="gate-note">Confirms the plan <em>and</em> the role assignment together. Until this, nothing has been read — not Jira, not your client context, not a repository.</p>
+      </div>
+      <div class="gate">
+        <div class="gate-phrase">APPROVE CODEX &lt;run-id&gt;</div>
+        <p class="gate-note">One write, 30 minutes, bound to the SHA-256 of one task file. Edit the task and the approval is refused rather than stretched.</p>
+      </div>
+      <div class="gate">
+        <div class="gate-phrase">APPROVE PUBLISH &lt;run-id&gt;</div>
+        <p class="gate-note">One target at a time. Approving Jira says nothing about Confluence, Figma, GitHub or a deployment.</p>
+      </div>
+      <div class="gates-foot">
+        Holding a role authorises nothing. A plan existing is not a reason to create anything.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ THE IDEA ============================ -->
+<section id="idea">
+  <div class="wrap stack-lg">
+    <div class="stack">
+      <p class="eyebrow">The idea</p>
+      <h2>Two sentences that explain the whole system</h2>
+    </div>
+
+    <dl class="rule-list">
+      <div class="rule-item">
+        <dt>Identities are not roles.</dt>
+        <dd>
+          <em>Claude: work</em>, <em>Claude: bedrock</em>, <em>ChatGPT/Codex</em>, <em>Gemini</em> and
+          <em>Microsoft Copilot</em> are who is in the room. Who researches, who architects, who reviews and
+          who implements is decided by you, at the start of every run, and is never inherited from the last
+          one. Any identity may hold any role it is capable of; one identity may hold several; <code>none</code>
+          is a valid answer.
+        </dd>
+      </div>
+      <div class="rule-item">
+        <dt>Nothing crosses a boundary without you.</dt>
+        <dd>
+          Nothing is read until you approve the combined plan and role assignment. Codex writes only under a
+          one-time approval bound to the exact bytes of one task file. Anything that leaves the machine —
+          Jira, Confluence, SharePoint, GitHub, Bitbucket, Figma, a deployment, an email — needs its own
+          publication approval.
+        </dd>
+      </div>
+      <div class="rule-item">
+        <dt>A refusal is the product working.</dt>
+        <dd>
+          FLOW would rather stop than guess. <code>roles are not confirmed</code>,
+          <code>task file changed since approval</code>, <code>not in this run's plan</code> — each refusal
+          names the missing thing and the exact command that supplies it. There is no <code>--yolo</code> and no
+          <code>danger-full-access</code> anywhere in the toolkit, and <code>fde doctor</code> fails if one ever appears.
+        </dd>
+      </div>
+      <div class="rule-item">
+        <dt>Progress is a claim, not a file listing.</dt>
+        <dd>
+          State comes from the controller, never inferred from which files happen to exist. A present artifact
+          is not a finished stage. Every run carries an append-only event log and an approval ledger under
+          <code>~/.claude-shared/runs/&lt;run-id&gt;/</code>.
+        </dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================ CONSOLE ============================ -->
+<section id="console">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">The console</p>
+      <h2>Everything the controller knows, on one local page</h2>
+      <p class="lede">
+        <code>fde-gui</code> serves FLOW at <code>127.0.0.1:7317</code> and hands out a session token in the
+        URL fragment — which browsers never send to a server, so it stays out of logs and history sync. The
+        console reads the controller and writes no run state of its own.
+      </p>
+    </div>
+
+    <!-- runs list -->
+    <div>
+      <div class="console">
+        <div class="c-chrome">
+          <span class="c-path">~/.claude-shared/runs</span>
+          <span class="c-pill ok">connected</span>
+          <span class="c-pill">local workspace</span>
+        </div>
+        <div class="c-body">
+          <div class="stack-sm">
+            <div class="c-title">Runs</div>
+            <div class="c-sub">Every run the controller knows about. State comes from the controller — never inferred from which files happen to exist.</div>
+          </div>
+          <div class="c-scroll">
+            <table class="c-table">
+              <thead>
+                <tr><th>Run</th><th>Requirement</th><th>Project</th><th>Orchestrator</th><th>State</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="id">20260904-acme-500-3f78</td>
+                  <td class="k">ACME-500 survive a payment outage</td>
+                  <td>checkout-resilience</td>
+                  <td>Claude: work</td>
+                  <td><span class="c-pill warn">awaiting_plan</span></td>
+                </tr>
+                <tr>
+                  <td class="id">20260904-acme-142-c6e6</td>
+                  <td class="k">ACME-142 research the returns journey and review it</td>
+                  <td>returns-modernisation</td>
+                  <td>Claude: work</td>
+                  <td><span class="c-pill">roles_confirmed</span></td>
+                </tr>
+                <tr>
+                  <td class="id">20260902-adr-token-9b14</td>
+                  <td class="k">ADR for token exchange between storefront and orders</td>
+                  <td>returns-modernisation</td>
+                  <td>Claude Code: Bedrock</td>
+                  <td><span class="c-pill ok">complete</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <p class="c-caption"><b>Runs.</b> Filter by state, project, orchestrator or live session. A run is one requirement with its own plan, roles, approvals and artifacts — and it is never shared with another run.</p>
+    </div>
+
+    <!-- run detail -->
+    <div>
+      <div class="console">
+        <div class="c-chrome">
+          <span class="c-path">Runs / returns-modernisation / 20260904-acme-142-c6e6</span>
+          <span class="c-pill warn">awaiting_roles</span>
+        </div>
+        <div class="c-body">
+          <div class="stack-sm">
+            <div class="c-crumb">Runs / <b>returns-modernisation</b> / 20260904-acme-142-c6e6</div>
+            <div class="c-title">ACME-142 research the returns journey and review it</div>
+          </div>
+
+          <div class="c-card stack-sm">
+            <div class="c-kicker">Next</div>
+            <div class="c-cmd">fde roles 20260904-acme-142-c6e6 <span class="flag">--set</span> research=<span class="ph">&lt;identity&gt;</span> <span class="flag">--set</span> solutioning=<span class="ph">&lt;identity&gt;</span> <span class="flag">--set</span> review=<span class="ph">&lt;identity&gt;</span> <span class="flag">--set</span> presentation=none</div>
+            <div class="c-sub">Use the Session tab to work with the orchestrator. Plan approval and every later approval remain explicit choices in that conversation.</div>
+          </div>
+
+          <div class="c-tabs">
+            <span class="c-tab on">Overview</span>
+            <span class="c-tab">Session</span>
+            <span class="c-tab">Routing<span class="n">3</span></span>
+            <span class="c-tab">Inputs<span class="n">2</span></span>
+            <span class="c-tab">Artifacts<span class="n">5</span></span>
+            <span class="c-tab">Events<span class="n">9</span></span>
+            <span class="c-tab">Approvals &amp; evidence<span class="n">0</span></span>
+          </div>
+
+          <div class="grid-2" style="gap:16px">
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Plan</div>
+              <ul class="c-list">
+                <li class="done">intake</li>
+                <li class="now">research</li>
+                <li>solution architecture</li>
+                <li>adversarial review</li>
+                <li>reconciliation</li>
+              </ul>
+            </div>
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Roles</div>
+              <dl class="c-kv">
+                <dt>Orchestrator</dt><dd>claude_work</dd>
+                <dt>Researcher(s)</dt><dd>gemini</dd>
+                <dt>Solution architect</dt><dd>claude_bedrock</dd>
+                <dt>Reviewer(s)</dt><dd>chatgpt_codex</dd>
+                <dt>Implementation</dt><dd style="color:var(--c-subtle)">none</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="c-caption"><b>One run, seven views.</b> Overview holds the plan and the role table; Session is the live orchestrator terminal; Routing shows what the controller proposes to spend; Artifacts separates what the plan expects from what exists; Events is the whole log; Approvals &amp; evidence is the ledger. A research-only run never asks you for an implementation agent.</p>
+    </div>
+
+    <!-- routing -->
+    <div>
+      <div class="console">
+        <div class="c-chrome">
+          <span class="c-path">Routing — proposed, not approved</span>
+          <span class="c-pill">policy 2026-09-07.1</span>
+        </div>
+        <div class="c-body">
+          <div class="chips" style="gap:6px">
+            <span class="c-pill">complexity: complex</span>
+            <span class="c-pill">confidence: medium</span>
+            <span class="c-pill">floor: high</span>
+            <span class="c-pill">strategy: balanced</span>
+          </div>
+          <div class="c-sub">A proposal authorises nothing. It is recomputed whenever the plan or the roles change, and it is frozen by <span class="mono" style="color:var(--c-accent)">APPROVE PLAN &lt;run-id&gt;</span> in the conversation — not here.</div>
+
+          <div class="c-card">
+            <div class="c-kicker" style="margin-bottom:10px">Approved ceilings</div>
+            <dl class="c-kv">
+              <dt>Cost units</dt><dd>~12 of 180 approved <span style="color:var(--c-subtle)">(policy weights, not money)</span></dd>
+              <dt>Model ceiling</dt><dd>premium tier at high effort</dd>
+              <dt>Retries</dt><dd>1 per task</dd>
+              <dt>Agents</dt><dd>8 specialist methods, 2 per stage, 3 in parallel</dd>
+            </dl>
+          </div>
+
+          <div class="c-card">
+            <div class="c-kicker" style="margin-bottom:10px">Usage</div>
+            <div class="c-sub" style="margin-bottom:10px">Every figure is marked as reported by a provider, estimated by the controller, or unavailable. Nothing here is inferred, and a missing measurement is never shown as zero.</div>
+            <dl class="c-kv">
+              <dt>Input tokens</dt><dd style="color:var(--c-subtle)">unavailable — no provider reported this figure</dd>
+              <dt>Estimated cost units</dt><dd>0 <span style="color:var(--c-subtle)">estimated</span></dd>
+              <dt>Attempts</dt><dd>0 <span style="color:var(--c-subtle)">reported</span></dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+      <p class="c-caption"><b>Routing.</b> Account identity, specialist method, model and effort are four separate choices — a method is what the account will run, the account is who runs it. The controller proposes all four with a cost estimate, and you freeze them with the plan approval.</p>
+    </div>
+
+    <!-- events -->
+    <div>
+      <div class="console">
+        <div class="c-chrome"><span class="c-path">Events — this is the whole log</span><span class="c-pill">events.jsonl</span></div>
+        <div class="c-body">
+          <div class="c-log">
+            <div class="c-log-row"><time>15:59:26 +05:30</time><span class="ev">run.created</span></div>
+            <div class="c-log-row"><time>15:59:26 +05:30</time><span class="note">Created in <span class="mono">awaiting_orchestrator</span>. Choosing an orchestrator and scoping the work read nothing; no connector, repository or client-context access is permitted until roles are confirmed.</span></div>
+            <div class="c-log-row"><time>15:59:26 +05:30</time><span class="ev">orchestrator.chosen <span style="color:var(--c-ink)">claude_work</span></span></div>
+            <div class="c-log-row"><time>15:59:27 +05:30</time><span class="ev">routing.assessed</span></div>
+            <div class="c-log-row"><time>15:59:27 +05:30</time><span class="ev">plan.proposed</span></div>
+            <div class="c-log-row"><time>16:04:11 +05:30</time><span class="ev">state <span style="color:var(--c-warn)">awaiting_roles</span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="c-caption"><b>Events.</b> Append-only, timestamped, and complete — the console shows the whole log rather than a summary of it. Every Atlassian call a run makes lands here too.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h4>Design panel</h4>
+        <p>Two or three Claude accounts get the same sealed brief, work behind an information barrier, and are reconciled into one recommendation. Still a normal run: same plan and role approval, same artifacts.</p>
+      </div>
+      <div class="panel">
+        <h4>System health</h4>
+        <p>What the console is pointed at: controller contracts, roots, binaries and profile names. No credential is read and no network check runs here — <code>fde doctor</code> stays the place for those.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CONFIGURATION ============================ -->
+<section id="configuration">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Configuration</p>
+      <h2>Four tabs, and not one of them grants anything</h2>
+      <p class="lede">
+        Configuration is where you register identities, store service credentials, set MCP scope and switch
+        capabilities on and off. It is deliberately <em>not</em> where anything becomes permitted — that belongs
+        to a run's roles and its approvals, every time.
+      </p>
+    </div>
+
+    <div class="console">
+      <div class="c-chrome"><span class="c-path">Configuration</span><span class="c-pill">workspace administration</span></div>
+      <div class="c-body">
+        <div class="c-kicker">Workspace administration</div>
+        <div class="c-title">Configuration</div>
+        <div class="c-sub">Manage AI identities, external services, MCP servers, and the skills, sub-agents and plugins that make up the FLOW harness.</div>
+        <div class="grid-2" style="gap:10px">
+          <div class="c-card" style="padding:12px 14px">
+            <div style="color:var(--c-ink);font-weight:600;margin-bottom:3px">AI accounts</div>
+            <div class="c-sub" style="font-size:11.5px">Claude, Codex, Gemini, Microsoft</div>
+          </div>
+          <div class="c-card" style="padding:12px 14px">
+            <div style="color:var(--c-ink);font-weight:600;margin-bottom:3px">Service connections</div>
+            <div class="c-sub" style="font-size:11.5px">Atlassian REST, Rovo, GitHub, Bitbucket, Figma</div>
+          </div>
+          <div class="c-card" style="padding:12px 14px">
+            <div style="color:var(--c-ink);font-weight:600;margin-bottom:3px">MCP servers</div>
+            <div class="c-sub" style="font-size:11.5px">Catalogue, readiness and tool scope</div>
+          </div>
+          <div class="c-card" style="padding:12px 14px">
+            <div style="color:var(--c-ink);font-weight:600;margin-bottom:3px">Capabilities</div>
+            <div class="c-sub" style="font-size:11.5px">Skills, sub-agents, tools and plugins</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI ACCOUNTS -->
+    <div class="stack">
+      <h3>AI accounts — who is in the room</h3>
+      <div class="callout">
+        <b>Accounts are identities, not roles.</b> Which of them does what is chosen per run, when you assign
+        roles — nothing on this tab grants anything. Register first, then sign in through the provider's own flow.
+      </div>
+
+      <div class="console">
+        <div class="c-chrome"><span class="c-path">Configuration / AI accounts</span><span class="c-pill">7 identities</span></div>
+        <div class="c-body">
+          <div class="c-kicker">AI providers</div>
+          <div class="c-sub">Add the provider identities this machine can use. Credentials remain isolated between accounts whenever the provider supports it.</div>
+
+          <div class="grid-2" style="gap:14px">
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Claude</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">Claude: work</span>
+                <span class="c-pill ok">signed in</span>
+              </div>
+              <div class="c-sub">claude confirmed this account is signed in</div>
+              <dl class="c-kv">
+                <dt>Identity id</dt><dd>claude_work</dd>
+                <dt>Credentials</dt><dd>~/.claude-profiles/work</dd>
+              </dl>
+            </div>
+
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Claude on Bedrock</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">Claude Code: Bedrock</span>
+                <span class="c-pill ok">signed in</span>
+              </div>
+              <div class="c-sub">This provider has no interactive sign-in — it uses credentials you already hold on this machine.</div>
+              <dl class="c-kv">
+                <dt>Identity id</dt><dd>claude_bedrock</dd>
+                <dt>AWS profile</dt><dd>&lt;your profile&gt;</dd>
+                <dt>AWS region</dt><dd>&lt;your region&gt;</dd>
+              </dl>
+            </div>
+
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Gemini (Antigravity)</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">Gemini</span>
+                <span class="c-pill ok">signed in</span>
+              </div>
+              <div class="c-sub">Already has its one account. Antigravity keeps one sign-in per machine — its token lives in the OS keyring, not in a per-account folder — so a second account would silently share the first one's login.</div>
+            </div>
+
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Microsoft Copilot</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">Microsoft Copilot</span>
+                <span class="c-pill warn">signed out · unavailable</span>
+              </div>
+              <div class="c-sub">Cannot be used: no secret stored for this account</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="c-caption"><b>AI accounts.</b> Each card shows the identity id roles are assigned to, where its credentials live, and whether the provider can actually keep accounts apart. Sign-in status comes from asking the CLI itself, not from a file existing.</p>
+
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem;margin-top:6px">
+        The isolation column is where FLOW is most obviously honest with you. Claude profiles get a directory
+        each, so two accounts genuinely cannot see one another. The others cannot, and the console says so on
+        the card rather than implying a separation that is not there.
+      </p>
+
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Provider</th><th>Identity id</th><th>Credentials</th><th>Isolation</th></tr></thead>
+          <tbody>
+            <tr><td>Claude</td><td><code>claude_work</code>, <code>claude_msc</code>, <code>claude_alt</code></td><td><code>~/.claude-profiles/&lt;name&gt;</code></td><td>A folder per account — fully separate</td></tr>
+            <tr><td>Claude on Bedrock</td><td><code>claude_bedrock</code></td><td><code>~/.claude-profiles/bedrock</code></td><td>Own folder; AWS profile and region are provider settings used for every launch</td></tr>
+            <tr><td>ChatGPT / Codex</td><td><code>chatgpt_codex</code></td><td><code>~/.codex</code></td><td>Shares the provider's default folder — it predates per-account folders</td></tr>
+            <tr><td>Gemini (Antigravity)</td><td><code>gemini</code></td><td><code>~/.gemini/antigravity-cli</code></td><td>One sign-in per machine; the token is in the OS keyring, so a second account is refused</td></tr>
+            <tr><td>Microsoft Copilot</td><td><code>microsoft_copilot</code></td><td><code>~/.fde-copilot</code></td><td>Shares the default folder; FLOW stores the Direct Line secret in the account directory</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        The same surface exists on the command line: <code>fde accounts list</code>,
+        <code>fde accounts add --provider &lt;p&gt; --name &lt;n&gt;</code>, <code>fde accounts login &lt;id&gt;</code>,
+        <code>fde accounts verify &lt;id&gt;</code>. The console's Login action opens an isolated
+        <code>claude auth login</code> terminal for only the selected profile — FLOW never receives a password,
+        an OAuth token or a credential file.
+      </p>
+    </div>
+
+    <!-- SERVICE CONNECTIONS -->
+    <div class="stack">
+      <h3>Service connections — identity only, never permission</h3>
+      <div class="console">
+        <div class="c-chrome"><span class="c-path">Configuration / Service connections</span><span class="c-pill ok">secrets stay private</span></div>
+        <div class="c-body">
+          <div class="c-kicker">External systems</div>
+          <div class="c-sub">Credentials are stored locally and establish identity only. External writes still require a FLOW publication approval. Tokens are never returned to this page after submission.</div>
+
+          <div class="c-card stack-sm">
+            <div class="c-kicker">Add a connection</div>
+            <div class="chips" style="gap:6px">
+              <span class="c-pill">Atlassian REST API</span>
+              <span class="c-pill">Atlassian Rovo MCP</span>
+              <span class="c-pill">GitHub</span>
+              <span class="c-pill">Bitbucket Cloud</span>
+              <span class="c-pill">Figma</span>
+              <span class="c-pill">Custom MCP server</span>
+            </div>
+            <div class="c-sub">Connection name · Site URL · Account email</div>
+          </div>
+
+          <div class="grid-2" style="gap:14px">
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Atlassian REST API</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">Acme</span>
+                <span class="c-pill ok">connected</span>
+              </div>
+              <dl class="c-kv">
+                <dt>siteUrl</dt><dd>https://your-site.atlassian.net</dd>
+                <dt>email</dt><dd>you@example.com</dd>
+              </dl>
+              <div class="c-sub" style="color:var(--c-ok)">Connection verified</div>
+            </div>
+            <div class="c-card stack-sm">
+              <div class="c-kicker">Atlassian Rovo MCP</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">Acme</span>
+                <span class="c-pill warn">oauth required</span>
+              </div>
+              <div class="c-sub">Rovo uses its own Atlassian OAuth sign-in, separate from the REST API token. FLOW never receives that OAuth token.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="c-caption"><b>Service connections.</b> These never become role identities, and configuring one never authorises an external write. Tokens are written to <code>~/.claude-shared/secrets/service-connections/</code> with owner-only permissions, and the browser never gets them back.</p>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Two Atlassian entries, on purpose</h4>
+          <p>The REST connection is an email and API token FLOW holds, and powers the bounded link reader. Rovo is client-owned OAuth over MCP. They are different credentials with different owners, so they are configured separately rather than pretended to be one.</p>
+        </div>
+        <div class="panel">
+          <h4>Figma is wired late</h4>
+          <p>Figma uses the official remote MCP endpoint and its OAuth credential stays owned by the MCP client. It is connected only after roles are confirmed, and canvas writes still need <code>fde approve-publish &lt;run-id&gt; figma</code>.</p>
+        </div>
+        <div class="panel">
+          <h4>Git stays the way you touch code</h4>
+          <p>Bitbucket and GitHub connections are for work items and pull requests. Local git remains the primary interface to repositories — the connector is not a substitute for it.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MCP + CAPABILITIES (moved here from the tour) -->
+    <div class="stack">
+      <h3>MCP servers and capabilities — the harness itself</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        The last two tabs configure what FLOW can load and what it may reach. The lifecycle rules behind them
+        are in <a href="#governance">Governance</a>; here is what the screens do.
+      </p>
+<!-- capabilities + mcp side by side -->
+    <div class="grid-2">
+      <div>
+        <div class="console">
+          <div class="c-chrome"><span class="c-path">Configuration / Capabilities</span><span class="c-pill">78 total</span></div>
+          <div class="c-body">
+            <div class="c-kicker">Agent harness</div>
+            <div class="c-title" style="font-size:17px">Capabilities &amp; extensions</div>
+            <div class="chips" style="gap:6px">
+              <span class="c-pill">Skills 30</span>
+              <span class="c-pill">Sub-agents 20</span>
+              <span class="c-pill">MCPs 10</span>
+              <span class="c-pill">Tools 9</span>
+              <span class="c-pill">Plugins 2</span>
+              <span class="c-pill">Hooks 1</span>
+            </div>
+            <div class="c-card stack-sm">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+                <div><span class="c-pill">Plugin</span> <span class="c-pill">built-in</span></div>
+                <span class="c-pill warn">Required</span>
+              </div>
+              <div style="color:var(--c-ink);font-weight:600">fde-core</div>
+              <div class="c-sub">Local control plane with dynamic account roles, delivery workflows, PR review, TDD and evidence gates, harness audits.</div>
+            </div>
+            <div class="c-card stack-sm">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+                <div><span class="c-pill">Skill</span> <span class="c-pill">built-in</span></div>
+                <span class="c-toggle"><span class="sw"></span>On</span>
+              </div>
+              <div style="color:var(--c-ink);font-weight:600">agent-config-audit</div>
+              <div class="c-sub">Audit identities, MCP targeting, hooks and scripts for malformed manifests, embedded secrets and bypass flags.</div>
+            </div>
+          </div>
+        </div>
+        <p class="c-caption"><b>Capabilities.</b> Every plugin, skill, sub-agent, MCP server, tool, command, hook and utility FLOW can load, with its origin. Switches apply to new processes; running sessions keep the set they started with. <code>fde-core</code> cannot be switched off — a control plane that can disable itself is not a control plane.</p>
+      </div>
+
+      <div>
+        <div class="console">
+          <div class="c-chrome"><span class="c-path">Configuration / MCP servers</span><span class="c-pill">10 in catalogue</span></div>
+          <div class="c-body">
+            <div class="c-sub">Being listed here is not access. A server is in the <b style="color:var(--c-ink)">catalogue</b> when FLOW knows how to run it, <b style="color:var(--c-ink)">configured</b> when you have supplied what it needs, <b style="color:var(--c-ink)">ready</b> when it is also installed and verified, and <b style="color:var(--c-ink)">active</b> only inside a run whose approved roles and stages call for it.</div>
+            <div class="c-card stack-sm">
+              <div class="c-kicker">browser-session · stdio</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">chrome-devtools</span>
+                <span class="c-pill ok">ready</span>
+              </div>
+              <div class="c-sub">Scope — read-only: 19 verified tool(s) allowed</div>
+            </div>
+            <div class="c-card stack-sm">
+              <div class="c-kicker">tenant-data · http</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">atlassian</span>
+                <span class="c-pill warn">unscoped</span>
+              </div>
+              <div class="c-sub">Its OAuth token belongs to the MCP client, so there is no tool list to build an allowlist from. FLOW says so rather than describing it as safe — its writes are stopped at publication.</div>
+            </div>
+            <div class="c-card stack-sm">
+              <div class="c-kicker">cloud-control-plane · stdio</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                <span style="color:var(--c-ink);font-weight:600">aws</span>
+                <span class="c-pill">not configured</span>
+              </div>
+              <div class="c-sub">not configured: AWS profile, default operation region</div>
+            </div>
+          </div>
+        </div>
+        <p class="c-caption"><b>MCP servers.</b> Credentials are stored owner-only and injected into one child process; nothing on that page ever shows a stored value. Versions are pinned, nothing installs itself, and neither <code>npx</code> nor <code>uvx</code> runs because you opened a page.</p>
+      </div>
+    </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Switches apply to new processes</h4>
+          <p>Turning a capability off changes what the next FLOW process loads. Sessions already running keep the capability set they started with, so nothing is pulled out from under a live run.</p>
+        </div>
+        <div class="panel">
+          <h4>Each switch uses the real mechanism</h4>
+          <p>MCP changes go through the governed MCP controller, disabled tools become explicit CLI deny rules, and hook changes rewrite the local plugin manifest. Nothing relies on asking an agent nicely.</p>
+        </div>
+        <div class="panel">
+          <h4>Extensions stay local</h4>
+          <p>You can author a skill into the separately managed <code>fde-user</code> plugin, or import a local plugin containing <code>.claude-plugin/plugin.json</code>. Imports are copied in, bounded in size, and reject symbolic links; they never overwrite an existing plugin.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WORKSPACE ============================ -->
+<section id="workspace">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Ways to work</p>
+      <h2>Choose the FLOW option that matches the job</h2>
+      <p class="lede">
+        Start a governed FDE lifecycle for repeatable delivery, group related work in a project, open a chat for
+        focused exploration, or keep several live sessions moving at once. Each option has a clear purpose and
+        its own safety boundary.
+      </p>
+    </div>
+
+    <nav class="option-grid" aria-label="FLOW ways to work">
+      <a class="option-link" href="#fde-lifecycle">
+        <span class="option-number">Option 01</span>
+        <b>FDE lifecycle</b>
+        <span>Run a named, versioned delivery process with roles, evidence, review and human approvals.</span>
+      </a>
+      <a class="option-link" href="#projects">
+        <span class="option-number">Option 02</span>
+        <b>Projects</b>
+        <span>Group related runs, chats and existing repository paths without changing their permissions.</span>
+      </a>
+      <a class="option-link" href="#chats">
+        <span class="option-number">Option 03</span>
+        <b>Chats</b>
+        <span>Explore an idea in restricted plan mode, with no run, roles or approvals created.</span>
+      </a>
+      <a class="option-link" href="#sessions">
+        <span class="option-number">Option 04</span>
+        <b>Sessions</b>
+        <span>Switch between several active conversations while each continues in its own run context.</span>
+      </a>
+    </nav>
+
+    <!-- FDE LIFECYCLE -->
+    <div class="stack" id="fde-lifecycle">
+      <h3>1 · The FDE lifecycle — a governed system you configure once</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        A normal run is scoped by conversation every time. A <b>system</b> is the opposite: a named, versioned
+        execution profile you set up once and start repeatedly. <b>Forward Deployed Engineer</b> ships as the
+        first one — the complete, independently reviewed delivery lifecycle, tracked separately from ad-hoc runs
+        and with its own run history.
+      </p>
+
+      <div class="console">
+        <div class="c-chrome">
+          <span class="c-path">Systems / Forward Deployed Engineer</span>
+          <span class="c-pill ok">available</span>
+          <span class="c-pill">dedicated executor</span>
+        </div>
+        <div class="c-body">
+          <div class="c-kicker">Executable systems</div>
+          <div class="c-title">Forward Deployed Engineer</div>
+          <div class="c-sub">Human-governed product delivery from business intent through operations.</div>
+          <div class="c-cmd" style="white-space:normal;color:var(--c-muted)">business intent → analysis → requirements → architecture → planning → implementation → QA → documentation → deployment → operations</div>
+          <div class="c-sub">Human approval and independent review remain part of the controller lifecycle.</div>
+
+          <div class="c-card">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px">
+              <span style="color:var(--c-ink);font-weight:600">Default Forward Deployed Engineer</span>
+              <span><span class="c-pill ok">active</span> <span class="c-pill">v1</span></span>
+            </div>
+            <div class="c-sub">The complete nine-stage, independently reviewed FDE lifecycle.</div>
+            <div class="c-sub" style="margin-top:8px;color:var(--c-subtle)">9 of 9 stages enabled · executor: forward-deployed-engineer</div>
+          </div>
+
+          <div class="chips" style="gap:6px">
+            <span class="c-pill">Configurations 1</span>
+            <span class="c-pill">FDE runs 1</span>
+            <span class="c-pill">Stages 9</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Versioned configurations</h4>
+          <p>Each configuration is named and versioned. Turn stages off, choose the default orchestrator, and point it at the capability catalogue for skill, sub-agent, MCP, tool, plugin and hook control. Create as many as you have kinds of engagement.</p>
+        </div>
+        <div class="panel">
+          <h4>A shorter way in</h4>
+          <p>The start wizard asks for four things — configuration, project, orchestrator and the business intent — instead of scoping from a blank sentence. Everything downstream is the ordinary lifecycle.</p>
+        </div>
+        <div class="panel">
+          <h4>Same gates, no exceptions</h4>
+          <p>A system changes how a run is <em>assembled</em>, never what it is allowed to do. Role selection, <code>APPROVE PLAN</code>, the Codex write binding and publication approvals all survive intact.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROJECTS -->
+    <div class="stack" id="projects">
+      <h3>2 · Projects — the folder runs belong to</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        A project is a name, a description and a list of repository paths. That is deliberately all it is: it
+        holds <em>no workflow state</em>, so grouping runs can never change what any of them is permitted to do.
+      </p>
+
+      <div class="console">
+        <div class="c-chrome"><span class="c-path">Projects</span><span class="c-pill">4 projects · 26 unassigned runs</span></div>
+        <div class="c-body">
+          <div class="c-sub">Projects group runs. They hold no workflow state of their own.</div>
+          <div class="grid-2" style="gap:14px">
+            <div class="c-card stack-sm">
+              <div style="color:var(--c-ink);font-weight:600">Returns modernisation</div>
+              <div class="c-crumb">returns-modernisation-b378</div>
+              <div class="c-sub">Storefront and orders alignment for the returns journey.</div>
+              <div class="chips" style="gap:6px"><span class="c-pill">5 runs</span><span class="c-pill">1 repo</span></div>
+            </div>
+            <div class="c-card stack-sm">
+              <div style="color:var(--c-ink);font-weight:600">Checkout resilience</div>
+              <div class="c-crumb">checkout-resilience-b447</div>
+              <div class="c-sub">Payment-outage behaviour and recovery.</div>
+              <div class="chips" style="gap:6px"><span class="c-pill">3 runs</span><span class="c-pill">1 repo</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Repositories must already exist</h4>
+          <p>FLOW never clones, initialises or modifies a repository to satisfy a project. Point it at a directory that is already on disk, or it refuses.</p>
+        </div>
+        <div class="panel">
+          <h4>Nothing is orphaned</h4>
+          <p>Runs created before projects existed keep working and are listed as unassigned. A project is never required.</p>
+        </div>
+        <div class="panel">
+          <h4>Deleting is conservative</h4>
+          <p>Deleting a project moves only its metadata to trash, leaves every repository untouched, and is refused outright while any live chat or run still refers to it.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHATS -->
+    <div class="stack" id="chats">
+      <h3>3 · Chats — thinking out loud, with nothing switched on</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Sometimes you just want to ask something. A chat creates no run, no roles, no plan, no approvals and no
+        checkpoints. It starts in <b>restricted plan mode with permission prompts denied</b>, and its tools are
+        off until you deliberately turn one on — so the safe path is also the default one.
+      </p>
+
+      <div class="console">
+        <div class="c-chrome"><span class="c-path">New chat</span><span class="c-pill">no run · no roles · no approvals</span></div>
+        <div class="c-body">
+          <div class="c-title" style="font-size:17px">Service access <span style="color:var(--c-subtle);font-weight:400;font-size:13px">optional, none by default</span></div>
+          <div class="c-sub">Allow this chat to read linked content through specific configured connections. Credentials stay in FLOW and are never sent to the AI provider.</div>
+          <div class="c-card stack-sm">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+              <span style="color:var(--c-ink)">Atlassian REST API</span>
+              <span class="c-pill ok">connected · read</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+              <span style="color:var(--c-ink)">Atlassian Rovo MCP</span>
+              <span class="c-pill warn">oauth required</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+              <span style="color:var(--c-ink)">Bitbucket Cloud</span>
+              <span class="c-pill ok">connected · read</span>
+            </div>
+          </div>
+          <div class="c-sub">A chat has no plan, roles or approvals behind it, so a connection is offered only where the tool scope can actually be enforced.</div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Links, not credentials</h4>
+          <p>A granted REST connection resolves only the Jira, Confluence, GitHub or Bitbucket links that appear in your message. FLOW hands the chat the <em>result</em> — the token never reaches the AI CLI or the chat record.</p>
+        </div>
+        <div class="panel">
+          <h4>Offered only where it can be enforced</h4>
+          <p>Codex chats get an explicit allowlist of read-only tools in a read-only sandbox. Claude chats get a connection only when every tool it offers reads. Gemini chats get none — its CLI cannot load per-chat MCP config, and FLOW will not widen the machine-global setting to fake it.</p>
+        </div>
+        <div class="panel">
+          <h4>Its own storage and its own bin</h4>
+          <p>Chats live under <code>~/.claude-shared/chats</code>, quite separate from runs. Deleting one moves its record to <code>.trash</code> and never touches the files you attached.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SESSIONS -->
+    <div class="stack" id="sessions">
+      <h3>4 · Sessions — several runs open at once</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Real delivery work does not happen one run at a time. Each Claude-led run gets its own orchestrator
+        session — exactly one <code>fde-start --resume &lt;run-id&gt;</code> process, <b>one per run, never two</b> —
+        running in an embedded terminal and streamed to its Session tab. You switch between them from the
+        sidebar; they keep running while you are looking at something else.
+      </p>
+
+      <div class="console">
+        <div class="c-chrome"><span class="c-path">Console sessions</span><span class="c-pill ok">2 running</span><span class="c-pill">1 finished</span></div>
+        <div class="c-body">
+          <div class="c-sub">Every orchestrator session this console has started. Each one is a single <span class="mono" style="color:var(--c-accent)">fde-start --resume</span> process, and only one per run.</div>
+          <div class="c-scroll">
+            <table class="c-table">
+              <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Viewers</th><th>Working directory</th><th></th></tr></thead>
+              <tbody>
+                <tr>
+                  <td class="id">20260904-acme-142-c6e6</td>
+                  <td><span class="c-pill ok">running</span></td>
+                  <td>3:59 PM</td><td>1</td>
+                  <td>~/code/returns-api</td>
+                  <td style="color:var(--c-accent)">Stop</td>
+                </tr>
+                <tr>
+                  <td class="id">20260904-acme-500-3f78</td>
+                  <td><span class="c-pill ok">running</span></td>
+                  <td>1:14 PM</td><td>0</td>
+                  <td>~/code/checkout</td>
+                  <td style="color:var(--c-accent)">Stop</td>
+                </tr>
+                <tr>
+                  <td class="id">20260902-adr-token-9b14</td>
+                  <td><span class="c-pill">finished</span></td>
+                  <td>Sep 2, 4:12 PM</td><td>0</td>
+                  <td>~/code/orders</td>
+                  <td style="color:var(--c-subtle)">Delete</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <h4>The sidebar is the switcher</h4>
+          <p>A <b>Running</b> group pins every live session with a <code>live</code> badge; <b>Recents</b> holds what you touched last, with its age. Click one and you are back in that conversation exactly where it was — the session was never paused.</p>
+        </div>
+        <div class="panel">
+          <h4>Choices survive a resume</h4>
+          <p>The model and effort you picked at creation are written into the run manifest and reapplied by <code>fde-start</code> on every resume, so a run does not quietly change model between sittings.</p>
+        </div>
+        <div class="panel">
+          <h4>Stopping ≠ deleting</h4>
+          <p>Deleting a finished session only forgets its terminal scrollback — the run itself is untouched. Deleting the <em>run</em> is controller-owned, moves the whole directory to <code>runs/.trash</code>, and is refused while its terminal or a design-panel worker is still alive.</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <b>A Codex-led run is labelled honestly instead of faked.</b> The console can only hold a
+        <code>fde-start</code> conversation for Claude profiles, so a run driven from Codex says so rather than
+        offering a Resume button that would not work. You drive that one from its own Codex task.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ A RUN ============================ -->
+<section id="run">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">A run, end to end</p>
+      <h2>Four questions, then it gets to work</h2>
+      <p class="lede">
+        You don't drive FLOW with controller commands. You start the launcher, choose the Claude identity that
+        will orchestrate, describe the request in a sentence, and make the decisions in chat. It runs the
+        <code>fde</code> calls behind each answer and holds the record.
+      </p>
+    </div>
+
+    <pre><span class="cm"># start the orchestrator conversation</span>
+fde-start                              <span class="cm"># choose work, msc, alt or bedrock</span>
+fde-start <span class="kw">--orchestrator</span> bedrock       <span class="cm"># or select it directly</span></pre>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h4>1 · Is this the ask?</h4>
+        <p>It reads your sentence back before acting on it. A Jira key at the start is picked up automatically.</p>
+      </div>
+      <div class="panel">
+        <h4>2 · Is this the plan?</h4>
+        <p>It proposes the stages your sentence implies and shows what it is <em>not</em> doing. Most work is a slice, not the full lifecycle.</p>
+      </div>
+      <div class="panel">
+        <h4>3 · Who should do each job?</h4>
+        <p>It shows the required specialist roles, why each is needed, and every eligible identity. Accounts have no fixed roles.</p>
+      </div>
+      <div class="panel">
+        <h4>4 · Do you approve all of it?</h4>
+        <p>One summary of request, plan, deliverables, assignments, access and remaining hard gates. Then you type the phrase.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <b>Nothing has been read at this point.</b> Not Jira, not your client file, nothing. The Atlassian connector is
+      in nobody's global config, so it cannot be used during scoping — it appears only after the combined approval.
+      That is why the session then hands you over: the orchestrator asks you to type <code>/exit</code> once, and
+      <code>fde-start</code> resumes the same conversation with the run-scoped connectors enabled.
+    </div>
+
+    <div class="stack">
+      <h3>The twelve stages, and the gates between them</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        A run is a slice of the pipeline, not all of it. The plan decides which stages this run does, and
+        everything downstream follows it — the role question shrinks to fit, <code>fde status</code> shows only
+        the artifacts in scope, and <code>fde invoke</code> refuses a stage that is not in the plan. Approval
+        gates are not stages you can plan around.
+      </p>
+      <div class="pipeline">
+        <span>intake</span><i>→</i>
+        <span>research</span><i>→</i>
+        <span>solution architecture</span><i>→</i>
+        <span>adversarial review</span><i>→</i>
+        <span>reconciliation</span><i>→</i>
+        <span>presentation</span><i>→</i>
+        <span>development plan</span><i>→</i>
+        <span class="gate">APPROVE CODEX</span><i>→</i>
+        <span>implementation</span><i>→</i>
+        <span>verification</span><i>→</i>
+        <span>deployment</span><i>→</i>
+        <span>observability</span><i>→</i>
+        <span class="gate">APPROVE PUBLISH</span><i>→</i>
+        <span>publication</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <h3>Named shapes, when you already know the slice</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Say “use the presentation and delivery-plan shapes” in the orchestrator chat. A named shape is a
+        planning shortcut, not an approval shortcut — it still shows the resulting plan and roles for approval.
+      </p>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Shape</th><th>Stages</th></tr></thead>
+          <tbody>
+            <tr><td><code>research</code></td><td>intake → research</td></tr>
+            <tr><td><code>research-to-adr</code></td><td>intake → research → solution architecture → review → reconciliation</td></tr>
+            <tr><td><code>review-only</code></td><td>intake → adversarial review</td></tr>
+            <tr><td><code>presentation</code></td><td>intake → presentation</td></tr>
+            <tr><td><code>delivery-plan</code></td><td>intake → development plan</td></tr>
+            <tr><td><code>build</code></td><td>intake → implementation → verification</td></tr>
+            <tr><td><code>pr-review</code></td><td>intake → review → verification</td></tr>
+            <tr><td><code>design-to-build</code></td><td>intake → solution architecture/design → presentation → planning → implementation → verification</td></tr>
+            <tr><td><code>design-panel</code></td><td>intake → solution architecture → adversarial review → reconciliation → presentation</td></tr>
+            <tr><td><code>release</code></td><td>verification → deployment → observability</td></tr>
+            <tr><td><code>operate</code></td><td>intake → observability</td></tr>
+            <tr><td><code>full</code></td><td>all twelve stages</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        Widening a plan works forwards (<code>fde plan &lt;run-id&gt; --add solutioning</code>); going backwards is a new run.
+        Start a second task and all four questions come again — nothing is inherited.
+      </p>
+    </div>
+
+    <div class="stack">
+      <h3>The roles a full lifecycle can ask for</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Solid chips are required when their stage is in the plan; dashed chips are optional. These are
+        <em>methods</em>, not accounts — you choose the identity for every one of them, every run.
+      </p>
+      <div class="chips">
+        <span class="chip core">orchestrator</span>
+        <span class="chip opt">productManagement</span>
+        <span class="chip">research</span>
+        <span class="chip">solutioning</span>
+        <span class="chip opt">uiUxDesign</span>
+        <span class="chip opt">designSystem</span>
+        <span class="chip">review</span>
+        <span class="chip opt">prReview</span>
+        <span class="chip opt">standardsReview</span>
+        <span class="chip opt">securityReview</span>
+        <span class="chip">deliveryPlanning</span>
+        <span class="chip">presentation</span>
+        <span class="chip">implementation</span>
+        <span class="chip">testEngineering</span>
+        <span class="chip opt">ciInvestigation</span>
+        <span class="chip">releaseManagement</span>
+        <span class="chip">observability</span>
+        <span class="chip opt">microsoftContext</span>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        Gemini and Microsoft Copilot cannot orchestrate — Gemini is a one-shot headless call with no session
+        state, and Copilot is a chat endpoint over the Microsoft estate, so neither can hold a run together.
+        Both can still research or review.
+      </p>
+    </div>
+
+    <div class="stack">
+      <h3>What lands in the run directory</h3>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Artifact</th><th>Produced by</th></tr></thead>
+          <tbody>
+            <tr><td><code>research/research-brief.md</code></td><td>research</td></tr>
+            <tr><td><code>architecture/architecture-options.md</code>, <code>adr.md</code></td><td>solutioning</td></tr>
+            <tr><td><code>review/review.md</code>, <code>reconciliation.md</code></td><td>review, reconciliation</td></tr>
+            <tr><td><code>presentation/solution-presentation.pptx</code></td><td>presentation</td></tr>
+            <tr><td><code>delivery-plan/development-plan.md</code>, <code>jira-plan.json</code></td><td>planning</td></tr>
+            <tr><td><code>implementation/implementation-task.md</code>, <code>verification-report.md</code></td><td>implementation, verification</td></tr>
+            <tr><td><code>deployment/deployment-report.md</code></td><td>deployment</td></tr>
+            <tr><td><code>observability/observability-plan.md</code></td><td>observability</td></tr>
+            <tr><td><code>publication-manifest.json</code></td><td>publication</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        Alongside them: <code>approvals.jsonl</code>, <code>events.jsonl</code>, hashed evidence checkpoints, and
+        the inputs you attached. The console deliberately does not serve the approval ledger, the session id or
+        the run-scoped connector configuration as browsable files.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ GATES ============================ -->
+<section id="gates">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">The approvals</p>
+      <h2>Two places you type rather than talk — and that is the point</h2>
+      <p class="lede">
+        The approval strings are not something an agent can hear you say by accident. Each one is shown to you
+        with exactly what it authorises before you type it.
+      </p>
+    </div>
+
+    <div class="stack">
+      <h3>Letting Codex write code</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Giving Codex the implementation role authorises nothing on its own. The write is a separate, deliberate step.
+      </p>
+      <pre>fde approve-codex &lt;run-id&gt; implementation \
+  <span class="kw">--task-file</span> ~/.claude-shared/runs/&lt;run-id&gt;/artifacts/implementation/implementation-task.md \
+  <span class="kw">--repo</span> ~/work/client-returns \
+  <span class="kw">--commands</span> <span class="st">"pytest -q"</span>
+
+<span class="cm"># you are shown: the repo, the branch, the writable root, the SHA-256 of the</span>
+<span class="cm"># task file, whether network was asked for, and what it may run. Read it, then type:</span>
+<span class="ph">APPROVE CODEX &lt;run-id&gt;</span>
+
+fde invoke &lt;run-id&gt; chatgpt_codex \
+  ~/.claude-shared/runs/&lt;run-id&gt;/artifacts/implementation/implementation-task.md <span class="kw">--write</span></pre>
+      <div class="callout warnbox">
+        One use, 30 minutes, bound to those exact bytes. Codex runs non-interactively with
+        <code>--sandbox workspace-write</code>: the filesystem is bounded to the approved root and network is off.
+        Edit the task file and the approval is <em>refused rather than stretched</em> — approve the new one.
+      </div>
+    </div>
+
+    <div class="stack">
+      <h3>Letting anything leave the machine</h3>
+      <pre>fde approve-publish &lt;run-id&gt; jira <span class="kw">--summary</span> <span class="st">"8 stories under ACME-142"</span>
+<span class="ph">APPROVE PUBLISH &lt;run-id&gt;</span>
+
+confluence create ENG <span class="st">"ADR 004: Token exchange"</span> \
+  ~/.claude-shared/runs/&lt;run-id&gt;/artifacts/architecture/adr.md <span class="kw">--parent</span> 123456</pre>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        One target, one approval. <code>jira-plan.json</code> is a <em>preview</em> — a plan existing is not a
+        reason to create anything. Figma canvas writes take the same route:
+        <code>fde approve-publish &lt;run-id&gt; figma</code>.
+      </p>
+    </div>
+
+    <div class="stack">
+      <h3>Output hygiene runs before anything is published</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Every legal transition into <code>publication</code> or <code>complete</code> applies a narrow,
+        provenance-preserving hygiene policy to files under <code>artifacts/</code> and writes a hashed JSON
+        report under <code>artifacts/evidence/</code>.
+      </p>
+      <div class="grid-2">
+        <div class="panel">
+          <h4>It removes</h4>
+          <p>Unsafe invisible Unicode, local home-directory prefixes, and selected personal or path-like Office properties.</p>
+        </div>
+        <div class="panel">
+          <h4>It preserves</h4>
+          <p>Creator, copyright and ownership fields, visible watermarks, C2PA content credentials, symlinks and unknown binary metadata.</p>
+        </div>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        Preview it at any time with <code>fde output-hygiene &lt;run-id&gt; --check</code>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ GOVERNANCE ============================ -->
+<section id="governance">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Governance</p>
+      <h2>Read-only is enforced, or it is not claimed</h2>
+      <p class="lede">
+        A prompt is not a control. Each client gets its scope in its own mechanism — Claude permission rules
+        with exact tool names and no wildcards, Codex <code>enabled_tools</code>, Gemini
+        <code>includeTools</code> — built from the tool list the server actually reported.
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table class="data">
+        <thead><tr><th>State</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td><code>catalogue</code></td><td>FLOW knows how to run this server. That is all it means.</td></tr>
+          <tr><td><code>configured</code></td><td>You supplied the settings and credentials it declares.</td></tr>
+          <tr><td><code>ready</code></td><td>Also installed, and a bounded verification succeeded.</td></tr>
+          <tr><td><code>active</code></td><td>In a specific run's or chat's effective set, because that run's approved stages, roles and profile call for it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+      Where a provider offers no verifiable read-only subset, the server stays inactive and reports
+      <code>blocked</code> with the reason instead of being described as safe. Atlassian and Figma are the
+      honest exception — their OAuth token belongs to the MCP client, so FLOW cannot enumerate their tools, and
+      every surface says so. <code>fde mcp effective --run &lt;id&gt;</code> shows what one run may actually
+      reach, and why anything else may not.
+    </p>
+
+    <div class="grid-3">
+      <div class="panel">
+        <h4>Ten servers, pinned</h4>
+        <p>Context7 and Serena for code, Playwright and Chrome DevTools for the browser, Atlassian and Figma for delivery and design, DBHub, AWS, Azure and Langfuse for data, cloud and observability.</p>
+      </div>
+      <div class="panel">
+        <h4>Profiles narrow, never widen</h4>
+        <p><code>coding</code>, <code>frontend-testing</code>, <code>client-delivery</code>, <code>data</code>, <code>observability</code> each name a slice of the catalogue for a kind of work.</p>
+      </div>
+      <div class="panel">
+        <h4>No permanent privilege</h4>
+        <p>Atlassian is role-scoped: it stays out of every global config and is written per run, for whichever identity holds the role. There is no permanently privileged orchestrator account, because there is no permanent orchestrator.</p>
+      </div>
+    </div>
+
+    <div class="stack">
+      <h3>Four layers, so nothing leaks between engagements</h3>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Layer</th><th>Lives in</th><th>Changes when</th></tr></thead>
+          <tbody>
+            <tr><td><b>Shared</b> — how you work, standards, client context</td><td><code>~/.claude-shared/</code></td><td>rarely</td></tr>
+            <tr><td><b>Toolkit</b> — skills, agents, commands, MCP servers, hooks</td><td><code>~/.claude-shared/fde-toolkit/</code></td><td>when you build a capability</td></tr>
+            <tr><td><b>Run</b> — one requirement, its roles, approvals, artifacts</td><td><code>~/.claude-shared/runs/&lt;run-id&gt;/</code></td><td>constantly, and never shared</td></tr>
+            <tr><td><b>Repo</b> — what <em>this</em> codebase is</td><td><code>&lt;repo&gt;/CLAUDE.md</code> + <code>&lt;repo&gt;/.claude/</code></td><td>per engagement</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        Plus one config directory per identity in <code>~/.claude-profiles/</code>, holding <em>only</em> auth and
+        provider settings. The shared layer is symlinked into each, so every profile sees the same context
+        without duplicating it — and one account's settings never leak into another's.
+      </p>
+    </div>
+
+    <div class="stack">
+      <h3>One instruction file, three agents</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        The other CLIs disagree about which instruction file to read and each stores MCP config in a different
+        place and shape. FLOW makes <code>AGENTS.md</code> the single source and generates the adapters.
+      </p>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Tool</th><th>Reads AGENTS.md</th><th>Adapter</th></tr></thead>
+          <tbody>
+            <tr><td>Codex CLI</td><td>natively</td><td>none</td></tr>
+            <tr><td>Claude Code</td><td>no</td><td><code>CLAUDE.md</code> containing <code>@AGENTS.md</code></td></tr>
+            <tr><td>Gemini CLI</td><td>not by default</td><td>one-time <code>context.fileName</code> setting</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        <code>mcp-sync</code> does the same for MCP: one source file at
+        <code>~/.claude-shared/mcp/mcp-servers.json</code> becomes a Claude <code>.mcp.json</code>, a Gemini
+        <code>settings.json</code> and a Codex <code>config.toml</code>. Servers FLOW manages are tagged
+        <code>_fdeManaged</code>, so a server you added by hand survives an update.
+      </p>
+      <div class="callout">
+        <b>GitHub Copilot is not part of this ecosystem.</b> <code>ask-copilot</code> is a stub that says so,
+        <code>mcp-sync</code> never reads or writes <code>~/.copilot</code>, and your existing configuration there
+        is left alone. “Copilot” here always means Microsoft 365 Copilot / Copilot Studio.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ GET STARTED ============================ -->
+<section id="start">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Get started</p>
+      <h2>About thirty minutes to a first completed run</h2>
+      <p class="lede">
+        Everything below is copy-paste. You need Node 22+ and Claude Code signed in at least once. Codex and
+        Gemini are optional until you actually assign them a role.
+      </p>
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Install</h3>
+          <p>Clone the repository somewhere permanent, then look before you write. <code>--dry-run</code> writes nothing.</p>
+          <pre>git clone https://github.com/poornimaka99x/fde-local-workspace.git
+cd fde-local-workspace
+
+./install.sh <span class="kw">--update --dry-run</span>     <span class="cm"># look first — nothing is written</span>
+./install.sh <span class="kw">--update</span>
+exec $SHELL <span class="kw">-l</span></pre>
+          <p>
+            This creates the profiles <code>work</code>, <code>msc</code>, <code>alt</code> and
+            <code>bedrock</code> — or name your own with <code>./install.sh work bedrock</code>. The installer
+            never deletes, shows you a diff before replacing anything you customised, and backs up what it
+            replaces into <code>~/.claude-shared/.backups/</code>. Your client contexts, intake files, run
+            history, logins and profile settings are never touched.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Create your credential file by hand</h3>
+          <p>
+            The installer deliberately does <em>not</em> copy any <code>.env.sh</code> out of the repository: a
+            secret should never travel with the source, and never into a cloud-synced folder. Your shell sources
+            <code>~/.claude-shared/env.sh</code>, which you create once, from the template.
+          </p>
+          <pre>cp claude-shared/env.sh.example ~/.claude-shared/env.sh
+chmod 600 ~/.claude-shared/env.sh
+${EDITOR:-vi} ~/.claude-shared/env.sh <span class="cm"># CONFLUENCE_BASE_URL, EMAIL, API_TOKEN</span>
+source ~/.claude-shared/env.sh
+
+confluence spaces                  <span class="cm"># should list your spaces</span></pre>
+          <p>
+            Get an Atlassian API token at <code>id.atlassian.com → Security → API tokens</code>. Set
+            <code>CONFLUENCE_BASE_URL</code> to your own site and <code>CONFLUENCE_EMAIL</code> to the account
+            that token belongs to. This file is gitignored, is never read into an agent prompt, and
+            <code>fde doctor</code> warns you if its permissions are looser than <code>600</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Check what you have</h3>
+          <pre>fde doctor</pre>
+          <p>Read it as three groups:</p>
+          <div class="tablewrap">
+            <table class="data">
+              <thead><tr><th>Marker</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>BROKEN*</code></td><td>Blocks you. Fix before going further.</td></tr>
+                <tr><td><code>--</code></td><td>Advisory. Codex and Gemini missing is fine if you are not assigning them roles yet; Copilot Studio unconfigured is fine — it needs your admin.</td></tr>
+                <tr><td><code>ok</code></td><td>Done.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Want the two extra CLIs?</p>
+          <pre>npm i -g @openai/codex @google/gemini-cli</pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Sign in once per identity</h3>
+          <pre>cc-work   cc-msc   cc-alt      <span class="cm"># personal accounts</span>
+cc-bedrock                      <span class="cm"># an org account on AWS Bedrock</span>
+cc-which                        <span class="cm"># what exists, what's active</span></pre>
+          <p>
+            Bedrock account settings live in the FLOW account registry — choose the AWS profile and region when
+            adding the account, or change them later under <b>Configuration → AI accounts</b>. FLOW exports those
+            values for verification and every launch.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Open the console</h3>
+          <pre>cd fde-gui
+npm install        <span class="cm"># once</span>
+npm start          <span class="cm"># builds the UI, serves it on 127.0.0.1:7317</span></pre>
+          <p>
+            Open the link the server prints — it looks like
+            <code>http://127.0.0.1:7317/#token=…</code>. The token lives in the URL fragment, which the browser
+            never sends to a server, so it stays out of logs and history sync. It is valid for that launch only;
+            a tab opened without it is refused.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Your first run</h3>
+          <p>
+            You do not drive this with controller commands. Start the launcher, choose the Claude identity, give
+            it the request in a sentence, and answer the four questions in plain English.
+          </p>
+          <pre>fde-start                       <span class="cm"># choose work, msc, alt or bedrock</span></pre>
+          <p>
+            When it shows you one combined summary of the request, plan, deliverables, assignments, access and
+            remaining hard gates — and only when it is correct — type the exact phrase it gives you:
+          </p>
+          <pre><span class="ph">APPROVE PLAN &lt;run-id&gt;</span></pre>
+          <p>
+            Then type <code>/exit</code> when prompted. <code>fde-start</code> resumes the same conversation with
+            the run-scoped connectors enabled, and works the stages you agreed to. Within clear approved scope it
+            uses its normal configured tools without asking for each routine operation; it stops and asks when
+            intent, target, authority, destructive effect, acceptance criteria or required evidence is ambiguous.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-body">
+          <h3>Watch it from outside</h3>
+          <p>
+            Ask in the session — “where is this?”, “what's next?”, “park it, I need to check with the PO” — and
+            it runs the right command. The CLI is there for when you want to look from another terminal.
+          </p>
+          <pre>fde status &lt;run-id&gt;    <span class="cm"># plan, roles, artifacts, approvals, next step</span>
+fde list               <span class="cm"># all runs</span>
+fde shapes             <span class="cm"># the named plan shapes</span></pre>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="stack">
+      <h3>Still needs someone else</h3>
+      <div class="grid-3">
+        <div class="panel">
+          <h4>Copilot Studio</h4>
+          <p>Needs an eligible account and a published agent. Store the Direct Line secret through FLOW, not in <code>env.sh</code>:<br>
+          <code>fde accounts set-secret &lt;account-id&gt;</code></p>
+        </div>
+        <div class="panel">
+          <h4>Bitbucket via Atlassian</h4>
+          <p>Depends on token scopes and whether the site is linked to your organisation. Ask your admin. Local git works regardless, and is still the right way to touch repositories.</p>
+        </div>
+        <div class="panel">
+          <h4>Client context</h4>
+          <p>Run <code>/client-context &lt;slug&gt;</code> before real work. It is why agent output either sounds like your client, or sounds like nobody.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <h3>Checking it still works</h3>
+      <pre>python3 <span class="kw">-m</span> unittest discover <span class="kw">-s</span> tests
+fde doctor</pre>
+      <p style="font-size:.88rem;color:var(--ink-subtle)">
+        The controller and harness suites run against temporary homes and a stub Codex; they never touch your
+        real configuration.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CHEAT SHEET ============================ -->
+<section id="cheatsheet">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Commands</p>
+      <h2>The cheat sheet</h2>
+      <p class="lede">
+        The orchestrator runs most of this for you. It is listed so you can look from outside — and for the
+        approvals, which are always yours to type.
+      </p>
+    </div>
+
+    <div class="grid-2">
+      <div class="stack-sm">
+        <h4>Running work</h4>
+        <pre>fde-start                     <span class="cm">start a run + orchestrator chat</span>
+fde-start <span class="kw">-o</span> bedrock            <span class="cm">choose the orchestrator</span>
+fde-start <span class="kw">--resume</span> &lt;run-id&gt;     <span class="cm">resume a launcher session</span>
+
+<span class="ph">APPROVE PLAN &lt;run-id&gt;</span>        <span class="cm">plan + roles, together</span>
+<span class="ph">APPROVE CODEX &lt;run-id&gt;</span>       <span class="cm">never inferred</span>
+<span class="ph">APPROVE PUBLISH &lt;run-id&gt;</span>     <span class="cm">one target at a time</span>
+
+fde doctor                    <span class="cm">configured vs broken</span>
+fde status &lt;run-id&gt;           <span class="cm">plan, roles, approvals, next</span>
+fde list <span class="kw">--json</span>               <span class="cm">the same, for a program</span>
+fde shapes                    <span class="cm">named plan shapes</span>
+fde resume &lt;run-id&gt; <span class="kw">--next</span>    <span class="cm">advance to what's next</span>
+fde resume &lt;run-id&gt; <span class="kw">--block</span> <span class="st">"…"</span>  <span class="cm">park it with a reason</span></pre>
+      </div>
+
+      <div class="stack-sm">
+        <h4>Projects and inputs</h4>
+        <pre>fde project create <span class="kw">--name</span> <span class="st">"…"</span> <span class="kw">--repo</span> ~/code/api
+fde projects                  <span class="cm">names, repos, run counts</span>
+fde project show &lt;id&gt;
+fde start <span class="st">"…"</span> <span class="kw">--project</span> &lt;id&gt;
+fde attach &lt;run-id&gt; &lt;file&gt;    <span class="cm">hashed and recorded</span>
+fde attachments &lt;run-id&gt;
+fde delete &lt;run-id&gt; <span class="kw">--confirm</span> &lt;run-id&gt;</pre>
+
+        <h4 style="margin-top:8px">Identities and delegation</h4>
+        <pre>cc-work  cc-msc  cc-alt  cc-bedrock
+cc-which                      <span class="cm">which one is active</span>
+
+ask-gemini <span class="st">"…"</span>               <span class="cm">long context, web research</span>
+ask-codex <span class="kw">--read-only</span> <span class="st">"…"</span>    <span class="cm">second opinion, cannot write</span>
+ask-ms-copilot <span class="st">"…"</span>           <span class="cm">SharePoint, Outlook, Teams</span>
+git diff | ask-gemini <span class="st">"what breaks in production?"</span></pre>
+      </div>
+
+      <div class="stack-sm">
+        <h4>The governed MCP catalogue</h4>
+        <pre>fde mcp list                  <span class="cm">every server + lifecycle state</span>
+fde mcp status &lt;server&gt;
+fde mcp configure &lt;s&gt; <span class="kw">--set</span> k=v
+fde mcp set-secret &lt;s&gt; &lt;field&gt;  <span class="cm">reads stdin, echoes nothing</span>
+fde mcp verify &lt;server&gt;        <span class="cm">bounded init + tool listing</span>
+fde mcp effective <span class="kw">--run</span> &lt;run-id&gt;  <span class="cm">what this run may reach</span>
+
+mcp-sync                      <span class="cm">regenerate all three configs</span>
+mcp-sync <span class="kw">--dry-run</span>            <span class="cm">show changes, write nothing</span></pre>
+      </div>
+
+      <div class="stack-sm">
+        <h4>Design panels</h4>
+        <pre>fde design-panel create &lt;run-id&gt; <span class="kw">--brief-file</span> b.md \
+  <span class="kw">--propose-plan</span> \
+  <span class="kw">--participant</span> work:flow \
+  <span class="kw">--participant</span> msc:visual \
+  <span class="kw">--participant</span> alt:system
+
+fde design-panel show &lt;run-id&gt;
+fde design-panel start &lt;run-id&gt; claude_work
+fde design-panel reconcile &lt;run-id&gt;
+<span class="ph">APPROVE DEGRADED RECONCILIATION &lt;run-id&gt;</span>  <span class="cm">when only one landed</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ REFUSALS ============================ -->
+<section id="refused">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">When something is refused</p>
+      <h2>Every refusal names the missing thing</h2>
+      <p class="lede">
+        If a command refuses, that is the design working. This table is the whole vocabulary — each message
+        tells you what was missing and the exact command that supplies it.
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table class="data">
+        <thead><tr><th>What you see</th><th>What it means</th><th>What to do</th></tr></thead>
+        <tbody>
+          <tr><td><code>has no orchestrator yet</code></td><td>the first decision hasn't been made</td><td><code>fde orchestrator &lt;run-id&gt; &lt;who&gt;</code></td></tr>
+          <tr><td><code>cannot orchestrate</code></td><td>Gemini and MS Copilot can't hold a run together</td><td>pick a Claude profile or Codex</td></tr>
+          <tr><td><code>has no stated ask yet</code></td><td>you planned before saying what you want</td><td><code>fde request &lt;run-id&gt; "…"</code></td></tr>
+          <tr><td><code>no confirmed plan</code></td><td>the run hasn't been scoped</td><td><code>fde plan &lt;run-id&gt; --stages …</code></td></tr>
+          <tr><td><code>roles are not confirmed</code></td><td>you tried to read or run something before assigning roles</td><td><code>fde roles &lt;run-id&gt;</code></td></tr>
+          <tr><td><code>not a role this run needs</code></td><td>that role isn't in the plan</td><td><code>fde plan &lt;run-id&gt; --add &lt;stage&gt;</code> first</td></tr>
+          <tr><td><code>not in this run's plan</code></td><td>that stage isn't in scope</td><td>widen the plan, or don't do it</td></tr>
+          <tr><td><code>already been passed</code></td><td>you can widen a plan forwards, not backwards</td><td>new run for that work</td></tr>
+          <tr><td><code>holds no role in run</code></td><td>that identity was not assigned anything here</td><td>assign it, or use one that was</td></tr>
+          <tr><td><code>Choose a replacement</code></td><td>you assigned something not installed on this device</td><td>install it, pick another, or <code>--allow-unavailable</code></td></tr>
+          <tr><td><code>no Codex write approval on record</code></td><td>the role is not the approval</td><td><code>fde approve-codex …</code></td></tr>
+          <tr><td><code>task file changed since approval</code></td><td>you edited the task after approving</td><td>approve the new one; never widen the old</td></tr>
+          <tr><td><code>approval consumed</code> / <code>expired</code></td><td>one use, 30 minutes</td><td>approve again</td></tr>
+          <tr><td><code>illegal transition</code></td><td>you skipped a stage</td><td><code>fde status &lt;run-id&gt;</code> shows the next legal one</td></tr>
+          <tr><td><code>only 1 proposal succeeded</code></td><td>a design-panel account failed or was stopped</td><td>retry it, or <code>fde design-panel approve-degraded</code></td></tr>
+          <tr><td><code>refusing to attach a symlink</code></td><td>the file you pointed at is a link</td><td>attach the real file</td></tr>
+          <tr><td><code>repository path does not exist</code></td><td>a project repo path is wrong or not yet cloned</td><td>give an existing directory — FLOW never clones one</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-grid">
+    <div class="stack-sm">
+      <div class="brandmark" style="font-size:1.15rem"><span class="dot"></span>FLOW</div>
+      <p>Forward-deployed Local Operations Workspace. A local console and controller for governed, multi-agent delivery work.</p>
+    </div>
+    <div class="stack-sm">
+      <h4 style="font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-subtle);font-family:var(--mono);font-weight:500">Where things live</h4>
+      <p style="font-family:var(--mono);font-size:.78rem;line-height:1.9">
+        ~/.claude-shared/<br>
+        ~/.claude-shared/runs/&lt;run-id&gt;/<br>
+        ~/.claude-profiles/&lt;identity&gt;/<br>
+        127.0.0.1:7317
+      </p>
+    </div>
+    <div class="stack-sm">
+      <h4 style="font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-subtle);font-family:var(--mono);font-weight:500">Source</h4>
+      <p>
+        <a href="https://github.com/poornimaka99x/fde-local-workspace">github.com/poornimaka99x/fde-local-workspace</a><br>
+        Source, setup guides and technical documentation are available in the repository.
+      </p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
