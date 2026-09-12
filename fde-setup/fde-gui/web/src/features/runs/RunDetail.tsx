@@ -153,7 +153,9 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
 
       <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`} tabIndex={-1}>
         {tab === 'overview' ? <Overview run={run} /> : null}
-        {tab === 'session' ? <SessionPanel run={run} autoStart={autoStart} /> : null}
+        {tab === 'session' ? (
+          <SessionPanel run={run} autoStart={autoStart} onRunChanged={status.reload} />
+        ) : null}
         {tab === 'routing' ? <RoutingMatrix run={run} /> : null}
         {tab === 'inputs' ? (
           <Inputs

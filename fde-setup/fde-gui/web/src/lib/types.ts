@@ -623,6 +623,8 @@ export interface ClaudeModelOption {
 
 export interface ClaudeAccount {
   id: string
+  /** Controller identity key. Older servers may omit it. */
+  identityId?: string | null
   label: string
   profile: string
   provider: 'anthropic' | 'bedrock' | 'codex' | 'gemini'

@@ -7,6 +7,7 @@ import { problem } from '../problem'
 import {
   PROJECT_ID_PATTERN,
   RUN_ID_PATTERN,
+  runController,
   runControllerJson,
   runControllerWithStdin,
 } from '../services/controller'
@@ -99,6 +100,10 @@ const createRunBody = z
 
 const uploadQuery = z.object({
   name: line(255).pipe(z.string().min(1, 'an original filename is required')),
+})
+
+const switchOrchestratorBody = z.object({
+  accountId: z.string().regex(ACCOUNT_ID_PATTERN, 'not a configured account'),
 })
 
 export function registerRunRoutes(
@@ -360,6 +365,103 @@ export function registerRunRoutes(
       release()
     }
   })
+
+  app.post<{ Params: { runId: string } }>(
+    '/api/runs/:runId/orchestrator',
+    async (request, reply) => {
+      const { runId } = request.params
+      if (!requireRunId(runId)) {
+        return problem(reply, 400, 'invalid-run-id', 'That is not a valid run id.')
+      }
+      const parsed = switchOrchestratorBody.safeParse(request.body)
+      if (!parsed.success) {
+        return problem(reply, 400, 'invalid-body', 'Choose a configured orchestrator account.',
+          describeZod(parsed.error))
+      }
+
+      const releaseRun = services.locks.tryAcquire(`run:${runId}`)
+      if (releaseRun === null) {
+        return problem(reply, 409, 'busy', 'This run is being changed right now.')
+      }
+      const releaseSession = services.locks.tryAcquire(`session:${runId}`)
+      if (releaseSession === null) {
+        releaseRun()
+        return problem(reply, 409, 'busy', 'This run is starting or changing its console session.')
+      }
+      try {
+        if (services.sessions.isRunning(runId)) {
+          return problem(
+            reply,
+            409,
+            'session-active',
+            'Stop the orchestrator session before switching accounts.',
+            'Stopping first prevents two account identities from acting as the same run at once.',
+          )
+        }
+
+        const before = statusSchema.parse(
+          await runControllerJson(config, ['status', runId, '--json', '--events-limit', '1']),
+        )
+        const account = services.accounts.getConfigured(parsed.data.accountId)
+        if (account === null || account.identityId === null) {
+          return problem(
+            reply,
+            400,
+            'unknown-orchestrator',
+            'That account is not registered as an orchestrator for this console.',
+            'Add it under AI accounts, or choose another listed account.',
+          )
+        }
+        if (!account.capabilities.includes('orchestration')) {
+          return problem(
+            reply,
+            400,
+            'orchestrator-capability-required',
+            'That identity is not permitted to orchestrate a run.',
+          )
+        }
+        if (account.provider === 'codex' || account.provider === 'gemini') {
+          return problem(
+            reply,
+            400,
+            'interactive-orchestrator-required',
+            'Choose a Claude account that can continue this run in the Session tab.',
+          )
+        }
+        if (before.roles.orchestrator?.agentId === account.identityId) {
+          return problem(reply, 409, 'orchestrator-unchanged', 'That account already orchestrates this run.')
+        }
+        const auth = await services.accounts.status(account.id, true)
+        if (auth.state === 'login_required') {
+          return problem(reply, 409, 'login-required', 'Sign in to that account before switching.')
+        }
+        if (auth.state === 'unavailable') {
+          return problem(reply, 503, 'account-unavailable', 'The selected account is not available.')
+        }
+
+        // The explicit --reassign is the operator's requested identity change.
+        // It approves nothing: an approved automatic route becomes stale and
+        // must still be reviewed and re-approved in the replacement session.
+        await runController(config, [
+          'orchestrator', runId, account.identityId, '--reassign',
+        ])
+        const run = statusSchema.parse(
+          await runControllerJson(config, ['status', runId, '--json', '--events-limit', '50']),
+        )
+        services.watcher.touch()
+        return {
+          schemaVersion: 1,
+          switched: true,
+          previousOrchestrator: before.roles.orchestrator,
+          run,
+          reapprovalRequired: run.nextAction?.includes('approve-plan') ?? false,
+        }
+      } finally {
+        releaseSession()
+        releaseRun()
+      }
+    },
+  )
 
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (request, reply) => {
     const { runId } = request.params

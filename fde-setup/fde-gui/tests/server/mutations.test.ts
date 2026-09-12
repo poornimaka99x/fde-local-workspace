@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authed, makeHarness, type Harness } from './harness'
 import { claudeSession, statusFixture } from './fixtures'
+import { fakeSpawn } from './fake-terminal'
 
 const RUN = '20260901-acme-1-aaaa'
 const PROJECT = 'returns-modernisation-a1b2'
@@ -271,6 +272,75 @@ describe('safe mutations', () => {
     const call = harness.calls()[0] ?? []
     expect(call[call.length - 2]).toBe('--')
     expect(call[call.length - 1]).toBe('--dangerously-do-something')
+  })
+
+  it('switches a stopped run to another authenticated Claude orchestrator', async () => {
+    const switching = await makeHarness({ withDesignRegistry: true })
+    try {
+      switching.fixture(`status-${RUN}`, {
+        ...statusFixture(RUN),
+        nextAction: `fde approve-plan ${RUN} --reapprove`,
+        roles: {
+          confirmed: true,
+          confirmedAt: null,
+          selectedAt: null,
+          orchestrator: { agentId: 'claude_work', label: 'Claude: work', kind: 'claude' },
+          assignments: [],
+        },
+      })
+      switching.fixture(`orchestrator-${RUN}-claude_alt`, {})
+
+      const response = await switching.app.inject({
+        method: 'POST',
+        url: `/api/runs/${RUN}/orchestrator`,
+        headers: mutating(switching.token),
+        payload: { accountId: 'alt' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toMatchObject({ switched: true, reapprovalRequired: true })
+      expect(switching.calls()).toEqual([
+        ['status', RUN, '--json', '--events-limit', '1'],
+        ['orchestrator', RUN, 'claude_alt', '--reassign'],
+        ['status', RUN, '--json', '--events-limit', '50'],
+      ])
+    } finally {
+      await switching.destroy()
+    }
+  })
+
+  it('refuses to switch a run to an unknown or non-interactive account', async () => {
+    for (const accountId of ['missing', 'chatgpt_codex']) {
+      const response = await post(`/api/runs/${RUN}/orchestrator`, { accountId })
+      expect(response.statusCode).toBe(400)
+    }
+    expect(harness.calls()).toEqual([
+      ['status', RUN, '--json', '--events-limit', '1'],
+      ['status', RUN, '--json', '--events-limit', '1'],
+    ])
+  })
+
+  it('refuses an account switch while the orchestrator process is still running', async () => {
+    const active = await makeHarness({ spawnTerminal: fakeSpawn })
+    try {
+      active.sessions.start({
+        runId: RUN,
+        startBin: active.config.fdeStartBin,
+        cwd: active.root,
+        env: {},
+      })
+      const response = await active.app.inject({
+        method: 'POST',
+        url: `/api/runs/${RUN}/orchestrator`,
+        headers: mutating(active.token),
+        payload: { accountId: 'work' },
+      })
+      expect(response.statusCode).toBe(409)
+      expect(response.json()).toMatchObject({ type: 'about:fde/session-active' })
+      expect(active.calls()).toHaveLength(0)
+    } finally {
+      await active.destroy()
+    }
   })
 
   it('deletes a run through the controller with exact confirmation', async () => {

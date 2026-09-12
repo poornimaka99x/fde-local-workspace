@@ -222,6 +222,60 @@ describe('the session panel', () => {
     expect(posted.filter((call) => call.url.includes('/session/resume'))).toHaveLength(1)
   })
 
+  it('switches a stopped run to another eligible account after confirmation', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/api/claude/accounts')) {
+          return new Response(JSON.stringify({ accounts: [
+            {
+              id: 'work', identityId: 'claude_work', label: 'Claude: work', profile: 'work',
+              provider: 'anthropic', profilePresent: true, authState: 'authenticated',
+              authMethod: 'test', models: [], capabilities: ['orchestration'],
+              orchestratorEligible: true, designPanelEligible: false,
+            },
+            {
+              id: 'alt', identityId: 'claude_alt', label: 'Claude: alt', profile: 'alt',
+              provider: 'anthropic', profilePresent: true, authState: 'authenticated',
+              authMethod: 'test', models: [], capabilities: ['orchestration'],
+              orchestratorEligible: true, designPanelEligible: false,
+            },
+          ] }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        if (init?.method === 'POST' && url.endsWith('/orchestrator')) {
+          posted.push({ url, body: typeof init.body === 'string' ? JSON.parse(init.body) : null })
+          return new Response(JSON.stringify({
+            switched: true,
+            reapprovalRequired: true,
+            run: runFixture(),
+          }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ available: true, session: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    const changed = vi.fn()
+    render(<SessionPanel run={runFixture()} onRunChanged={changed} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Switch orchestrator' }))
+    await user.selectOptions(screen.getByLabelText('Replacement account'), 'alt')
+    await user.click(screen.getByRole('button', { name: 'Confirm switch' }))
+
+    await waitFor(() => expect(posted).toContainEqual({
+      url: '/api/runs/20260903-acme-1-aaaa/orchestrator',
+      body: { accountId: 'alt' },
+    }))
+    expect(changed).toHaveBeenCalled()
+    expect(await screen.findByText(/Switched to Claude: alt/)).toHaveTextContent(
+      /review its revised plan and routing/,
+    )
+  })
+
   it('interrupts first, and only force-stops behind a confirmation', async () => {
     {
       const running = {
@@ -245,6 +299,8 @@ describe('the session panel', () => {
       render(<SessionPanel run={runFixture()} forceStopDelayMs={10} />)
 
       await waitFor(() => expect(FakeSocket.instances).toHaveLength(1))
+      expect(screen.getByRole('button', { name: 'Switch orchestrator' })).toBeDisabled()
+      expect(screen.getByText(/Stop the current session before switching/)).toBeInTheDocument()
       await user.click(await screen.findByRole('button', { name: 'Stop' }))
       expect(posted.at(-1)).toMatchObject({ body: { force: false } })
       const force = await screen.findByRole('button', { name: 'Force stop' })
