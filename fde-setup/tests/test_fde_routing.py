@@ -1429,6 +1429,46 @@ class TestReapproval(RoutingTest):
         self.assertTrue(superseded["supersededAt"])
         self.assertIn("changed after its route was approved", superseded["reason"])
 
+    def test_refused_reapproval_preserves_the_existing_route_approval(self):
+        run_id = self.approved_run()
+        first = self.routing_doc(run_id)
+        self.reassign(run_id, review="claude_bedrock")
+        refused = self.sb.fde("approve-plan", run_id, "--reapprove", stdin="no\n")
+        self.assertEqual(refused.returncode, 8)
+        self.assertIn("confirmation did not match", refused.stderr)
+        doc = self.routing_doc(run_id)
+        self.assertEqual(doc["approvedAt"], first["approvedAt"])
+        self.assertEqual(doc["approvedBy"], first["approvedBy"])
+        self.assertEqual(doc["approvedWithPlanHash"], first["approvedWithPlanHash"])
+        self.assertEqual(doc["decisionHash"], first["decisionHash"])
+        self.assertEqual(doc.get("supersededApprovals") or [], [])
+
+    def test_reapproval_recovers_a_route_stranded_by_the_old_controller(self):
+        run_id = self.approved_run()
+        self.reassign(run_id, review="claude_bedrock")
+        path = self.sb.shared / "runs" / run_id / "routing.json"
+        doc = self.routing_doc(run_id)
+        doc["supersededApprovals"] = [{
+            "approvedAt": doc["approvedAt"],
+            "approvedBy": doc["approvedBy"],
+            "approvedWithPlanHash": doc["approvedWithPlanHash"],
+            "decisionHash": doc["decisionHash"],
+            "supersededAt": "2026-09-12T00:00:00+00:00",
+            "reason": "stranded by the old eager reapproval path",
+        }]
+        doc["approvedAt"] = None
+        doc["approvedWithPlanHash"] = None
+        doc.pop("approvedBy", None)
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
+        recovered = self.sb.fde("approve-plan", run_id, "--reapprove",
+                                stdin=f"APPROVE PLAN {run_id}\n")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        repaired = self.routing_doc(run_id)
+        self.assertTrue(repaired["approvedAt"])
+        self.assertTrue(repaired["approvedWithPlanHash"])
+        self.assertEqual(len(repaired["supersededApprovals"]), 1)
+
     def test_the_reapproved_route_is_the_one_that_gets_invoked(self):
         run_id = self.approved_run()
         self.reassign(run_id, review="claude_bedrock")

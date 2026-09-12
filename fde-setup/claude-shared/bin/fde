@@ -5765,7 +5765,12 @@ def cmd_approve_plan(args):
     if not plan.get("approvalRequired"):
         die(f"run {run.id} does not require a separate combined plan approval", 5)
     stale, why = routing_needs_reapproval(run)
-    if args.reapprove and not stale:
+    existing_route = load_routing(run)
+    stranded_reapproval = bool(
+        args.reapprove and plan.get("executionApprovedAt") and existing_route
+        and existing_route.get("mode") == "auto" and not existing_route.get("approvedAt")
+        and existing_route.get("supersededApprovals"))
+    if args.reapprove and not stale and not stranded_reapproval:
         die(f"run {run.id}'s approved route still matches its plan and roles; there is "
             f"nothing to re-approve", 5)
     if plan.get("executionApprovedAt") and not args.reapprove:
@@ -5809,6 +5814,11 @@ def cmd_approve_plan(args):
     # The exact combined gate covers the plan, the roles AND the route. If the
     # route recomputes differently from the one last shown, the approval cannot
     # stand for it, and the operator is shown the revised proposal instead.
+    if stranded_reapproval:
+        # Older controllers could clear the freeze before asking for typed
+        # confirmation. There is no approval left to preserve in that state, so
+        # bring its already-unapproved proposal current before showing the gate.
+        refresh_routing_proposal(run, agents)
     routing_doc = freeze_routing_for_approval(run, agents)
     if routing_doc is not None:
         print("\n  route")
@@ -5854,6 +5864,9 @@ def cmd_approve_plan(args):
     confirmation = input("> ").strip() if sys.stdin.isatty() else sys.stdin.readline().strip()
     if confirmation != expected:
         die("confirmation did not match; nothing was approved", 8)
+
+    if stale:
+        commit_routing_reapproval(run, routing_doc, agents, reason=why)
 
     stamp = iso()
     plan["confirmedAt"] = stamp
@@ -8797,18 +8810,8 @@ def initialise_routing(run: Run, agents=None, *, quiet=True):
     return decision
 
 
-def refresh_routing_proposal(run: Run, agents=None, *, strategy=None, quiet=True):
-    """Recompute and re-persist an unapproved proposal after the plan or roles move.
-
-    A proposal is a preview: it is recomputed from the run's current files every
-    time something it depends on changes, so what an operator is asked to
-    approve is never stale. An approved route is not touched here — changing one
-    of those needs its own approval, through `fde routing override`."""
-    doc = load_routing(run)
-    if doc is None or doc.get("mode") != "auto":
-        return None
-    if doc.get("approvedAt"):
-        return doc
+def recompute_routing_proposal(run: Run, doc, agents=None, *, strategy=None):
+    """Build the current proposal without changing the approval record."""
     policy = load_routing_policy()
     agents = agents or load_agents()
     orchestrator = run.orchestrator() or (doc.get("orchestrator") or {}).get("accountId")
@@ -8825,6 +8828,22 @@ def refresh_routing_proposal(run: Run, agents=None, *, strategy=None, quiet=True
     merged["planHash"] = routing_plan_hash(request["stages"], assignments)
     merged["overrides"] = list(doc.get("overrides") or [])
     merged["supersededApprovals"] = list(doc.get("supersededApprovals") or [])
+    return merged
+
+
+def refresh_routing_proposal(run: Run, agents=None, *, strategy=None, quiet=True):
+    """Recompute and re-persist an unapproved proposal after the plan or roles move.
+
+    A proposal is a preview: it is recomputed from the run's current files every
+    time something it depends on changes, so what an operator is asked to
+    approve is never stale. An approved route is not touched here — changing one
+    of those needs its own approval, through `fde routing override`."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto":
+        return None
+    if doc.get("approvedAt"):
+        return doc
+    merged = recompute_routing_proposal(run, doc, agents, strategy=strategy)
     save_routing(run, merged)
     if doc.get("decisionHash") != merged["decisionHash"]:
         routing_event(run, "routing.proposed", mode="auto",
@@ -9510,9 +9529,12 @@ def freeze_routing_for_approval(run: Run, agents=None, *, quiet=False):
     stale, why = routing_needs_reapproval(run)
     if stale:
         if not quiet:
-            print(f"\n  {why}, so the previous route is superseded and this approval "
-                  f"covers the recomputed one.")
-        doc = supersede_routing_approval(run, agents, reason=why) or doc
+            print(f"\n  {why}. The previous route is superseded only if this approval "
+                  f"is accepted; it will then cover the recomputed route.")
+        # Reapproval is a transaction: preview the replacement without clearing
+        # the existing approval. The old freeze remains authoritative unless the
+        # operator types the exact confirmation phrase.
+        return recompute_routing_proposal(run, doc, agents)
     stored = doc.get("decisionHash")
     recomputed = refresh_routing_proposal(run, agents)
     if recomputed is None:
@@ -9529,6 +9551,36 @@ def freeze_routing_for_approval(run: Run, agents=None, *, quiet=False):
             f"the routing decision for run {run.id} is not the one that was displayed",
             f"Read the revised proposal above, then run: fde approve-plan {run.id}",
             exit_code=5)
+    return recomputed
+
+
+def commit_routing_reapproval(run: Run, displayed, agents=None, *, reason=""):
+    """Replace a stale approved route after its displayed proposal was accepted."""
+    doc = load_routing(run)
+    if doc is None or doc.get("mode") != "auto" or not doc.get("approvedAt"):
+        return doc
+    recomputed = recompute_routing_proposal(run, doc, agents)
+    if recomputed.get("decisionHash") != displayed.get("decisionHash"):
+        raise RoutingError(
+            "routing-decision-changed",
+            f"the routing decision for run {run.id} changed while approval was pending",
+            f"Read the revised proposal and run: fde approve-plan {run.id} --reapprove",
+            exit_code=5)
+    routing_event(run, "routing.proposed", mode=doc.get("mode"),
+                  strategy=doc.get("strategy"), decisionHash=doc.get("decisionHash"),
+                  policyRevision=doc.get("policyRevision"),
+                  supersededApprovalAt=doc.get("approvedAt"),
+                  supersededPlanHash=doc.get("approvedWithPlanHash"),
+                  reason=_safe_line(reason, ROUTING_MAX_REASON_CHARS))
+    recomputed["supersededApprovals"] = list(doc.get("supersededApprovals") or []) + [{
+        "approvedAt": doc.get("approvedAt"),
+        "approvedBy": doc.get("approvedBy"),
+        "approvedWithPlanHash": doc.get("approvedWithPlanHash"),
+        "decisionHash": doc.get("decisionHash"),
+        "supersededAt": iso(),
+        "reason": _safe_line(reason, ROUTING_MAX_REASON_CHARS),
+    }]
+    save_routing(run, recomputed)
     return recomputed
 
 
