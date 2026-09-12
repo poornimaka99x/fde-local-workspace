@@ -4,17 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FLOW Operations Workspace — Forward-deployed Local Operations Workspace</title>
-<meta name="description" content="FLOW is a local console and controller for governed, multi-agent delivery work through Claude Code, Codex, Gemini and Microsoft Copilot.">
+<meta name="description" content="FLOW is a governed multi-agent delivery workspace with explainable model routing, reusable skills, sub-agents, plugins and MCP integrations.">
 <link rel="canonical" href="https://poornimaka99x.github.io/fde-local-workspace/">
 <meta property="og:site_name" content="FLOW">
 <meta property="og:title" content="FLOW — Forward-deployed Local Operations Workspace">
-<meta property="og:description" content="Several AI coding agents, one governed lifecycle, and not a single boundary crossed without you saying so.">
+<meta property="og:description" content="Explainable model routing, reusable skills, specialist agents and governed MCP integrations in one local delivery lifecycle.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://poornimaka99x.github.io/fde-local-workspace/">
 <meta property="og:image" content="https://poornimaka99x.github.io/fde-local-workspace/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="FLOW — Forward-deployed Local Operations Workspace">
-<meta name="twitter:description" content="Several AI coding agents, one governed lifecycle, and not a single boundary crossed without you saying so.">
+<meta name="twitter:description" content="Explainable model routing, reusable skills, specialist agents and governed MCP integrations in one local delivery lifecycle.">
 <meta name="twitter:image" content="https://poornimaka99x.github.io/fde-local-workspace/og.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -645,6 +645,8 @@ html{scroll-behavior:smooth}
       <a href="#idea">The idea</a>
       <a href="#console">Console</a>
       <a href="#configuration">Configuration</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#routing">Auto-routing</a>
       <a href="#workspace">Workspace</a>
       <a href="#run">A run</a>
       <a href="#design-panel">Design panel</a>
@@ -1152,7 +1154,7 @@ html{scroll-behavior:smooth}
     <div class="grid-2">
       <div>
         <div class="console">
-          <div class="c-chrome"><span class="c-path">Configuration / Capabilities</span><span class="c-pill">78 total</span></div>
+          <div class="c-chrome"><span class="c-path">Configuration / Capabilities</span><span class="c-pill">88 catalogued</span></div>
           <div class="c-body">
             <div class="c-kicker">Agent harness</div>
             <div class="c-title" style="font-size:17px">Capabilities &amp; extensions</div>
@@ -1162,7 +1164,10 @@ html{scroll-behavior:smooth}
               <span class="c-pill">MCPs 10</span>
               <span class="c-pill">Tools 9</span>
               <span class="c-pill">Plugins 2</span>
-              <span class="c-pill">Hooks 1</span>
+              <span class="c-pill">Commands 8</span>
+              <span class="c-pill">Hooks 4</span>
+              <span class="c-pill">Utilities 4</span>
+              <span class="c-pill">Workflows 1</span>
             </div>
             <div class="c-card stack-sm">
               <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
@@ -1234,6 +1239,222 @@ html{scroll-behavior:smooth}
           <p>You can author a skill into the separately managed <code>fde-user</code> plugin, or import a local plugin containing <code>.claude-plugin/plugin.json</code>. Imports are copied in, bounded in size, and reject symbolic links; they never overwrite an existing plugin.</p>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CAPABILITIES ============================ -->
+<section id="capabilities">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Capabilities &amp; extensions</p>
+      <h2>What FLOW can use, and where you add more</h2>
+      <p class="lede">
+        FLOW does not treat every extension as the same thing. A skill is reusable guidance, a sub-agent is a
+        focused worker, a command is an explicit entry point, an MCP server connects tools and data, and a
+        plugin is the package that can carry all of them. The catalogue shows the source, declared tools,
+        effective state and owner of every item before a new process can load it.
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table class="data">
+        <thead><tr><th>Capability</th><th>Included now</th><th>What it does</th><th>How to extend it</th></tr></thead>
+        <tbody>
+          <tr><td><b>Skills</b></td><td>30</td><td>Reusable instructions that activate for a kind of task and declare which tools they may request.</td><td>Use <b>Configuration → Capabilities → Create skill</b>. FLOW writes it to the update-safe <code>fde-user</code> plugin.</td></tr>
+          <tr><td><b>Sub-agents</b></td><td>20</td><td>Focused methods such as research, solutioning, implementation, testing, security review and release management. They are tasks, not identities.</td><td>Add an agent definition inside a reviewed plugin; its model and declared tools become visible in the catalogue.</td></tr>
+          <tr><td><b>Plugins</b></td><td>2</td><td>Versionable bundles of skills, sub-agents, commands, hooks, utilities and optional MCP definitions.</td><td>Use <b>Import local plugin</b> with a directory containing <code>.claude-plugin/plugin.json</code>, or use the governed <code>fde plugins add</code> path.</td></tr>
+          <tr><td><b>Commands</b></td><td>8</td><td>Named operator or agent entry points: FLOW's <code>route</code> and <code>standards</code>, plus the reviewed Ponytail commands.</td><td>Package the command definition in a plugin. Controller lifecycle commands remain in the separate <code>fde</code> CLI.</td></tr>
+          <tr><td><b>MCP servers</b></td><td>10</td><td>Governed connections to code intelligence, browsers, tenant systems, data and cloud control planes.</td><td>Add a validated catalogue entry, configure it, store secrets separately, verify its real tools, then enable it.</td></tr>
+          <tr><td><b>Built-in tools</b></td><td>9</td><td><code>Read</code>, <code>Grep</code>, <code>Glob</code>, <code>Bash</code>, <code>Task</code>, <code>WebFetch</code>, <code>WebSearch</code>, <code>Write</code> and <code>Edit</code>.</td><td>Skills and agents request a subset. Switching one off becomes an explicit deny rule in new Claude processes.</td></tr>
+          <tr><td><b>Hooks &amp; utilities</b></td><td>4 + 4</td><td>Lifecycle checks and local helper programs for session context, account identity, audits and context budgets.</td><td>Ship them in a plugin and review executable or hook behaviour before activation.</td></tr>
+          <tr><td><b>Workflow</b></td><td>1</td><td>The Forward Deployed Engineer stage template, which selects capability bundles for primary and reviewer roles.</td><td>Add a versioned workflow definition; missing dependencies are reported as degraded, never invented.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-3">
+      <div class="panel">
+        <h4>Built-in delivery skills</h4>
+        <p>Discovery and context, Jira delivery, architecture and design systems, implementation and TDD, CI diagnosis, PR review, verification evidence, release observability, handover, retrospectives and harness auditing. Twenty-four ship in <code>fde-core</code>; six reviewed Ponytail skills add focused code-quality workflows.</p>
+      </div>
+      <div class="panel">
+        <h4>Specialists FLOW can delegate to</h4>
+        <p>Product analyst, researcher, repo cartographer, integration scout, solutioner, UI/UX designer, design-system steward, implementation engineer, TDD guide, test engineer, reviewer, security, standards and reliability reviewers, PR and CI analysts, release and delivery managers, SRE/observability and workflow evaluation.</p>
+      </div>
+      <div class="panel">
+        <h4>Commands are not approvals</h4>
+        <p>A plugin command makes a workflow easy to invoke; it does not grant repository or external-system access. FLOW's controller commands still enforce roles, the plan gate, hash-bound writes and one-target publication approvals.</p>
+      </div>
+    </div>
+
+    <div class="stack">
+      <h3>The ten built-in MCP integrations</h3>
+      <p class="prose" style="color:var(--ink-muted);font-size:.94rem">
+        Profiles are useful filters, not permission bundles. A server becomes active only when it is enabled,
+        configured, verified, selected by the approved stages and roles, and inside the requested scope.
+      </p>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>Profile</th><th>Servers</th><th>Use them for</th></tr></thead>
+          <tbody>
+            <tr><td><b>Coding</b></td><td><code>context7</code>, <code>serena</code></td><td>Version-specific public documentation and governed repository symbol navigation.</td></tr>
+            <tr><td><b>Frontend testing</b></td><td><code>context7</code>, <code>playwright</code>, <code>chrome-devtools</code></td><td>Browser testing, page inspection, console, network and performance diagnosis.</td></tr>
+            <tr><td><b>Client delivery</b></td><td><code>context7</code>, <code>atlassian</code>, <code>figma</code></td><td>Jira and Confluence context plus design inspection and approved canvas publication.</td></tr>
+            <tr><td><b>Data</b></td><td><code>context7</code>, <code>dbhub</code></td><td>Documentation plus read-only database investigation.</td></tr>
+            <tr><td><b>Observability</b></td><td><code>context7</code>, <code>langfuse</code>, <code>aws</code>, <code>azure</code></td><td>Tracing, operational diagnosis and governed cloud inspection.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="stack">
+      <h3>Connect or add something new</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-body">
+            <h3>Connect an existing service</h3>
+            <p>Open <b>Configuration → Service connections</b>, choose the provider, enter its non-secret settings, store the token once, and verify. The connection establishes identity only; any write still needs the run's target-specific publication approval.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h3>Make an MCP server ready</h3>
+            <p>Open <b>Configuration → MCP servers</b>, save the required settings and secrets, install the dependency only when the card says it is missing, then press <b>Verify</b>. Verification performs a bounded initialize and tool listing; enable the server only after its enforceable scope is clear.</p>
+            <pre>fde mcp configure &lt;server&gt; <span class="kw">--set</span> name=value
+fde mcp set-secret &lt;server&gt; &lt;field&gt;   <span class="cm"># reads the value from stdin</span>
+fde mcp verify &lt;server&gt;
+fde mcp enable &lt;server&gt;
+fde mcp effective <span class="kw">--run</span> &lt;run-id&gt;</pre>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h3>Create one reusable skill</h3>
+            <p>In <b>Configuration → Capabilities</b>, choose <b>Create skill</b>, give it a lowercase hyphenated name, describe when it should trigger, write its instructions and select the smallest tool set it needs. FLOW keeps it under <code>fde-user/skills/&lt;name&gt;/SKILL.md</code>.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h3>Import a complete plugin</h3>
+            <p>Use <b>Import local plugin</b> for an absolute directory containing <code>.claude-plugin/plugin.json</code>. FLOW validates and copies a bounded tree, rejects symbolic links and duplicate names, and executes nothing during import. Review hooks and executables, install or refresh the plugin for each AI account that needs it, then start a new session.</p>
+            <pre>fde plugins add &lt;source&gt; <span class="kw">--name</span> &lt;name&gt; <span class="kw">--commit</span> &lt;40-char-sha&gt; <span class="kw">--dry-run</span>
+fde plugins verify &lt;name&gt;             <span class="cm"># re-hash and report drift</span>
+fde capabilities validate</pre>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-body">
+            <h3>Add a new MCP or capability type</h3>
+            <p>Add MCP metadata to <code>~/.claude-shared/mcp/mcp-servers.json</code>, including transport, required fields, pinned package, profiles and a provable read-only policy, then run <code>mcp-sync --dry-run</code>, sync and verify. Add new sub-agents, commands, hooks and utilities through a plugin so provenance, declared tools and lifecycle controls remain visible.</p>
+          </div>
+        </div>
+      </div>
+      <div class="callout warnbox">
+        <b>Adding is not activating, and activating is not authorising.</b> Extensions change the local catalogue;
+        switches affect new processes; the approved run plan decides what is selected; write and publication
+        gates still decide what may change.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ AUTO ROUTING ============================ -->
+<section id="routing">
+  <div class="wrap stack-lg">
+    <div class="stack prose">
+      <p class="eyebrow">Intelligent routing</p>
+      <h2>FLOW can pick the model and effort to match the requirement</h2>
+      <p class="lede">
+        Choose the account that will orchestrate—the provider identity is always your decision—then select
+        automatic routing. FLOW deterministically assesses the saved requirement, proposes a concrete model,
+        reasoning effort and focused specialist matrix, and shows its reasoning before anything is approved.
+      </p>
+    </div>
+
+    <div class="pipeline" aria-label="Automatic routing sequence">
+      <span>requirement</span><i>→</i><span>7-dimension assessment</span><i>→</i><span>risk floor</span><i>→</i><span>available models + efforts</span><i>→</i><span>strategy</span><i>→</i><span>specialist matrix</span><i>→</i><span class="gate">APPROVE PLAN</span>
+    </div>
+
+    <div class="grid-3">
+      <div class="panel">
+        <h4>1 · Assess complexity</h4>
+        <p>FLOW scores scope breadth, ambiguity, reasoning depth, context volume, cross-system coordination, reversibility or operational risk, and verification burden from 0–2. The result is <b>simple</b>, <b>standard</b>, <b>complex</b> or <b>critical</b>, with confidence and evidence for every dimension.</p>
+      </div>
+      <div class="panel">
+        <h4>2 · Apply safety floors</h4>
+        <p>Security, authentication, production, deployment, publication, destructive work, data migration and other high-risk signals can raise the quality floor regardless of the arithmetic score. Low confidence can raise the recommendation or produce a focused clarification question; it never silently lowers quality.</p>
+      </div>
+      <div class="panel">
+        <h4>3 · Pick a valid route</h4>
+        <p>The router filters to model and effort combinations the selected, authenticated account actually offers, rejects anything below the quality floor or above policy ceilings, then chooses according to <b>balanced</b>, <b>quality first</b> or <b>cost first</b>.</p>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h4>Typical routing ladder</h4>
+        <p><b>Economy / low:</b> classification, extraction and mechanical low-risk work.<br><b>Standard / medium:</b> normal research, planning, implementation and tests with clear acceptance criteria.<br><b>Premium / high:</b> architecture, ambiguous synthesis, reconciliation and security or reliability review.<br><b>xhigh or max:</b> never routine defaults and always bounded by the approved ceiling. <b>Ultra</b> is excluded from the current automatic catalogue.</p>
+      </div>
+      <div class="panel">
+        <h4>Specialists are selected for a reason</h4>
+        <p>Simple work normally stays with the orchestrator. Standard work may add one focused specialist per active stage; complex and critical work may add complementary specialists and a genuinely independent reviewer. Duplicate agents are not created merely because accounts are available, and concurrency, retries and total estimated cost units remain capped by policy.</p>
+      </div>
+    </div>
+
+    <div class="console">
+      <div class="c-chrome"><span class="c-path">Routing / proposed decision</span><span class="c-pill warn">not approved</span></div>
+      <div class="c-body">
+        <div class="c-kicker">Explainable model selection</div>
+        <div class="c-title" style="font-size:17px">One decision, with the rejected alternatives</div>
+        <div class="c-sub">The proposal records the assessment evidence, risk overrides, selected account, model, effort, specialist method, quality floor, alternatives considered, rejection reasons, retry ceiling, parallelism and policy revision.</div>
+        <div class="grid-2" style="gap:14px">
+          <div class="c-card stack-sm">
+            <div class="c-kicker">Assessment</div>
+            <dl class="c-kv">
+              <dt>Band</dt><dd>critical · score 8/14</dd>
+              <dt>Confidence</dt><dd>medium</dd>
+              <dt>Risk floor</dt><dd>critical</dd>
+              <dt>Signals</dt><dd>authentication · production · migration</dd>
+            </dl>
+          </div>
+          <div class="c-card stack-sm">
+            <div class="c-kicker">Selected route</div>
+            <dl class="c-kv">
+              <dt>Account</dt><dd>Claude: work</dd>
+              <dt>Model / effort</dt><dd>Opus / high</dd>
+              <dt>Why</dt><dd>lowest expected cost meeting the critical floor</dd>
+              <dt>Ceiling</dt><dd>premium / xhigh · 2 retries</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="c-caption"><b>Cost units are relative estimates, never invented currency prices.</b> Provider-reported usage, controller estimates and unavailable measurements remain separately labelled. The policy lives in <code>~/.claude-shared/config/routing-policy.json</code>, so model tiers, strengths, cost weights and ceilings are reviewable and locally adjustable.</p>
+
+    <div class="grid-2">
+      <div class="stack-sm">
+        <h4>Preview without creating or reading anything</h4>
+        <pre>fde routing preview <span class="kw">--orchestrator</span> work <span class="kw">--shape</span> full \
+  <span class="kw">--strategy</span> balanced \
+  <span class="kw">--requirement</span> <span class="st">"Secure the production sign-in flow"</span></pre>
+      </div>
+      <div class="stack-sm">
+        <h4>Create an automatically routed run</h4>
+        <pre>fde start <span class="st">"Secure the production sign-in flow"</span> \
+  <span class="kw">--orchestrator</span> work <span class="kw">--shape</span> full \
+  <span class="kw">--routing</span> auto <span class="kw">--strategy</span> balanced
+
+fde routing explain &lt;run-id&gt;
+fde routing override &lt;run-id&gt; <span class="kw">--task-id</span> &lt;id&gt; \
+  <span class="kw">--model</span> &lt;model&gt; <span class="kw">--effort</span> &lt;effort&gt; <span class="kw">--reason</span> <span class="st">"…"</span></pre>
+      </div>
+    </div>
+
+    <div class="callout">
+      <b>The route is a proposal until you approve the plan.</b> <code>APPROVE PLAN &lt;run-id&gt;</code> freezes the
+      exact plan, roles and routing hash together. If the plan or role assignment changes, invocation is refused
+      until the combined decision is shown and approved again. Manual model and effort selection remains available.
     </div>
   </div>
 </section>
@@ -2378,6 +2599,33 @@ mcp-sync <span class="kw">--dry-run</span>            <span class="cm">show chan
       </div>
 
       <div class="stack-sm">
+        <h4>Capabilities and extensions</h4>
+        <pre>fde capabilities              <span class="cm">complete local inventory</span>
+fde capabilities <span class="kw">--kind</span> skill
+fde capabilities show &lt;id&gt;
+fde capabilities validate    <span class="cm">definitions + dependencies</span>
+fde config show <span class="kw">--run</span> &lt;run-id&gt;  <span class="cm">effective layered policy</span>
+fde config set &lt;id&gt; disabled <span class="kw">--scope</span> global
+
+fde plugins list
+fde plugins add &lt;source&gt; <span class="kw">--commit</span> &lt;sha&gt; <span class="kw">--dry-run</span>
+fde plugins verify &lt;name&gt;
+fde plugins rollback &lt;name&gt;</pre>
+      </div>
+
+      <div class="stack-sm">
+        <h4>Automatic model and effort routing</h4>
+        <pre>fde routing preview <span class="kw">--orchestrator</span> work \
+  <span class="kw">--requirement</span> <span class="st">"…"</span>       <span class="cm">score without creating</span>
+fde start <span class="st">"…"</span> <span class="kw">--orchestrator</span> work \
+  <span class="kw">--routing</span> auto <span class="kw">--strategy</span> balanced
+fde routing show &lt;run-id&gt;
+fde routing explain &lt;run-id&gt;  <span class="cm">why this route</span>
+fde routing attempts &lt;run-id&gt; <span class="cm">usage + retry evidence</span>
+fde routing report             <span class="cm">calibration evidence</span></pre>
+      </div>
+
+      <div class="stack-sm">
         <h4>Design panels</h4>
         <pre>fde design-panel create &lt;run-id&gt; <span class="kw">--brief-file</span> b.md \
   <span class="kw">--propose-plan</span> \
@@ -2459,5 +2707,16 @@ fde design-panel reconcile &lt;run-id&gt;
     </div>
   </div>
 </footer>
+<script>
+  // Re-apply deep links after web fonts settle; otherwise the late layout shift
+  // can leave a shared #section URL several sections above its real target.
+  window.addEventListener("load", () => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    const target = id ? document.getElementById(id) : null;
+    if (!target) return;
+    const fontsReady = document.fonts ? document.fonts.ready : Promise.resolve();
+    fontsReady.then(() => target.scrollIntoView({ block: "start" }));
+  });
+</script>
 </body>
 </html>
