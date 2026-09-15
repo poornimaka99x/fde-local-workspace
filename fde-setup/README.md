@@ -388,9 +388,10 @@ and quality (`/implementation`, `/tdd-evidence`, `/verification-evidence`,
 
 **Agents** — the original research, architecture and review agents plus focused
 product, UI/UX, design-system, delivery, implementation, PR analysis, standards,
-security, test, CI, release and SRE/observability specialists. These are methods,
-not fixed account assignments: the user chooses the identity for every role at
-the start of each run.
+security, test, CI, release and SRE/observability specialists. The pinned
+Anthropic code-simplifier refines recently changed code after implementation is
+green. These are methods, not fixed account assignments: the user chooses the
+identity for every role at the start of each run.
 
 **Controller** — `fde doctor | start | roles | status | brief | checkpoint |
 output-hygiene | learn | resume | invoke | approve-codex | approve-publish |

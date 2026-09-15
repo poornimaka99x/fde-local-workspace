@@ -5,6 +5,11 @@
   },
   "plugins": [
     {
+      "name": "code-simplifier",
+      "source": "./plugins/code-simplifier",
+      "description": "Agent that simplifies and refines code for clarity, consistency, and maintainability while preserving functionality"
+    },
+    {
       "name": "fde-core",
       "source": "./plugins/fde-core",
       "description": "End-to-end FDE toolkit with per-run roles, product/design/delivery workflows, GitHub and Bitbucket PR review, TDD and evidence checkpoints, bounded context and learning, harness audits, deployment and observability."

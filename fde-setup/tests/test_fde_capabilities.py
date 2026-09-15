@@ -647,6 +647,7 @@ class IdentityTest(unittest.TestCase):
 
     def test_reserved_namespaces_are_not_reachable_by_an_imported_plugin(self):
         self.assertEqual(cap.plugin_namespace("fde-core"), "fde")
+        self.assertEqual(cap.plugin_namespace("code-simplifier"), "code-simplifier")
         self.assertEqual(cap.plugin_namespace("ponytail"), "ponytail")
         self.assertEqual(cap.plugin_namespace("anything-else"), "user:anything-else")
 

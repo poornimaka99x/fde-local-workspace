@@ -125,9 +125,10 @@ CONFIRM=(
   # You may have pinned a different upstream commit with `design-sources update`.
   # Replacing that silently would move a supply-chain pin behind your back.
   "fde-toolkit/plugins/fde-core/vendor/design-sources.lock.json"
-  # Same reasoning for the vendored Ponytail plugin: you may have re-pinned it
-  # with `fde plugins update`, and replacing that silently would move a
-  # supply-chain pin behind your back. `fde plugins verify` re-checks the tree.
+  # Same reasoning for the vendored external plugins: you may have re-pinned
+  # one with `fde plugins update`, and replacing it silently would move a
+  # supply-chain pin behind your back. `fde plugins verify` re-checks each tree.
+  "fde-toolkit/plugins/code-simplifier/*"
   "fde-toolkit/plugins/ponytail/*"
 )
 
@@ -298,11 +299,13 @@ if [[ "$MODE" == "install" ]]; then
 
   for p in "${PROFILES[@]}"; do
     dir="$HOME/.claude-profiles/$p"
-    say "installing fde-core into profile: $p"
+    say "installing FDE plugins into profile: $p"
     if (( ! DRY )); then
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$SHARED/fde-toolkit" 2>/dev/null || true
-      CLAUDE_CONFIG_DIR="$dir" claude plugin install fde-core@fde-toolkit 2>/dev/null || \
-        note "(plugin install needs an interactive session first — run 'cc-$p' and use /plugin)"
+      for plugin in fde-core code-simplifier ponytail; do
+        CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" 2>/dev/null || \
+          note "($plugin install needs an interactive session first — run 'cc-$p' and use /plugin)"
+      done
     fi
   done
 else

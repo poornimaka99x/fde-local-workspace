@@ -25,6 +25,7 @@ import fde_capabilities as cap        # noqa: E402
 import fde_plugin_import as imports   # noqa: E402
 
 PONYTAIL_COMMIT = "356918eba965ee1eac64bd3a7f0dd02108350de5"
+CODE_SIMPLIFIER_COMMIT = "da823e86c8feef13b73b6712af11eadd38c992f6"
 
 
 class PluginTestCase(unittest.TestCase):
@@ -352,6 +353,47 @@ class VerifyRollbackTest(PluginTestCase):
 
     def test_the_built_in_plugin_cannot_be_removed(self):
         self.fde("plugins", "remove", "fde-core", expected=2)
+
+
+class CodeSimplifierTest(PluginTestCase):
+    """Anthropic's simplifier is pinned and bounded to implementation."""
+
+    def test_code_simplifier_ships_pinned_with_its_licence_recorded(self):
+        payload = json.loads(
+            self.fde("plugins", "show", "code-simplifier", "--json").stdout
+        )["plugin"]
+        self.assertEqual(payload["namespace"], "code-simplifier")
+        self.assertEqual(payload["origin"], "external")
+        self.assertEqual(payload["commit"], CODE_SIMPLIFIER_COMMIT)
+        self.assertEqual(payload["license"], "Apache-2.0")
+        self.assertTrue(payload["pinned"])
+        self.assertEqual(payload["url"],
+                         "https://github.com/anthropics/claude-plugins-official")
+
+    def test_the_vendored_code_simplifier_tree_still_matches_its_pin(self):
+        payload = json.loads(
+            self.fde("plugins", "verify", "code-simplifier", "--json").stdout
+        )
+        self.assertEqual(payload["results"][0]["state"], "valid")
+
+    def test_the_agent_is_visible_and_only_enabled_for_primary_implementation(self):
+        agent = "agent:code-simplifier:code-simplifier"
+        catalog = json.loads(
+            self.fde("capabilities", "--namespace", "code-simplifier", "--json").stdout
+        )
+        self.assertIn(agent, {item["id"] for item in catalog["items"]})
+
+        primary, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                   "--stage", "vertical-slice", "--role", "primary")
+        reviewer, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                    "--stage", "vertical-slice", "--role", "reviewer")
+        review_stage, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                        "--stage", "quality-review", "--role", "primary")
+        self.assertIn(agent, primary["enabled"])
+        self.assertIn("plugin:code-simplifier", primary["enabled"])
+        self.assertNotIn(agent, reviewer["enabled"])
+        self.assertNotIn("plugin:code-simplifier", reviewer["enabled"])
+        self.assertNotIn(agent, review_stage["enabled"])
 
 
 class PonytailTest(PluginTestCase):

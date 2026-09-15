@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "forward-deployed-engineer",
   "label": "Forward Deployed Engineer",
-  "revision": "2026-09-11.1",
+  "revision": "2026-09-15.1",
   "description": "The full forward-deployed delivery lifecycle: business intent through operations, with an independent reviewer at every stage.",
   "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
   "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
@@ -309,6 +309,8 @@
       },
       "primary": {
         "enable": [
+          "plugin:code-simplifier",
+          "agent:code-simplifier:code-simplifier",
           "agent:fde:implementation-engineer",
           "agent:fde:tdd-guide",
           "hook:ponytail:SessionStart",
@@ -360,6 +362,7 @@
       },
       "ponytailMode": "full",
       "notes": {
+        "codeSimplifier": "The pinned Anthropic code-simplifier runs after the implementation is green and only on recently changed code. It must preserve behavior, remain inside the approved implementation scope, and rerun affected verification after refinements.",
         "design": "design-to-code, design-system, design-system-steward and figma are offered when designs are in scope.",
         "security": "security-reviewer is offered, and should be switched on, for security-sensitive changes.",
         "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate.",

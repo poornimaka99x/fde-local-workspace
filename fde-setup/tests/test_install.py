@@ -35,10 +35,13 @@ class InstallScriptTest(unittest.TestCase):
             "HOME": str(self.home),
             "PATH": ":".join(path),
             "CLAUDE_SHARED": str(self.home / ".claude-shared"),
+            "CLAUDE_STUB_LOG": str(self.home / "claude-calls.log"),
         })
         if with_claude:
             stub = self.bindir / "claude"
-            stub.write_text("#!/bin/sh\nexit 0\n")
+            stub.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CLAUDE_STUB_LOG\"\nexit 0\n"
+            )
             stub.chmod(0o755)
         return environment
 
@@ -84,6 +87,12 @@ class InstallScriptTest(unittest.TestCase):
         result = self.run_install("--dry-run")
         self.assertIn("found claude at", result.stdout)
         self.assertNotIn("Install Claude Code first", result.stderr)
+
+    def test_a_fresh_install_registers_every_shipped_plugin(self):
+        self.run_install("work", with_claude=True)
+        calls = (self.home / "claude-calls.log").read_text()
+        for plugin in ("fde-core", "code-simplifier", "ponytail"):
+            self.assertIn(f"plugin install {plugin}@fde-toolkit", calls)
 
 
 if __name__ == "__main__":

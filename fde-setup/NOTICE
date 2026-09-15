@@ -41,14 +41,25 @@ re-verified with `vendor/bin/design-sources audit`.
 Vendored plugins
 --------------------------------------------------------------------------
 
-This repository also vendors one third-party plugin under
-`fde-toolkit/plugins/`. Unlike the design references above it contains
-executable code. It is pinned to an immutable upstream commit, imported as a
-reviewed subset, and its provenance — upstream URL, tag, commit, licence,
-imported paths, and the SHA-256 of every file — is recorded in the lock file
-beside its manifest. Re-verify it at any time with `fde plugins verify`.
+This repository also vendors two third-party plugins under
+`fde-toolkit/plugins/`. Unlike the design references above they contain agent
+guidance or executable code. Each is pinned to an immutable upstream commit,
+imported as a reviewed subset, and its provenance — upstream URL, tag or ref,
+commit, licence, imported paths, and the SHA-256 of every file — is recorded in
+the lock file beside its manifest. Re-verify them at any time with
+`fde plugins verify`.
 
-4. ponytail
+4. code-simplifier
+   https://github.com/anthropics/claude-plugins-official
+   Copyright Anthropic PBC
+   Licensed under the Apache License, Version 2.0.
+   Pinned at commit da823e86c8feef13b73b6712af11eadd38c992f6.
+   Full text: fde-toolkit/plugins/code-simplifier/LICENSE
+   Provenance: fde-toolkit/plugins/code-simplifier/.claude-plugin/fde-lock.json
+   Imported: the plugin manifest and code-simplifier agent definition. No
+   hooks, executables, install scripts or runtime dependencies are present.
+
+5. ponytail
    https://github.com/dietrichgebert/ponytail
    Copyright (c) 2026 DietrichGebert
    Licensed under the MIT License.

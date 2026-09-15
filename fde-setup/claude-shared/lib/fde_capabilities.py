@@ -65,7 +65,7 @@ BUILTIN_NAMESPACE = "fde"
 # MIT. Its four roles are covered by fde-core agents that already exist, which
 # is what the requirement asks for anyway where an imported agent overlaps one
 # of ours.
-PINNED_NAMESPACES = ("ponytail",)
+PINNED_NAMESPACES = ("code-simplifier", "ponytail")
 
 # The built-in tool surface. Discovery seeds these rather than inferring the
 # whole set from front matter, because a tool nobody happens to declare is still

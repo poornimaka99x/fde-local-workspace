@@ -1,0 +1,48 @@
+{
+  "accepted": {
+    "executables": false,
+    "hooks": false
+  },
+  "commit": "da823e86c8feef13b73b6712af11eadd38c992f6",
+  "commitDate": null,
+  "commitVerified": false,
+  "executables": [],
+  "fileCount": 3,
+  "files": [
+    {
+      "bytes": 271,
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "f18fb26b2f03e95ad165a4333c73ecd292da18e74d2b89d89bd9848839f8d0e7"
+    },
+    {
+      "bytes": 11358,
+      "path": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "bytes": 3129,
+      "path": "agents/code-simplifier.md",
+      "sha256": "2a51e8d210580d9f66ac2ed1226c41f9374565fc275da30d7bb95f65c2cc87bb"
+    }
+  ],
+  "hooks": [],
+  "importedPaths": null,
+  "installFiles": [],
+  "installedAt": "2026-09-15T08:41:36+05:30",
+  "license": "Apache-2.0",
+  "licenseFile": "LICENSE",
+  "localPath": "/private/tmp/fde-code-simplifier.rEix5u/candidate",
+  "name": "code-simplifier",
+  "ref": "main@2026-09-15",
+  "reviewNote": "Reviewed 2026-09-15 at commit da823e86. Vendored only the code-simplifier manifest and agent definition plus the repository Apache-2.0 licence. The plugin contains no hooks, executables, install scripts, network calls, or runtime dependencies. Enabled only for the primary vertical-slice implementation stage, after tests are green, within the existing FDE write approval and scope.",
+  "runtimes": [],
+  "schemaVersion": 1,
+  "subdirectory": null,
+  "totalBytes": 14758,
+  "treeSha256": "c6a55cefc4ec484fced4972b01b0c5321401b133b8fe435cf4195bff1bbe5b1b",
+  "type": "local",
+  "url": "https://github.com/anthropics/claude-plugins-official",
+  "validatedAt": "2026-09-15T08:44:53+05:30",
+  "validationStatus": "valid",
+  "version": "1.0.0"
+}

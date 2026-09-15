@@ -343,6 +343,19 @@ walk as capabilities (§4) at the same scopes — so "the reviewer runs Ponytail
 lite mode on this one run" is expressible, and it lands in the run snapshot with
 everything else.
 
+### Code simplifier
+
+Anthropic's code-simplifier is vendored from `claude-plugins-official` at commit
+`da823e86c8feef13b73b6712af11eadd38c992f6` under Apache-2.0. The reviewed
+subset contains only its manifest, agent definition and licence; it has no
+hooks, executables, install scripts, network calls or runtime dependencies.
+
+It is enabled only for the primary role in `vertical-slice`. The implementation
+skill invokes it after the implementation is green, scopes it to recently
+modified code, requires exact behavior preservation, and reruns affected checks
+after refinement. The existing implementation write approval and workflow
+governance remain authoritative.
+
 ### Governance
 
 The template carries a `governance` block, and resolution and every run snapshot
