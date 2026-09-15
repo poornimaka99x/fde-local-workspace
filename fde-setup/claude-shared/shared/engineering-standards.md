@@ -419,11 +419,12 @@ Security is a coding standard, not a phase.
 
 ## 13. Documentation and comments
 
-- **The code is the primary documentation.** Comments explain **why**, not **what**. A comment restating the code is deleted.
-- Comment the non-obvious: business rationale, a regulatory constraint, a workaround for an upstream bug (with a link), a deliberate trade-off, an algorithmic choice.
+- **The code is the primary documentation. Do not add code comments by default.** Prefer precise names, small functions and clear structure that make the implementation self-explanatory.
+- Add a comment only when information required to understand or safely change the code cannot be expressed clearly in the code itself. Valid cases include non-obvious business or regulatory rationale, a workaround for an upstream bug (with a link), a deliberate trade-off, or an algorithmic constraint.
+- Comments **MUST NOT** narrate the implementation, restate what the code does, label obvious sections, preserve development notes, or explain changes that belong in version control or the pull request. Delete such comments.
 - **No commented-out code.** Version control holds history. Delete it.
 - **`TODO`/`FIXME` MUST reference a ticket** (`TODO(PROJ-123): ...`). Untracked TODOs are rejected — they are permanent, invisible debt.
-- **Public APIs, exported functions, shared components and utilities carry doc comments** describing purpose, parameters, return value, thrown errors and any non-obvious behaviour.
+- Add doc comments to public APIs only when required by repository tooling or conventions, or when a non-obvious contract cannot be communicated through the name and type signature. Do not generate boilerplate doc comments for self-explanatory exports.
 - **Every repository has a README** that states what the service does, how to run it locally, how to test it, how to configure it, and how to deploy it — kept accurate as part of Definition of Done.
 - **Significant technical decisions are recorded as ADRs** (Architecture Decision Records): context, options considered, decision, consequences. One short file per decision, in the repo, immutable once accepted.
 

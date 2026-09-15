@@ -9,6 +9,8 @@ Read repository instructions and the shared engineering standards first. Decide
 greenfield versus brownfield and follow the applicable policy. Implement the
 smallest complete vertical slice, preserve public contracts unless the plan
 changes them, and add tests that fail without the change. Run the repository's
-real formatter, static checks, tests and build. Report changed files, commands,
-results and residual risks. If operating as Codex, do not write until the FDE
-one-time task approval has been granted and consumed.
+real formatter, static checks, tests and build. Do not add code comments by
+default. Prefer self-explanatory names, types and structure; comment only when
+required non-obvious context cannot be expressed clearly in the code. Report
+changed files, commands, results and residual risks. If operating as Codex, do
+not write until the FDE one-time task approval has been granted and consumed.
