@@ -56,7 +56,6 @@ function ServerCard({ server, reload }: { server: McpServer, reload: () => void 
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<ApiError | null>(null)
   const [open, setOpen] = useState(false)
-  const secrets = server.requiredFields.filter((field) => field.secret)
   const act = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
     setBusy(label); setError(null)
     try { await fn(); reload() } catch (cause) {
@@ -68,7 +67,9 @@ function ServerCard({ server, reload }: { server: McpServer, reload: () => void 
     await act('save', async () => apiSend<McpDetailResponse>(
       `/api/mcp/servers/${encodeURIComponent(server.name)}/configure`, 'POST', { values }))
   }
-  const fields = visibleFields(server, values)
+  const visible = visibleFields(server, values)
+  const fields = visible.filter((field) => !field.secret)
+  const secrets = visible.filter((field) => field.secret)
 
   return <article className="connection-card" data-server={server.name}>
     <div className="connection-card-head">

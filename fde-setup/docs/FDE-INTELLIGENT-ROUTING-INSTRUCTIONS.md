@@ -102,8 +102,12 @@ all estimates as `costUnits` and clearly label them estimates. Do not select the
 ambiguous `default` model in automatic mode because its quality and cost cannot
 be compared reliably; select a concrete model offered by the chosen account.
 
-The model catalog exposed by `AccountService` is the availability boundary.
-Never generate a model/effort combination that `validateSelection` rejects.
+The provider clients' live model catalogues are the availability boundary.
+Refresh Codex and Gemini availability before automatic planning, keep a dated
+last-known-good cache for offline use, and make `AccountService` consume that
+same snapshot. Never generate a model/effort combination that
+`validateSelection` rejects. Claude family aliases resolve to the provider's
+latest available Haiku, Sonnet and Opus models.
 
 ## Complexity and risk assessment
 

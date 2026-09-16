@@ -112,6 +112,25 @@ describe('Claude accounts and general chats', () => {
     expect(service.validateSelection('work', 'default', 'ultra')).toBe(false)
   })
 
+  it('uses the controller live-model snapshot as the selection boundary', () => {
+    const cache = path.join(harness.config.sharedRoot, 'cache')
+    mkdirSync(cache, { recursive: true })
+    writeFileSync(path.join(cache, 'model-catalog.json'), JSON.stringify({
+      schemaVersion: 1,
+      providers: {
+        codex: { models: [{ id: 'gpt-next', label: 'GPT Next', efforts: ['high'] }] },
+        gemini: { models: [{ id: 'gemini-next-high', label: 'Gemini Next', efforts: ['high'] }] },
+      },
+    }))
+    const service = new AccountService(harness.config)
+    const codex = service.configured().find((account) => account.provider === 'codex')
+    const gemini = service.configured().find((account) => account.provider === 'gemini')
+    expect(codex?.models.some((model) => model.id === 'gpt-next')).toBe(true)
+    expect(codex?.models.some((model) => model.id === 'gpt-5.5')).toBe(false)
+    expect(gemini?.models.some((model) => model.id === 'gemini-next-high')).toBe(true)
+    expect(service.validateSelection('chatgpt_codex', 'gpt-next', 'high')).toBe(true)
+  })
+
   it('starts exactly the selected profile login command in an isolated PTY', async () => {
     const response = await harness.app.inject({
       method: 'POST', url: '/api/claude/accounts/work/login',

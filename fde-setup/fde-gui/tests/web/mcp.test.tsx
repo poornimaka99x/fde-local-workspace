@@ -156,9 +156,9 @@ describe('the MCP catalogue panel', () => {
       return response({ title: 'unexpected request' }, 500)
     }))
     render(<McpCatalogView />)
-    // The form is already open, because this server is waiting on the operator.
+    await userEvent.click(await screen.findByRole('button', { name: 'Set it up' }))
     await waitFor(() => expect(screen.getByText('Read-only PostgreSQL DSN')).toBeInTheDocument())
-    expect(screen.getByText(/Waiting on you/)).toBeInTheDocument()
+    expect(screen.getByText('not configured')).toBeInTheDocument()
     expect(screen.queryByText('Read-only account password')).toBeNull()
     expect(screen.queryByText('Host')).toBeNull()
 

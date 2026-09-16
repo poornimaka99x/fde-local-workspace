@@ -67,6 +67,7 @@ try:
     import fde_capabilities  # noqa: E402
     import fde_capability_commands  # noqa: E402
     import fde_plugin_import  # noqa: E402
+    import fde_models  # noqa: E402
 except ImportError as _exc:  # pragma: no cover — an install missing half of itself
     sys.exit(f"fde: the MCP catalogue library is missing ({_exc}).\n"
              f"       It belongs at {_here.parent / 'lib' / 'fde_mcp.py'}.\n"
@@ -6978,6 +6979,7 @@ ROUTING_AMBIGUOUS_MODEL = "default"
 # than guessing from a version string.
 ROUTING_CAPABILITIES = [
     "routing.policy.v1",
+    "routing.models.live.v1",
     "routing.preview",
     "routing.propose",
     "routing.show",
@@ -7276,10 +7278,10 @@ def validate_routing_policy(raw):
     return policy
 
 
-def load_routing_policy(path=None):
-    """The policy, validated once per process and per path."""
+def load_routing_policy(path=None, *, refresh_models=False):
+    """The policy plus the provider clients' current availability catalogue."""
     target = pathlib.Path(path) if path else ROUTING_POLICY_FILE
-    key = str(target)
+    key = f"{target}:{'live' if refresh_models else 'cache'}"
     cached = _ROUTING_POLICY_CACHE.get(key)
     if cached is not None:
         return cached
@@ -7295,6 +7297,12 @@ def load_routing_policy(path=None):
     except json.JSONDecodeError as exc:
         _policy_fail(f"it is not valid JSON ({exc})")
     policy = validate_routing_policy(raw)
+    if path is None:
+        snapshot = fde_models.load_snapshot(SHARED, live=refresh_models)
+        effective = fde_models.apply(policy, snapshot)
+        discovery = effective.get("_modelDiscovery")
+        policy = validate_routing_policy(effective)
+        policy["_modelDiscovery"] = discovery
     _ROUTING_POLICY_CACHE[key] = policy
     return policy
 
@@ -7748,6 +7756,8 @@ def routing_provider_for(agents, agent_id):
         return "bedrock" if agent.get("profile") == "bedrock" else "anthropic"
     if kind == "codex":
         return "codex"
+    if kind == "gemini":
+        return "gemini"
     return None
 
 
@@ -7761,6 +7771,8 @@ def routing_account_id(agents, agent_id):
         return agent.get("profile")
     if agent.get("kind") == "codex":
         return "codex"
+    if agent.get("kind") == "gemini":
+        return "gemini"
     return None
 
 
@@ -7896,9 +7908,10 @@ def escalation_ceiling(policy, *, tier, effort, limits):
 
 def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, purpose):
     """One model-and-effort decision, with everything needed to argue about it."""
+    kind = ((agents or {}).get("agents", {}).get(agent_id) or {}).get("kind") or "unknown"
     provider = routing_provider_for(agents, agent_id)
-    if provider is None:
-        kind = ((agents or {}).get("agents", {}).get(agent_id) or {}).get("kind") or "unknown"
+    explicit_unroutable = policy.get("unroutableKinds", {}).get(kind)
+    if provider is None or explicit_unroutable:
         return {
             "accountId": agent_id,
             "account": routing_account_id(agents, agent_id),
@@ -7911,7 +7924,7 @@ def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, pur
             "costUnits": 0.0,
             "expectedCostUnits": 0.0,
             "confidenceNote": None,
-            "reason": (policy.get("unroutableKinds", {}).get(kind)
+            "reason": (explicit_unroutable
                        or f"a '{kind}' identity exposes no model or effort to select"),
             "escalationCeiling": None,
             "alternatives": [],
@@ -8443,6 +8456,7 @@ def routing_decision_hash(decision):
     canonical = {
         "schemaVersion": ROUTING_SCHEMA_VERSION,
         "policyRevision": decision.get("policyRevision"),
+        "modelCatalogDigest": decision.get("modelCatalogDigest"),
         "mode": decision.get("mode"),
         "strategy": decision.get("strategy"),
         "assessment": {
@@ -8630,6 +8644,8 @@ def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, requ
     decision = {
         "schemaVersion": ROUTING_SCHEMA_VERSION,
         "policyRevision": policy["policyRevision"],
+        "modelCatalogDigest": (policy.get("_modelDiscovery") or {}).get("catalogDigest"),
+        "modelDiscovery": policy.get("_modelDiscovery"),
         "mode": mode,
         "strategy": strategy,
         "assessment": assessment,
@@ -8813,7 +8829,7 @@ def initialise_routing(run: Run, agents=None, *, quiet=True):
     orchestrator = run.orchestrator()
     if not orchestrator:
         return None
-    policy = load_routing_policy()
+    policy = load_routing_policy(refresh_models=True)
     agents = agents or load_agents()
     assignments = (run.roles() or {}).get("assignments") or {}
     request = routing_request_for(run)
@@ -8861,7 +8877,7 @@ def initialise_routing(run: Run, agents=None, *, quiet=True):
 
 def recompute_routing_proposal(run: Run, doc, agents=None, *, strategy=None):
     """Build the current proposal without changing the approval record."""
-    policy = load_routing_policy()
+    policy = load_routing_policy(refresh_models=True)
     agents = agents or load_agents()
     orchestrator = run.orchestrator() or (doc.get("orchestrator") or {}).get("accountId")
     assignments = (run.roles() or {}).get("assignments") or {}
@@ -9094,6 +9110,40 @@ def _routing_requirement(args):
 
 
 @routing_command
+def cmd_routing_models(args):
+    """Show the exact provider catalogue automatic routing will use."""
+    if getattr(args, "refresh", False):
+        fde_models.refresh(SHARED)
+    _ROUTING_POLICY_CACHE.clear()
+    policy = load_routing_policy(refresh_models=bool(getattr(args, "refresh", False)))
+    payload = {
+        "schemaVersion": 1,
+        "policyRevision": policy["policyRevision"],
+        "discovery": policy.get("_modelDiscovery"),
+        "providers": {
+            provider: [{"id": model["id"], "label": model["label"],
+                        "tier": model["tier"], "efforts": model["efforts"]}
+                       for model in spec["models"]]
+            for provider, spec in policy["providers"].items()
+        },
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    discovery = payload.get("discovery") or {}
+    print(f"model catalogue  {discovery.get('state', 'static')}  "
+          f"{discovery.get('refreshedAt') or 'not refreshed'}")
+    for provider, models in payload["providers"].items():
+        print(f"\n{provider}")
+        for model in models:
+            print(f"  {model['id']:<30} {model['tier']:<8} "
+                  f"{','.join(model['efforts'])}")
+    failures = discovery.get("failures") or {}
+    for provider, reason in failures.items():
+        print(f"\nwarning  {provider}: {reason}")
+    return 0
+
+
+@routing_command
 def cmd_routing_preview(args):
     """Score a request and show what it would be routed to. Writes nothing.
 
@@ -9102,7 +9152,7 @@ def cmd_routing_preview(args):
     repository, not a connector. It is deterministic, so the same request and
     the same policy give the same answer every time and a difference between
     preview and creation is a real difference, not noise."""
-    policy = load_routing_policy(getattr(args, "policy", None))
+    policy = load_routing_policy(getattr(args, "policy", None), refresh_models=True)
     agents = load_agents()
     orchestrator = resolve_agent(agents, args.orchestrator)
     strategy = args.strategy or policy["defaultStrategy"]
@@ -9132,8 +9182,8 @@ def cmd_routing_preview(args):
         "recorded.")
     if getattr(args, "json", False):
         return emit_json({"schemaVersion": ROUTING_SCHEMA_VERSION, "preview": decision})
-    print("\nRouting preview — nothing was created, written, or read from any "
-          "connected system.\n")
+    print("\nRouting preview — no run was created and no project or connector "
+          "data was read. Provider model metadata may have refreshed.\n")
     print_routing_matrix(decision)
     print(f"\n  provisional {decision['provisionalReason']}\n")
     return 0
@@ -9211,7 +9261,7 @@ def cmd_routing_explain(args):
     actually approved."""
     run = Run(args.run_id)
     doc = load_routing(run, required=True)
-    policy = load_routing_policy()
+    policy = load_routing_policy(refresh_models=True)
     drift = None
     if doc.get("policyRevision") != policy["policyRevision"]:
         drift = (f"this route was decided under policy revision "
@@ -9321,7 +9371,7 @@ def cmd_routing_override(args):
     of those is a change to what was approved."""
     run = Run(args.run_id)
     doc = load_routing(run, required=True)
-    policy = load_routing_policy()
+    policy = load_routing_policy(refresh_models=True)
     agents = load_agents()
     if doc.get("mode") != "auto":
         raise RoutingError("routing-manual",
@@ -12284,7 +12334,7 @@ def route_panel_participants(run: Run, agents, panel, *, mode, strategy, brief):
     chosen model or effort is left exactly as the operator set it."""
     if mode != "auto":
         return None
-    policy = load_routing_policy()
+    policy = load_routing_policy(refresh_models=True)
     assessment, band, floor = panel_routing_band(policy, run, brief)
     limits = policy["limits"][band]
     identities_before = [(participant["participantId"], participant["agentId"],
@@ -13778,7 +13828,11 @@ def main(argv=None):
         help="assess a request, propose a route, and explain or override one")
     rt = s.add_subparsers(dest="routing_cmd", required=True)
 
-    c = rt.add_parser("preview", help="score a request and show its route; writes nothing")
+    c = rt.add_parser(
+        "preview",
+        help=("score a request and show its route; may refresh cached provider "
+              "model metadata"),
+    )
     c.add_argument("--orchestrator", "-o", required=True,
                    help="work | msc | alt | bedrock | codex — an operator decision")
     c.add_argument("--strategy", choices=list(AUTO_STRATEGIES))
@@ -13794,6 +13848,12 @@ def main(argv=None):
     c.add_argument("--policy", metavar="FILE", help=argparse.SUPPRESS)
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_routing_preview)
+
+    c = rt.add_parser("models", help="show or refresh the live model catalogue used by auto routing")
+    c.add_argument("--refresh", action="store_true",
+                   help="query Codex and Antigravity now; otherwise use the last-known-good cache")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_models)
 
     c = rt.add_parser("propose",
                       help="recompute this run's unapproved proposal from its own files")

@@ -288,6 +288,7 @@ fde mcp set-secret <s> <field>      reads stdin, echoes nothing
 fde mcp verify <server>             bounded initialize + tool listing
 fde mcp effective --run <run-id>    what this run may actually reach
 fde mcp gateway                     Docker routing preview; changes nothing
+fde routing models --refresh        refresh the exact models auto-plan may select
 ```
 
 An entry in that catalogue is not access. A server has to be **configured** (you

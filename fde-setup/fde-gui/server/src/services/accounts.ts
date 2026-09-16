@@ -99,11 +99,14 @@ const CODEX_MODELS: ModelOption[] = [
   { id: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
   { id: 'gpt-5.6-luna', label: 'GPT-5.6-Luna', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
   { id: 'gpt-5.5', label: 'GPT-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
-  { id: 'gpt-5.2', label: 'GPT-5.2', efforts: ['low', 'medium', 'high', 'xhigh'] },
 ]
 
 const GEMINI_MODELS: ModelOption[] = [
   { id: 'default', label: 'Antigravity default', efforts: ['auto', 'low', 'medium', 'high'] },
+  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)', efforts: ['high'] },
+  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)', efforts: ['medium'] },
+  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)', efforts: ['low'] },
+  { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)', efforts: ['high'] },
 ]
 
 const BEDROCK_ENV_ALLOWLIST = new Set([
@@ -242,6 +245,36 @@ export class AccountService {
     private readonly runStatus: StatusRunner = defaultStatusRunner,
   ) {}
 
+  private currentModels(provider: 'codex' | 'gemini', fallback: ModelOption[]): ModelOption[] {
+    try {
+      const raw = JSON.parse(readFileSync(
+        path.join(this.config.sharedRoot, 'cache', 'model-catalog.json'), 'utf8',
+      )) as { providers?: Record<string, { models?: unknown[] }> }
+      const discovered = raw.providers?.[provider]?.models
+      if (!Array.isArray(discovered)) return fallback
+      const models = discovered.flatMap((entry): ModelOption[] => {
+        if (!entry || typeof entry !== 'object') return []
+        const value = entry as { id?: unknown; label?: unknown; efforts?: unknown }
+        if (typeof value.id !== 'string' || !MODEL_PATTERN.test(value.id)
+            || !Array.isArray(value.efforts)) return []
+        const efforts = value.efforts.filter(
+          (effort): effort is Effort => typeof effort === 'string'
+            && EFFORTS.includes(effort as Effort),
+        )
+        if (efforts.length === 0) return []
+        return [{ id: value.id, label: typeof value.label === 'string' ? value.label : value.id,
+          efforts }]
+      })
+      return models.length > 0
+        ? [{ id: 'default', label: provider === 'codex' ? 'Account default' : 'Antigravity default',
+            efforts: provider === 'codex' ? [...EFFORTS] : ['auto', 'low', 'medium', 'high'] },
+          ...models]
+        : fallback
+    } catch {
+      return fallback
+    }
+  }
+
   configured(): Omit<ClaudeAccount, 'authState' | 'authMethod' | 'authDetail'>[] {
     const found = new Map<string, {
       label: string
@@ -347,7 +380,8 @@ export class AccountService {
         profile: id,
         provider: value.provider,
         profilePresent: value.provider === 'gemini' || existsSync(this.profileDirectory(id)),
-        models: (value.provider === 'gemini' ? GEMINI_MODELS : MODELS)
+        models: (value.provider === 'gemini'
+          ? this.currentModels('gemini', GEMINI_MODELS) : MODELS)
           .map((model) => ({ ...model, efforts: [...model.efforts] })),
         capabilities: [...value.capabilities],
         orchestratorEligible: value.capabilities.includes('orchestration'),
@@ -366,7 +400,8 @@ export class AccountService {
           profile: id,
           provider: 'codex' as const,
           profilePresent: existsSync(value.home),
-          models: CODEX_MODELS.map((model) => ({ ...model, efforts: [...model.efforts] })),
+          models: this.currentModels('codex', CODEX_MODELS)
+            .map((model) => ({ ...model, efforts: [...model.efforts] })),
           capabilities: [...value.capabilities],
           orchestratorEligible: value.capabilities.includes('orchestration'),
           // A design panel is about separately authenticated *Claude* accounts

@@ -567,18 +567,30 @@ Three properties matter to a reader:
 
 ### The policy
 
-`~/.claude-shared/config/routing-policy.json` holds the model catalogue, tier
-assignments, relative cost weights, quality floors, per-band ceilings and the
-escalation ladder. It is validated strictly on every load: an unknown effort, a
+`~/.claude-shared/config/routing-policy.json` holds model classification and
+routing judgement: tier assignments, relative cost weights, quality floors,
+per-band ceilings and the escalation ladder. Live availability is separate.
+Before an automatic proposal, FDE queries `codex debug models` and `agy models`,
+intersects their visible models and efforts with policy metadata, and saves a
+last-known-good snapshot at `~/.claude-shared/cache/model-catalog.json`. Claude
+uses the CLI's `haiku`, `sonnet` and `opus` latest-family aliases. The policy is
+validated strictly on every load: an unknown effort, a
 tier below its own band's floor, a descending escalation ladder, the ambiguous
 `default` model, or a price without provenance are each refused with the field
 named.
 
-The catalogue is deliberately a **subset** of what the console's
-`AccountService` offers. `default` is absent because a decision naming it cannot
-be compared or audited, and `ultra` is absent because no automatic route may
-reach it. A test asserts that every combination the policy offers is one
-`validateSelection` accepts; nothing else guarantees two files agree.
+`default` is absent because a decision naming it cannot be compared or audited,
+and `ultra` is absent because no automatic route may reach it. Retired models
+are removed when the installed client no longer lists them; newly listed Codex
+and Gemini models receive deterministic fallback classification until explicit
+policy metadata ships. The console reads the same snapshot, so
+`validateSelection` and the controller share one availability boundary. The
+snapshot digest is approval-bound in the routing decision.
+
+`fde routing models --refresh` shows the exact catalogue and its provenance.
+If discovery is offline, FDE uses the dated last-known-good provider snapshot
+and reports the fallback. It never treats a failed refresh as proof that a model
+exists.
 
 The installer treats the policy as **confirm**: a shipped change is shown as a
 diff and applied only with the operator's say-so, so local cost and entitlement
@@ -586,10 +598,10 @@ customisations survive an update.
 
 ### `routing preview --json`
 
-Non-mutating and deterministic. It creates no run, writes no file, and reads
-nothing connected — not the Jira item the request names, not a repository, not a
-connector. Same request plus same policy gives the same `decisionHash` every
-time, so a difference between preview and creation is a real difference.
+It creates no run and reads no client data, repository or connector. It may
+refresh provider model metadata and its cache. Same request, policy and model
+catalogue digest gives the same `decisionHash`; availability changes deliberately
+produce a different decision.
 
 ```json
 {

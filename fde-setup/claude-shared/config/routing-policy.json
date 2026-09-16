@@ -3,7 +3,7 @@
   "_costUnits": "costWeight and effortCostMultiplier are RELATIVE weights, not money. There are no provider prices in this file and none may be added as bare numbers: if monetary pricing is ever configured it must carry a source, a currency and an effectiveAt date, and estimates stay labelled estimates until it does.",
   "_specialistCaps": "maxSpecialistsPerStage is the fan-out allowed on ONE stage: one method for standard work, two complementary ones for complex work, three (including an independent reviewer) for critical work. maxSpecialists bounds the whole run so a wide plan cannot accumulate an unbounded agent count.",
   "schemaVersion": 1,
-  "policyRevision": "2026-09-07.1",
+  "policyRevision": "2026-09-16.2",
   "strategies": [
     "balanced",
     "quality_first",
@@ -38,7 +38,7 @@
     "tierAtBand": 0.15,
     "tierAboveBand": 0.05
   },
-  "_providers": "The catalogue the router may select from. It is deliberately a SUBSET of what the console's AccountService offers: the ambiguous 'default' model is absent because its quality and cost cannot be compared, and 'ultra' is absent because no automatic route may reach it. Every entry here must be accepted by AccountService.validateSelection \u2014 a test enforces that.",
+  "_providers": "Policy metadata for the catalogue the router may select from. Before automatic planning, current Codex and Gemini availability is refreshed from their installed clients and intersected with these entries; newly discovered models receive deterministic fallback classification. Claude aliases track the latest family offered by Claude Code. The console consumes the same cached availability. The ambiguous 'default' model and 'ultra' effort remain outside automatic routing.",
   "providers": {
     "anthropic": {
       "label": "Claude (Anthropic account)",
@@ -189,27 +189,6 @@
       "_note": "A different provider family, not a rank-for-rank equivalent of the Claude tiers. Tiers here say what this policy is willing to spend on which class of work; they do not assert parity between vendors.",
       "models": [
         {
-          "id": "gpt-5.2",
-          "label": "GPT-5.2",
-          "tier": "standard",
-          "efforts": [
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ],
-          "costWeight": 3,
-          "contextTokens": null,
-          "strengths": [
-            "bounded-implementation",
-            "mechanical-low-risk",
-            "independent-read"
-          ],
-          "limitations": [
-            "no 'auto' effort \u2014 an effort is always explicit for Codex"
-          ]
-        },
-        {
           "id": "gpt-5.5",
           "label": "GPT-5.5",
           "tier": "standard",
@@ -297,11 +276,56 @@
           ]
         }
       ]
+    },
+    "gemini": {
+      "label": "Gemini through Antigravity",
+      "_note": "Availability and exact effort-bearing model IDs are refreshed from `agy models` before automatic routing. These entries are the offline fallback and the policy metadata for known models.",
+      "models": [
+        {
+          "id": "gemini-3.8-flash-low",
+          "label": "Gemini 3.8 Flash (Low)",
+          "tier": "standard",
+          "efforts": ["low"],
+          "costWeight": 2,
+          "contextTokens": null,
+          "strengths": ["research", "long-context", "bounded-formatting"],
+          "limitations": ["one-shot headless invocation; connector evidence is passed explicitly"]
+        },
+        {
+          "id": "gemini-3.8-flash-medium",
+          "label": "Gemini 3.8 Flash (Medium)",
+          "tier": "standard",
+          "efforts": ["medium"],
+          "costWeight": 3,
+          "contextTokens": null,
+          "strengths": ["research", "long-context", "review"],
+          "limitations": ["one-shot headless invocation; connector evidence is passed explicitly"]
+        },
+        {
+          "id": "gemini-3.8-flash-high",
+          "label": "Gemini 3.8 Flash (High)",
+          "tier": "standard",
+          "efforts": ["high"],
+          "costWeight": 5,
+          "contextTokens": null,
+          "strengths": ["research", "long-context", "review"],
+          "limitations": ["one-shot headless invocation; connector evidence is passed explicitly"]
+        },
+        {
+          "id": "gemini-3.1-pro-high",
+          "label": "Gemini 3.1 Pro (High)",
+          "tier": "premium",
+          "efforts": ["high"],
+          "costWeight": 10,
+          "contextTokens": null,
+          "strengths": ["ambiguous-synthesis", "research", "security-review"],
+          "limitations": ["one-shot headless invocation; connector evidence is passed explicitly"]
+        }
+      ]
     }
   },
   "_unroutable": "Identities whose surface exposes no model or effort choice. They remain fully assignable to roles; the router simply reports that it has nothing to select for them rather than inventing a combination.",
   "unroutableKinds": {
-    "gemini": "one-shot headless call with no model or effort selection through this toolkit",
     "copilot-studio": "a chat endpoint over the Microsoft estate; model and effort are the tenant's, not this controller's"
   },
   "_floors": "A quality floor is the lowest tier and effort an automatic route may use. It is a floor, never a target: a higher choice is always permitted, a lower one never is.",

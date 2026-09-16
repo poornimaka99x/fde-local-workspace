@@ -470,6 +470,12 @@ after that every invocation is checked against it. `fde routing preview`,
 weights, quality floors and ceilings — yours to edit, and preserved across
 updates. Costs are relative cost units, never money.
 
+Before each automatic proposal, FDE refreshes model availability from the
+installed Codex and Antigravity clients, removes models those clients no longer
+offer, and saves a last-known-good cache for offline runs. Claude routes use its
+latest-family aliases. Inspect the exact shared catalogue and provenance with
+`fde routing models --refresh`; its digest is bound into plan approval.
+
 Retries are bounded and have to be earned: a failure needs a classification
 before the budget is spent again, one of them buys a same-tier retry and the rest
 climb a frozen ladder, and the approved retry count, tier, effort and cost units

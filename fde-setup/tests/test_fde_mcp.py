@@ -558,7 +558,7 @@ class GatewayPlanning(unittest.TestCase):
         overlap = set(plan["routedThroughGateway"]) & set(plan["runDirectly"])
         self.assertEqual(overlap, set(), "a server may not be both direct and routed")
         self.assertEqual(sorted(plan["dockerProfiles"]),
-                         ["coding", "data", "frontend-testing", "client-delivery",
+                         ["client-delivery", "coding", "data", "frontend-testing",
                           "observability"])
 
     def test_a_profile_restricts_what_the_gateway_would_own(self):

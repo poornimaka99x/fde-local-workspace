@@ -124,6 +124,7 @@ class Sandbox:
             "PATH": f"{self.bindir}:{self.shared / 'bin'}:{os.environ['PATH']}",
             "CODEX_LOG": str(self.codex_log),
             "FDE_AGY_BIN": str(self.tmp / "missing-agy"),
+            "FDE_MODEL_DISCOVERY": "static",
             "AWS_CONFIG_FILE": str(self.aws_config),
             "AWS_SHARED_CREDENTIALS_FILE": str(self.tmp / "aws-credentials"),
         })

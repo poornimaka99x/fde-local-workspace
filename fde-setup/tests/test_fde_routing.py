@@ -306,7 +306,7 @@ class TestPolicyMatchesConsoleCatalogue(unittest.TestCase):
     def console_catalogue():
         source = ACCOUNTS_TS.read_text(encoding="utf-8")
         catalogues = {}
-        for name in ("MODELS", "CODEX_MODELS"):
+        for name in ("MODELS", "CODEX_MODELS", "GEMINI_MODELS"):
             match = re.search(
                 r"const " + name + r": ModelOption\[\] = \[(.*?)\n\]", source, re.S)
             assert match, f"could not find {name} in {ACCOUNTS_TS}"
@@ -326,7 +326,10 @@ class TestPolicyMatchesConsoleCatalogue(unittest.TestCase):
         policy = json.loads((SRC_SHARED / "config" / "routing-policy.json").read_text())
         catalogues = self.console_catalogue()
         for provider, spec in policy["providers"].items():
-            offered = catalogues["CODEX_MODELS" if provider == "codex" else "MODELS"]
+            offered = catalogues[
+                "CODEX_MODELS" if provider == "codex"
+                else "GEMINI_MODELS" if provider == "gemini"
+                else "MODELS"]
             for model in spec["models"]:
                 self.assertIn(
                     model["id"], offered,
