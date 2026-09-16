@@ -37,7 +37,7 @@ a CTO and the engineers who will maintain it.
 Gemini and Codex CLIs are installed and wrapped in `~/.claude-shared/bin/`, and a
 Microsoft Copilot Studio agent is reachable over Direct Line. Each call is a fresh
 context with no memory of this session, so the question must carry its own context
-inline.
+or an explicit evidence packet.
 
 **Who does what is not fixed.** These are identities, not roles. At the start of
 every run the user assigns roles — orchestrator, researcher, solution architect,
@@ -60,6 +60,15 @@ client context file until the user has confirmed the roles for *this* run.
   Teams, M365 documents, Copilot Notebook material. Not source code, not git, not
   Bitbucket, not creating Jira work. `ms-intake` is the manual path for anything
   the tenant will not expose.
+
+Inside an FDE run, never call `ask-codex` or `ask-gemini` directly. Put the
+self-contained request in the run's `tasks/` directory and invoke the assigned
+identity with `fde invoke`. Codex then receives the eligible run-scoped MCP
+servers. For Gemini, save the exact connector material retrieved by the
+orchestrator under the run's `artifacts/` directory and pass it with repeatable
+`--context-file` options; Antigravity does not expose a safe per-invocation MCP
+configuration surface. Evidence files must retain source URLs or IDs and
+retrieval times where available.
 
 GitHub Copilot is not part of this ecosystem. `ask-copilot` is a stub that says so.
 

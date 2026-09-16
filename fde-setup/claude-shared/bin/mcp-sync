@@ -30,9 +30,15 @@ Run-scoped servers never enter a global config. That is the point: there is no
 permanently privileged orchestrator identity, so a connector that speaks for the
 whole engagement must not be sitting in every profile waiting to be used.
 
+Antigravity currently has no safe per-invocation MCP configuration argument.
+FDE therefore does not write a misleading run-level Gemini config: the
+orchestrator retrieves the approved evidence and passes the exact bounded files
+through `fde invoke --context-file` instead.
+
   mcp-sync                      global targets only
   mcp-sync claude gemini        global, restricted to those CLIs
-  mcp-sync --run <run-id>       write the run-scoped configs for a confirmed run
+  mcp-sync --run <run-id>       write live run-scoped configs for clients that
+                                support per-invocation MCP injection
   mcp-sync --profile data       restrict the effective set to one FDE profile
   mcp-sync --dry-run            show what would change; write, start and
                                 download nothing
@@ -340,6 +346,16 @@ def sync_run(catalog, user_doc, health, run_id, dry, report, profile=None):
                 {"server": names, "target": str(kind), "state": mcp.BLOCKED,
                  "reason": f"no MCP surface for kind '{kind}'"})
             continue
+        if kind == "gemini":
+            names = ", ".join(sorted(selected))
+            reason = ("Antigravity has no per-invocation MCP config; retrieve the approved "
+                      "evidence through the orchestrator and pass it with "
+                      "fde invoke --context-file")
+            print(f"  handoff {names} for {aid}: {reason}")
+            report.setdefault("skipped", []).append(
+                {"server": names, "target": "gemini", "identity": aid,
+                 "state": mcp.BLOCKED, "reason": reason})
+            continue
         maps = settings_map(catalog, user_doc, selected)
         if kind == "claude":
             profile_name = a.get("profile", aid)
@@ -359,12 +375,6 @@ def sync_run(catalog, user_doc, health, run_id, dry, report, profile=None):
             if launch:
                 commit(out_dir / f"claude-{profile_name}.env.json", launch, dry, "run",
                        report, mode=0o600)
-        elif kind == "gemini":
-            p = out_dir / "gemini.json"
-            cfg = read_json(p, {})
-            cfg = merge_servers(cfg, "mcpServers",
-                                mcp.render_gemini(selected, settings_by_name=maps, health=health))
-            commit(p, cfg, dry, "run", report, mode=0o600)
         else:
             p = out_dir / "codex.toml"
             commit(p, splice_codex(p, mcp.render_codex_block(
@@ -399,7 +409,7 @@ def sync_run(catalog, user_doc, health, run_id, dry, report, profile=None):
         commit(out_dir / "README.md", run_readme(run_id, out_dir, effective, catalog),
                False, "run", report)
     if not written:
-        print("  none   no role-restricted server matches this run's assignments")
+        print("  none   no live run-scoped MCP binding is available for this run's identities")
     report["effective"] = effective
     return written
 
@@ -408,23 +418,26 @@ def prune_stale(out_dir, bindings, agents, dry, report):
     """Remove generated bindings that no longer describe this run."""
     if not out_dir.is_dir():
         return
-    keep = set()
+    keep = {"effective.json"}
+    has_live_binding = False
     for aid in bindings:
         kind = (agents.get(aid) or {}).get("kind")
         if kind == "claude":
+            has_live_binding = True
             profile_name = (agents.get(aid) or {}).get("profile", aid)
             keep.update({f"claude-{profile_name}.mcp.json",
                          f"claude-{profile_name}.settings.json",
                          f"claude-{profile_name}.env.json"})
-        elif kind == "gemini":
-            keep.add("gemini.json")
         elif kind == "codex":
+            has_live_binding = True
             keep.add("codex.toml")
-    keep.update({"README.md", "effective.json"})
+    if has_live_binding:
+        keep.add("README.md")
     for path in sorted(out_dir.iterdir()):
         if not path.is_file() or path.name in keep:
             continue
-        if not (path.name.startswith("claude-") or path.name in ("gemini.json", "codex.toml")):
+        if not (path.name.startswith("claude-") or
+                path.name in ("gemini.json", "codex.toml", "README.md")):
             continue
         if dry:
             print(f"  would remove run      {path.name} (no longer applicable)")

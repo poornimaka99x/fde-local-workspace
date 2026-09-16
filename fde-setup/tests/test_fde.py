@@ -71,7 +71,8 @@ class Sandbox:
                   self.bindir, self.repo, self.outside):
             d.mkdir(parents=True, exist_ok=True)
 
-        for name in ("fde", "ask-codex", "mcp-sync", "ask-ms-copilot", "ask-copilot"):
+        for name in ("fde", "ask-codex", "ask-gemini", "mcp-sync",
+                     "ask-ms-copilot", "ask-copilot"):
             dst = self.shared / "bin" / name
             shutil.copy2(SRC_SHARED / "bin" / name, dst)
             dst.chmod(0o755)
@@ -541,13 +542,27 @@ class TestCodexGate(FDETest):
         self.assertNotIn("--approve-for-me", calls)
 
     def test_read_only_accepts_only_bounded_mcp_config_overrides(self):
-        value = 'mcp_servers.atlassian.url="https://mcp.atlassian.com/v2/mcp"'
-        result = self.sb.ask_codex("--read-only", "--config-override", value, "hello")
+        values = [
+            'mcp_servers.atlassian.url="https://mcp.atlassian.com/v2/mcp"',
+            'mcp_servers.atlassian.startup_timeout_sec=30',
+            'mcp_servers.atlassian.tool_timeout_sec=60',
+            'mcp_servers.atlassian.enabled_tools=["getJiraIssue"]',
+            'mcp_servers.atlassian.env_http_headers."Authorization"="ATLASSIAN_TOKEN"',
+        ]
+        args = [item for value in values for item in ("--config-override", value)]
+        result = self.sb.ask_codex("--read-only", *args, "hello")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"-c {value}", self.sb.codex_calls())
+        for value in values:
+            self.assertIn(f"-c {value}", self.sb.codex_calls())
         refused = self.sb.ask_codex("--read-only", "--config-override",
                                     'approval_policy="never"', "hello")
         self.assertNotEqual(refused.returncode, 0)
+
+    def test_direct_sidecar_call_inside_a_run_is_refused(self):
+        result = self.sb.ask_codex("--read-only", "review this", FDE_RUN_ID="run-123")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fde invoke run-123", result.stderr)
+        self.assertEqual(self.sb.codex_calls(), "")
 
     def test_write_refuses_without_approval(self):
         """7. Codex write mode refuses to start without approval."""
@@ -794,7 +809,8 @@ class TestAtlassian(FDETest):
 
     def test_no_permanently_privileged_orchestrator(self):
         src = json.loads((SRC_SHARED / "mcp/mcp-servers.json").read_text())
-        self.assertEqual(src["servers"]["atlassian"]["targets"], ["role:orchestrator"])
+        self.assertEqual(src["servers"]["atlassian"]["targets"],
+                         ["role:orchestrator", "role:review", "role:prReview"])
         r = subprocess.run([sys.executable, str(self.sb.shared / "bin" / "mcp-sync")],
                            capture_output=True, text=True, env=self.sb.env())
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -802,7 +818,7 @@ class TestAtlassian(FDETest):
         self.assertNotIn("atlassian", global_cfg)
         self.assertIn("context7", global_cfg)
 
-    def test_connector_wired_only_after_roles_and_only_to_the_orchestrator(self):
+    def test_connector_wired_only_after_roles_and_to_eligible_reviewers(self):
         run_id = self.sb.start_full()
         r = subprocess.run([sys.executable, str(self.sb.shared / "bin" / "mcp-sync"),
                             "--run", run_id], capture_output=True, text=True,
@@ -816,8 +832,55 @@ class TestAtlassian(FDETest):
         cfg = json.loads((mcp_dir / "claude-alt.mcp.json").read_text())
         self.assertEqual(cfg["mcpServers"]["atlassian"]["url"], self.ENDPOINT)
         self.assertEqual(cfg["mcpServers"]["figma"]["url"], "https://mcp.figma.com/mcp")
-        others = [p.name for p in mcp_dir.glob("claude-*.mcp.json")]
-        self.assertEqual(others, ["claude-alt.mcp.json"])
+        others = sorted(p.name for p in mcp_dir.glob("claude-*.mcp.json"))
+        self.assertEqual(others, ["claude-alt.mcp.json", "claude-msc.mcp.json"])
+
+    def test_routed_codex_review_gets_live_mcp_and_bounded_evidence(self):
+        run_id = self.sb.start_full()
+        result = self.sb.full_roles(run_id, review="chatgpt_codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.sb.advance_to(run_id, "review")
+        task = self.sb.run_dir(run_id) / "tasks/review.md"
+        evidence = self.sb.run_dir(run_id) / "artifacts/review-evidence.md"
+        task.parent.mkdir(parents=True, exist_ok=True)
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("Review the proposal against the supplied evidence")
+        evidence.write_text("Jira ACME-142: acceptance criterion one")
+        result = self.sb.fde("invoke", run_id, "chatgpt_codex", str(task),
+                             "--stage", "review", "--context-file", str(evidence),
+                             "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocation = json.loads(result.stdout)
+        self.assertEqual(invocation["env"]["FDE_ROUTED_INVOCATION"], "1")
+        self.assertEqual(invocation["contextFiles"], ["artifacts/review-evidence.md"])
+        self.assertIn("--context-file", invocation["argv"])
+        self.assertTrue(any("mcp_servers.atlassian.url=" in item
+                            for item in invocation["argv"]))
+
+    def test_routed_gemini_review_gets_the_explicit_evidence_packet(self):
+        run_id = self.sb.start_full()
+        result = self.sb.fde("roles", run_id,
+                             "--set", "orchestrator=claude_alt",
+                             "--set", "review=gemini",
+                             "--allow-unassigned", "--allow-unavailable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.sb.advance_to(run_id, "review")
+        task = self.sb.run_dir(run_id) / "tasks/review.md"
+        evidence = self.sb.run_dir(run_id) / "artifacts/review-evidence.md"
+        task.parent.mkdir(parents=True, exist_ok=True)
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("Review the proposal against the supplied evidence")
+        evidence.write_text("Confluence page ENG-19: rollout is reversible")
+        result = self.sb.fde("invoke", run_id, "gemini", str(task),
+                             "--stage", "review", "--context-file", str(evidence),
+                             "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocation = json.loads(result.stdout)
+        self.assertEqual(invocation["env"]["FDE_ROUTED_INVOCATION"], "1")
+        self.assertEqual(invocation["contextFiles"], ["artifacts/review-evidence.md"])
+        self.assertIn("--task-file", invocation["argv"])
+        self.assertIn("--context-file", invocation["argv"])
+        self.assertFalse(any("mcp_servers." in item for item in invocation["argv"]))
 
     def test_specialist_invocations_receive_their_run_scoped_mcp_config(self):
         run_id = self.sb.start_full()

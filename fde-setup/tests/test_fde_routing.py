@@ -831,8 +831,10 @@ class TestOverrides(RoutingTest):
                           "--stage", "review", "--task-id", "review-1", "--dry-run")
         self.assertEqual(dry.returncode, 0, dry.stderr)
         payload = json.loads(dry.stdout)
-        self.assertEqual(payload["argv"][:6],
-                         ["claude", "--model", "big", "--effort", "high", "-p"])
+        self.assertEqual(payload["argv"][:5],
+                         ["claude", "--model", "big", "--effort", "high"])
+        self.assertIn("--mcp-config", payload["argv"])
+        self.assertIn("-p", payload["argv"])
 
     def test_the_orchestrator_route_can_be_overridden_too(self):
         run_id = self.approved_run()

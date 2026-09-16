@@ -23,11 +23,20 @@ in one line and explain what would have changed your mind.
 2. **Get an independent read** from a different model family:
 
    ```bash
-   ~/.claude-shared/bin/ask-codex --read-only "Critique this architecture proposal. Be specific about what would fail. <proposal inline>"
+   fde invoke "$FDE_RUN_ID" <assigned-codex-identity> tasks/review.md \
+     --stage review --context-file artifacts/review-evidence.md
    ```
 
-   Exit 127 means Codex is not installed — note it and continue alone. Include
-   the proposal inline; it has none of this session's context.
+   Use this form inside a run, and only when Codex is assigned a review role.
+   Put the proposal and critique request in the task file. Put the exact
+   connector evidence used by the orchestrator in a bounded run artifact, with
+   source URLs or IDs, and pass it with `--context-file`. The controller supplies
+   eligible live run-scoped connectors to Codex as well. Do not call
+   `ask-codex` directly inside a run.
+
+   Outside a run, `ask-codex --read-only --task-file <file> --context-file
+   <file>` is allowed. Exit 127 means Codex is not installed — note it and
+   continue alone.
 
 3. **Reconcile.** Where you and Codex disagree, work out which is right rather
    than reporting both.

@@ -729,6 +729,14 @@ another. The selection reaches the CLI as separate argument-array elements
 task file beginning with `-` is text, not a flag. `invoke.start` and
 `invoke.end` record the resolved route.
 
+Codex and Gemini sidecar invocations also accept repeatable `--context-file`
+arguments. Each path must resolve to a regular file inside the run; symlinks and
+paths outside it are refused, and the combined payload is capped at 512 KiB.
+The start event records each relative path and SHA-256. Codex additionally gets
+the review role's eligible MCP servers as per-invocation overrides. Antigravity
+has no safe per-invocation MCP config surface, so Gemini gets the explicit
+evidence packet and no generated run config is represented as live.
+
 A run with no `routing.json` keeps the original behaviour exactly: `claude -p
 <body>`, no `--task-id`, `route.source: "manual"`. Passing `--task-id` to such a
 run is refused rather than ignored.

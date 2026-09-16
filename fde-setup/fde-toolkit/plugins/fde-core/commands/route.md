@@ -15,11 +15,11 @@ asked for.
 
 | Need | Surface | Because |
 |---|---|---|
-| Research volume, long documents, web grounding | `ask-gemini` | large context, ~1,000 req/day, and Bedrock has no WebSearch |
-| Independent critique from another model family | `ask-codex --read-only` | disagreement is the point; read-only sandbox |
+| Research volume, long documents, web grounding | assigned Gemini via `fde invoke` | large context, ~1,000 req/day, and Bedrock has no WebSearch; pass run evidence with `--context-file` |
+| Independent critique from another model family | assigned Codex via `fde invoke` | disagreement is the point; read-only sandbox plus eligible run-scoped MCP |
 | Implementation by Codex | `fde approve-codex` then `fde invoke ... --write` | write needs a one-time, hash-bound approval every time |
 | Microsoft estate — SharePoint, Outlook, Teams, Copilot Notebooks | `ask-ms-copilot`, or `ms-intake` for the manual path | Microsoft Copilot is the enterprise-context surface, not a coding agent |
-| Jira, Confluence, Bitbucket reads | Atlassian MCP, wired only to the run's orchestrator | no permanently privileged account |
+| Jira and Confluence reads | Atlassian MCP, wired to the run's orchestrator and assigned reviewers | no permanently privileged account; role, stage, profile and readiness still constrain it |
 | GitHub or Bitbucket PR analysis | `/scm-pr-review` + local git + matching provider context | provider is detected; reviews verify the local diff |
 | Jira, Confluence, SharePoint, GitHub, Bitbucket, email, Teams writes | `fde approve-publish <run-id> <target>` | other people watch those spaces |
 | UI flows and prototypes | `/ui-prototype` using Figma or Claude Design | design states and accessibility are settled before code |

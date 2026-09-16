@@ -161,7 +161,7 @@ class QuietHandsOffToRtk(unittest.TestCase):
 class SidecarPrefixIsCacheable(unittest.TestCase):
     """A prefix that shifts by one byte is a full cache miss."""
 
-    def compose(self, question, env=None):
+    def compose(self, question, env=None, context=None):
         # ask-gemini's composition, exercised through a stand-in for the CLI.
         # The stub lives in a temporary directory: a test that writes into the
         # repository is a test that changes what it is measuring.
@@ -175,8 +175,17 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
                             '  [[ "$1" == "-p" ]] && { printf "%s" "$2"; exit 0; }\n'
                             '  shift\ndone\n')
             stub.chmod(0o755)
-            merged = {"PATH": f"{tmp}:{os.environ['PATH']}", **(env or {})}
-            return sh(SHARED / "bin" / "ask-gemini", question,
+            merged = dict(os.environ)
+            merged.pop("FDE_RUN_ID", None)
+            merged.pop("FDE_ROUTED_INVOCATION", None)
+            merged.update({"PATH": f"{tmp}:{os.environ['PATH']}", **(env or {})})
+            args = []
+            if context is not None:
+                evidence = Path(tmp) / "review-evidence.md"
+                evidence.write_text(context)
+                args += ["--context-file", evidence]
+            args.append(question)
+            return sh(SHARED / "bin" / "ask-gemini", *args,
                       env=merged, expected=0).stdout
 
     def test_preamble_is_first_and_identical_across_questions(self):
@@ -205,13 +214,32 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
         bare = self.compose("bare question", env={"FDE_NO_PREAMBLE": "1"})
         self.assertEqual(bare.strip(), "bare question")
 
+    def test_explicit_evidence_is_passed_even_without_the_shared_preamble(self):
+        prompt = self.compose("find contradictions", env={"FDE_NO_PREAMBLE": "1"},
+                              context="Jira ACME-142 says retries are required")
+        self.assertIn("# Reference: review-evidence.md", prompt)
+        self.assertIn("Jira ACME-142 says retries are required", prompt)
+        self.assertTrue(prompt.rstrip().endswith("find contradictions"))
+
+    def test_direct_gemini_call_inside_a_run_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "agy"
+            stub.write_text('#!/usr/bin/env bash\necho should-not-run\n')
+            stub.chmod(0o755)
+            result = sh(SHARED / "bin" / "ask-gemini", "review this",
+                        env={"PATH": f"{tmp}:{os.environ['PATH']}",
+                             "FDE_RUN_ID": "run-123"})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fde invoke run-123", result.stderr)
+            self.assertNotIn("should-not-run", result.stdout)
+
     def test_write_mode_prompt_is_not_wrapped(self):
         # The approval is hash-bound to the task file: what Codex is told in
         # write mode must be exactly what the user approved.
         codex = (SHARED / "bin" / "ask-codex").read_text()
         write_path = codex.split("# -------------------------------------------------------------------- write --")[1]
         self.assertNotIn("compose_prompt", write_path)
-        self.assertIn('"$(cat "$task_file")"', write_path)
+        self.assertIn('"$approved_prompt"', write_path)
 
 
 if __name__ == "__main__":

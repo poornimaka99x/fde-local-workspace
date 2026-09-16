@@ -16,9 +16,15 @@ and mixing the two produces research bent toward a conclusion you picked early.
    the organisation, and internal answers carry the client's own vocabulary.
 2. **Microsoft estate.** `ask-ms-copilot "<question>"` if it is configured;
    otherwise say what you would have asked and move on. Do not block.
-3. **Outside.** `ask-gemini "<question>"` for deep or broad research — vendor
-   documentation, comparable architectures, standards. Use it for volume; it has
-   the daily quota to absorb it.
+3. **Outside.** Use the Gemini identity assigned to research for deep or broad
+   research — vendor documentation, comparable architectures, standards. Inside
+   an FDE run, save the question and exact internal-source evidence as run files
+   and call `fde invoke "$FDE_RUN_ID" <gemini-identity> <task-file> --stage
+   research --context-file <evidence-file>`. Antigravity cannot safely receive a
+   per-invocation MCP configuration, so the explicit evidence file is its access
+   path. Never call `ask-gemini` directly inside a run. Outside a run, the raw
+   wrapper remains available. Use it for volume; it has the daily quota to absorb
+   it.
 
 ## Return
 

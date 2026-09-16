@@ -22,25 +22,41 @@ routine work — it is slow and it burns quota that has a daily ceiling.
 1. **Form your own answer first, and write it down before asking anyone else.**
    If you ask first you will anchor on their reply, and the exercise is wasted.
 
-2. **Prepare a self-contained question.** The other CLIs do not share this
-   session's context. Include the relevant code or diff inline. A question that
-   requires context they cannot see produces a confident, useless answer.
+2. **Prepare a self-contained question and evidence packet.** The other CLIs do
+   not share this session's context. Inside a run, save the question under the
+   run's `tasks/` directory and save the exact Jira, Confluence, Figma, database
+   or cloud evidence under the run's `artifacts/` directory. Include source URLs
+   or IDs and retrieval times where available. A question that depends on
+   context they cannot see produces a confident, useless answer.
 
-3. **Ask both, in parallel:**
+3. **Ask both, in parallel.** Inside an FDE run, use only the controller and the
+   identities assigned to review or research:
 
    ```bash
-   ~/.claude-shared/bin/ask-gemini "<question with context inline>"
-   ~/.claude-shared/bin/ask-codex --read-only "<same question>"
+   fde invoke "$FDE_RUN_ID" <gemini-identity> tasks/crosscheck.md \
+     --stage review --context-file artifacts/review-evidence.md
+   fde invoke "$FDE_RUN_ID" <codex-identity> tasks/crosscheck.md \
+     --stage review --context-file artifacts/review-evidence.md
+   ```
+
+   The controller supplies eligible run-scoped MCP servers directly to Codex.
+   Antigravity has no safe per-invocation MCP configuration surface, so Gemini
+   receives the exact bounded evidence packet instead. Never call `ask-codex`
+   or `ask-gemini` directly from inside a run; doing so bypasses role checks and
+   the run's connector/evidence scope.
+
+   Outside a run, use the wrappers with a self-contained prompt or an explicit
+   `--context-file`:
+
+   ```bash
+   ~/.claude-shared/bin/ask-gemini --task-file /path/to/question.md --context-file /path/to/evidence.md
+   ~/.claude-shared/bin/ask-codex --read-only --task-file /path/to/question.md --context-file /path/to/evidence.md
    ```
 
    Read-only, always: a cross-check reads and argues, it does not change
    anything. If you find yourself wanting `--write` here you are no longer
    cross-checking, you are implementing — that belongs in `/engage` behind an
    approval.
-
-   Inside a run, ask only the identities the user actually assigned to the
-   review or research roles. An identity with no role in this run does not get
-   a vote in it.
 
    Exit 127 means that CLI is not installed — note it and continue with the
    other. Do not treat a missing tool as a failed check; say which opinions you

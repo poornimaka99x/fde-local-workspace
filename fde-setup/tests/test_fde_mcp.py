@@ -334,6 +334,18 @@ class Activation(unittest.TestCase):
         self.assertNotIn("atlassian", chosen)
         self.assertIn("no approved stage", rejected["atlassian"][1])
 
+    def test_reviewers_receive_review_stage_evidence_connectors(self):
+        chosen, _rejected = self.effective(roles={"review"}, stages=["review"],
+                                           profile="client-delivery")
+        self.assertIn("atlassian", chosen)
+        self.assertIn("figma", chosen)
+
+    def test_every_orchestrator_evidence_connector_declares_review_scope(self):
+        for name in ("atlassian", "figma", "dbhub", "aws", "azure"):
+            server = self.catalog.get(name)
+            self.assertIn("role:review", server["targets"], name)
+            self.assertIn("review", server["stages"], name)
+
     def test_a_profile_narrows_the_effective_set(self):
         chosen, rejected = self.effective(roles={"orchestrator"}, stages=["intake"],
                                           profile="data")
@@ -561,6 +573,7 @@ class SyncBehaviour(unittest.TestCase):
         (self.shared / "config" / "agents.json").write_text(json.dumps({"agents": {
             "claude_work": {"kind": "claude", "profile": "work", "label": "Claude work"},
             "codex_work": {"kind": "codex", "label": "Codex work"},
+            "gemini": {"kind": "gemini", "label": "Gemini"},
         }}))
 
     def tearDown(self):
@@ -649,6 +662,20 @@ class SyncBehaviour(unittest.TestCase):
         self.assertFalse((run_dir / "mcp/claude-work.mcp.json").exists())
         self.assertFalse((run_dir / "mcp/claude-work.settings.json").exists())
         self.assertTrue((run_dir / "mcp/codex.toml").exists())
+
+    def test_gemini_uses_an_explicit_evidence_handoff_not_a_dead_config(self):
+        run_dir = self.make_run("run-gemini", {"review": "gemini"}, ["review"],
+                                profile="client-delivery")
+        stale = run_dir / "mcp/gemini.json"
+        stale.write_text('{"mcpServers":{"atlassian":{}}}')
+        stale_readme = run_dir / "mcp/README.md"
+        stale_readme.write_text("old live binding")
+        result = self.sync("--run", "run-gemini")
+        self.assertIn("fde invoke --context-file", result.stdout)
+        self.assertFalse(stale.exists())
+        self.assertFalse(stale_readme.exists())
+        effective = json.loads((run_dir / "mcp/effective.json").read_text())
+        self.assertEqual(effective["servers"], {})
 
     def test_an_unconfigured_connector_is_refused_with_its_reason(self):
         run_dir = self.make_run("run-c", {"observability": "claude_work"},

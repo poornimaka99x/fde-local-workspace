@@ -33,7 +33,8 @@ class RunActivation(FDETest):
         effective = self.effective(run_id)
         self.assertEqual(effective["runId"], run_id)
         self.assertEqual(sorted(effective["servers"]), ["atlassian", "figma"])
-        self.assertEqual(effective["servers"]["atlassian"]["identities"], ["claude_alt"])
+        self.assertEqual(effective["servers"]["atlassian"]["identities"],
+                         ["claude_alt", "claude_msc"])
         self.assertEqual(effective["servers"]["atlassian"]["mutation"], "mutation-capable")
 
     def test_activation_is_recorded_server_by_server(self):

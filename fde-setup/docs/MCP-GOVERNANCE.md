@@ -44,7 +44,7 @@ close, and it closes it in the client's own mechanism:
 | --- | --- | --- |
 | Claude Code | `permissions.allow` / `permissions.deny` in a generated settings file, loaded with `--settings` beside `--mcp-config` | exact `mcp__<server>__<tool>` names — wildcards are not accepted for MCP specifiers, which is *why* an unverified server cannot be allow-listed |
 | Codex CLI | `enabled_tools` on the `[mcp_servers.<name>]` table | exact tool names |
-| Gemini / Antigravity | `includeTools` on the `mcpServers` entry | exact tool names; unavailable through `agy mcp add`, so a server needing filtering is not placed globally for Gemini |
+| Gemini / Antigravity | `includeTools` on a persistent `mcpServers` entry | exact tool names, but Antigravity exposes no safe per-invocation MCP config; FDE does not pretend a generated run file is active and instead passes bounded evidence files through `fde invoke --context-file` |
 
 How a server's safe subset is established is declared per entry as
 `readOnlyPolicy`:
@@ -143,6 +143,13 @@ FDE stores no token. Both stay run-scoped rather than global. Sign in inside the
 assigned client (`/mcp` in a Claude session), then `fde mcp verify atlassian`.
 Rovo does not give unrestricted Bitbucket repository operations — use local git
 or the Bitbucket REST connection for repository files.
+
+The orchestrator and an assigned reviewer can use these connectors when the
+approved stage and profile require them. Codex receives eligible connectors as
+per-invocation configuration. Gemini does not: the orchestrator must save the
+exact retrieved material, including source URLs or IDs, inside the run and pass
+it with `fde invoke --context-file`. The controller logs each evidence path and
+hash, caps the total handoff at 512 KiB, and refuses paths outside the run.
 
 ### DBHub — configure first
 ```bash

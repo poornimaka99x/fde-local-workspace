@@ -109,6 +109,7 @@ PROJECTS = pathlib.Path(os.environ.get("FDE_PROJECTS_DIR", SHARED / "projects"))
 # Attachments are copied into the run, hashed, and recorded append-only. The
 # ceiling is configurable downward only — no caller may raise it.
 MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
+MAX_SIDECAR_CONTEXT_BYTES = 512 * 1024
 
 # Flags that must never appear anywhere in this toolkit — a sandbox bypass or a
 # blanket approval, whichever CLI offers it. What may be approved is decided by
@@ -6204,6 +6205,36 @@ def _resolve_task_file(run: Run, given: str) -> pathlib.Path:
     return p
 
 
+def _resolve_sidecar_context(run: Run, values) -> list[pathlib.Path]:
+    """Explicit, bounded run evidence for a separate-model review.
+
+    A context file must already live inside this run. That lets an orchestrator
+    hand off retrieved Jira, Confluence, design or operational evidence without
+    granting a sidecar access to arbitrary files elsewhere on the machine.
+    """
+    root = run.dir.resolve()
+    resolved, seen, total = [], set(), 0
+    for value in values or []:
+        raw = pathlib.Path(value).expanduser()
+        candidate = raw if raw.is_absolute() else run.dir / raw
+        if candidate.is_symlink() or not candidate.is_file():
+            die(f"review context is not a regular run file: {candidate}", 2)
+        path = candidate.resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            die(f"review context must be inside run {run.id}: {path}", 2)
+        if path in seen:
+            continue
+        size = path.stat().st_size
+        total += size
+        if total > MAX_SIDECAR_CONTEXT_BYTES:
+            die(f"review context exceeds the {MAX_SIDECAR_CONTEXT_BYTES // 1024} KiB limit", 2)
+        seen.add(path)
+        resolved.append(path)
+    return resolved
+
+
 def _branch(repo: pathlib.Path):
     r = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
     if r is None or r.returncode != 0:
@@ -6549,7 +6580,7 @@ def _run_mcp_options(run: Run, agent_id: str, agent: dict) -> list[str]:
 
 
 def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path,
-                     write: bool, route=None):
+                     write: bool, route=None, context_files=()):
     a = agents["agents"][agent_id]
     kind = a.get("kind")
     body = task.read_text(encoding="utf-8", errors="replace")
@@ -6560,6 +6591,8 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
     # a Codex, Gemini or Copilot account created by 'fde accounts add' reaches
     # its own credentials without a change to this function.
     env.update(account_env(agents, agent_id))
+    context_options = [part for path in context_files
+                       for part in ("--context-file", str(path))]
     if kind == "claude":
         prof = a.get("profile") or account_slug_of(agent_id, a)
         if prof == "bedrock" and "CLAUDE_CODE_USE_BEDROCK" not in env:
@@ -6587,15 +6620,19 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
             capability_options = ["--disallowedTools", ",".join(disabled_tools)]
         return ["claude"] + options + claude_options + capability_options + ["-p", body], env
     if kind == "codex":
+        env["FDE_ROUTED_INVOCATION"] = "1"
         mcp_options = _run_mcp_options(run, agent_id, a)
         if mcp_options:
             env.update(_run_mcp_env(run, agent_id))
         if write:
             return [_bin("ask-codex"), "--write", "--run", run.id,
                     "--stage", stage, "--task-file", str(task)] + options + mcp_options, env
-        return [_bin("ask-codex"), "--read-only", "--task-file", str(task)] + options + mcp_options, env
+        return ([_bin("ask-codex"), "--read-only", "--task-file", str(task)]
+                + context_options + options + mcp_options), env
     if kind == "gemini":
-        return [_bin("ask-gemini"), body], env
+        env["FDE_ROUTED_INVOCATION"] = "1"
+        return ([_bin("ask-gemini"), "--task-file", str(task)]
+                + context_options + options), env
     if kind == "copilot-studio":
         return [_bin("ask-ms-copilot"), body], env
     die(f"no invocation defined for kind '{kind}'", 2)
@@ -6667,8 +6704,13 @@ def cmd_invoke(args):
     if args.task_file and getattr(args, "task_file_option", None):
         die("give the task file once, not both positionally and with --task-file", 2)
     task = _resolve_task_file(run, given)
+    context_files = _resolve_sidecar_context(run, args.context_file)
+    if context_files and agents["agents"][agent_id].get("kind") not in ("codex", "gemini"):
+        die("--context-file is supported for Codex and Gemini sidecar invocations", 2)
+    if context_files and args.write:
+        die("Codex write mode cannot add context outside the approved task file", 2)
     argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write,
-                                       route=route)
+                                       route=route, context_files=context_files)
 
     if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
         die("refusing to run: the invocation contains a sandbox-bypass flag", 8)
@@ -6692,11 +6734,15 @@ def cmd_invoke(args):
         # "what would this do", and an answer that spends a retry is not one.
         print(json.dumps({"argv": argv, "env": extra_env, "stage": stage,
                           "agent": agent_id, "roles": held, "write": bool(args.write),
+                          "contextFiles": [str(path.relative_to(run.dir.resolve()))
+                                           for path in context_files],
                           "route": resolved_route}))
         return 0
 
     run.event("invoke.start", agent=agent_id, stage=stage, roles=held,
               write=bool(args.write), taskFile=str(task), argv0=argv[0],
+              contextFiles=[{"path": str(path.relative_to(run.dir.resolve())),
+                             "sha256": sha256_file(path)} for path in context_files],
               route=resolved_route)
     env = dict(os.environ, **extra_env)
     started = now()
@@ -6724,7 +6770,10 @@ def cmd_invoke(args):
            if resolved_route["taskId"] else
            "- model/effort: selected manually for this run\n")
         + f"- started: {iso(started)}\n- exit: {proc.returncode}\n"
-        f"- task: {task}\n\n"
+        f"- task: {task}\n"
+        + ("- context: " + ", ".join(str(path.relative_to(run.dir.resolve()))
+                                      for path in context_files) + "\n" if context_files else "")
+        + "\n"
         f"> Output of a separate agent with its own context. Evidence, not authority —\n"
         f"> verify claims about the codebase against the codebase.\n\n"
         f"---\n\n{proc.stdout.strip()}\n"
@@ -13718,6 +13767,8 @@ def main(argv=None):
                    help="the approved routed task this invocation carries out; required "
                         "on an automatically routed run, and the source of its model and "
                         "effort")
+    s.add_argument("--context-file", action="append", default=[], metavar="RUN-FILE",
+                   help="bounded evidence inside the run to pass to Codex or Gemini; repeatable")
     s.add_argument("--write", action="store_true", help="Codex only, and only with a live approval")
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_invoke)
