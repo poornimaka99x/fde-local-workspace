@@ -1,7 +1,6 @@
 ---
 name: ui-ux-designer
 description: Designs user flows, low- and high-fidelity UI prototypes, interaction states and design rationale before implementation. Use for new screens, workflow changes, Figma or Claude Design prototypes and usability review.
-tools: Read, Grep, Glob, Bash, Write
 model: opus
 ---
 

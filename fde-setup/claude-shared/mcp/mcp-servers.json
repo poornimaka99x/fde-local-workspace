@@ -146,11 +146,16 @@
       "startupTimeoutSeconds": 120,
       "clients": { "codex": { "toolTimeoutSeconds": 180 } },
       "targets": [
+        "role:orchestrator",
         "role:uiUxDesign", "role:implementation", "role:testEngineering",
         "role:ciInvestigation"
       ],
-      "stages": ["implementation", "verification"],
-      "profiles": ["frontend-testing"],
+      "stages": [
+        "intake", "research", "solutioning", "planning", "implementation",
+        "reconciliation",
+        "review", "verification", "presentation", "publication", "deployment",
+        "observability"
+      ],
       "requires": {
         "executables": ["npx"],
         "setup": "Node.js provides npx. The pinned package is fetched on first use, never when a page is opened.",
@@ -188,9 +193,12 @@
           "^browser_network_requests$", "^browser_wait_for$", "^browser_tabs$"
         ],
         "update": [
-          "^browser_navigate", "^browser_click$", "^browser_type$", "^browser_press_key$",
+          "^browser_click$", "^browser_type$", "^browser_press_key$",
           "^browser_hover$", "^browser_select_option$", "^browser_drag$",
           "^browser_fill_form$", "^browser_resize$", "^browser_handle_dialog$"
+        ],
+        "search": [
+          "^browser_navigate$", "^browser_navigate_back$"
         ],
         "delete": [
           "^browser_close$"
@@ -201,11 +209,11 @@
       },
       "mutationApproval": { "targets": ["jira", "confluence", "sharepoint", "bitbucket", "github", "email", "teams", "figma", "deployment"] },
       "verify": { "method": "tools/list", "timeoutSeconds": 120 },
-      "useWhen": "Browser workflows, accessibility-tree interaction, responsive behaviour and end-to-end verification of a UI you are building.",
+      "useWhen": "Web research and search through an isolated browser, plus accessibility-tree interaction, responsive behaviour and end-to-end verification of a UI you are building. This is the Bedrock fallback when native WebSearch is unavailable.",
       "preferOver": ["screenshot-only descriptions of a page", "hand-written DOM guesses"],
       "doNotUseWhen": "A repeatable acceptance check belongs in the repository's own Playwright tests — write the test rather than driving the browser once. Do not activate it alongside Chrome DevTools unless the task needs both.",
       "gateway": { "docker": "frontend-testing" },
-      "note": "Isolated, headless sessions by default: no profile is saved to disk and no signed-in browser is reused. Arbitrary script evaluation, file upload and installation tools are denied. A browser action that submits, publishes, purchases, sends or otherwise mutates an external authenticated service is an external mutation and needs the matching fde approve-publish first."
+      "note": "Available to the orchestrator for every approved stage, and inherited by its subagents. Sessions are isolated and headless by default: no profile is saved to disk and no signed-in browser is reused. Read/search scope permits observation and URL navigation; clicks, typing and form actions still require update scope. Arbitrary script evaluation, file upload and installation tools are denied. A browser action that submits, publishes, purchases, sends or otherwise mutates an external authenticated service is an external mutation and needs the matching fde approve-publish first."
     },
 
     "chrome-devtools": {

@@ -114,6 +114,7 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("ARG=--session-id", log)
         self.assertIn("ARG=--resume", log)
         self.assertIn("ARG=--mcp-config", log)
+        self.assertIn("ARG=--settings", log)
         self.assertIn("ARG=--permission-mode", log)
         self.assertIn("ARG=auto", log)
         self.assertGreaterEqual(log.count("ARG=--disallowedTools"), 2)
@@ -132,6 +133,7 @@ class FdeStartTest(unittest.TestCase):
         self.assertEqual(manifest["sessionConfig"], {"model": "opus", "effort": "xhigh"})
         self.assertIn("executionApprovedAt", plan)
         self.assertTrue((runs[0] / "mcp/claude-work.mcp.json").is_file())
+        self.assertTrue((runs[0] / "mcp/claude-work.settings.json").is_file())
 
     def test_resume_uses_an_existing_recorded_request_without_asking_again(self):
         env = dict(os.environ)

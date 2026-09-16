@@ -1,7 +1,6 @@
 ---
 name: standards-reviewer
 description: Reviews changed code against repository and shared engineering standards, reporting evidence-backed violations. Use before PRs and for architecture-conformance review.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

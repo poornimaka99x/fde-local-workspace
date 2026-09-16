@@ -1,7 +1,6 @@
 ---
 name: repo-cartographer
 description: Surveys an unfamiliar repository and returns a structural map — languages, module boundaries, build and test commands, config and deployment surface, and the traps a new engineer would hit. Use when onboarding into a repo you have not worked in, or when you need the shape of a codebase without reading it into the main context.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

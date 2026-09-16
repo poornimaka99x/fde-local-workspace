@@ -1,7 +1,6 @@
 ---
 name: reviewer
 description: Adversarially reviews a proposal or ADR, including by putting it to a different model family via Codex, then returns the objections ranked by how much they would cost if ignored. Use after the solutioner produces a proposal, before anything goes to a stakeholder.
-tools: Read, Grep, Glob, Bash
 model: opus
 ---
 

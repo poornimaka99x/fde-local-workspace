@@ -1,7 +1,6 @@
 ---
 name: implementation-engineer
 description: Implements an approved, bounded change with tests and documentation while following the repository architecture and shared engineering standards. Use only after scope, design and acceptance criteria are sufficiently clear.
-tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 ---
 

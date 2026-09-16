@@ -317,8 +317,9 @@ ask-ms-copilot "…"            # SharePoint, Outlook, Teams, M365 documents
 git diff | ask-gemini "what breaks in production?"
 ```
 
-`ask-gemini` matters more than it looks: **Bedrock has no WebSearch**, so on that
-profile it is your research path.
+Bedrock has no native WebSearch. Approved FDE runs instead expose the isolated
+Playwright browser for web navigation and search; `ask-gemini` remains useful
+for high-volume research and independent web grounding.
 
 Codex writing is a different thing entirely:
 
@@ -591,9 +592,10 @@ latter remains owned by each MCP-capable client.
 
 ## Caveats
 
-- **WebSearch is unavailable on Bedrock.** For research-heavy work use a
-  subscription profile, or give the research role to Gemini as well. The session
-  banner reminds you which provider you are on.
+- **Native WebSearch is unavailable on Bedrock.** Approved FDE runs use the
+  isolated Playwright browser for web navigation and search. For high-volume or
+  independent research, assign Gemini as well. The session banner reminds you
+  which provider you are on.
 - Model aliases resolve differently on Bedrock; pin versions via
   `/setup-bedrock` rather than assuming `opus`/`sonnet` mean the same in both.
 - Gemini CLI cannot run as an MCP server. Codex can (`codex mcp-server`) but it

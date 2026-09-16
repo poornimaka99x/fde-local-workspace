@@ -297,6 +297,13 @@ The combined plan approval shows the same set before anything is generated, and
 change. Access is never widened silently: a widened plan supersedes the frozen
 route and re-asks.
 
+The isolated Playwright server is eligible for the run's orchestrator in every
+approved stage and profile. It supplies browser navigation and web research when
+Claude runs on Bedrock, where native WebSearch is unavailable. FDE subagents do
+not declare narrower tool allowlists, so they inherit the orchestrator's active
+built-ins and run-scoped MCP servers. Readiness, stage selection, MCP scopes and
+publication/mutation approvals still apply; inheritance is not a gate bypass.
+
 ## Sample effective configuration per profile
 
 What `fde mcp effective --profile <name>` reports on this machine today, with
@@ -307,6 +314,7 @@ and Langfuse have not been configured.
 ```
 ### coding
   context7         read-only         public-documentation   every tool
+  playwright       mutation-capable  browser-session        18 governed tool(s)
   serena           unavailable       missing on this machine: serena. uv tool install -p 3.13 serena-agent
 
 ### frontend-testing
@@ -318,16 +326,19 @@ and Langfuse have not been configured.
   atlassian        mutation-capable  tenant-data            every tool   ← unscoped, see below
   context7         read-only         public-documentation   every tool
   figma            mutation-capable  tenant-data            every tool   ← unscoped, see below
+  playwright       mutation-capable  browser-session        18 governed tool(s)
 
 ### data
   context7         read-only         public-documentation   every tool
   dbhub            not_configured    Read-only PostgreSQL DSN, The database account itself is read-only
+  playwright       mutation-capable  browser-session        18 governed tool(s)
 
 ### observability
   context7         read-only         public-documentation   every tool
   aws              unavailable       missing on this machine: aws
   azure            unavailable       missing on this machine: az
   langfuse         not_configured    Langfuse deployment, MCP endpoint, Public key, Secret key
+  playwright       mutation-capable  browser-session        18 governed tool(s)
 ```
 
 Those tool counts are not estimates. Playwright 0.0.80 reports 24 tools and 18

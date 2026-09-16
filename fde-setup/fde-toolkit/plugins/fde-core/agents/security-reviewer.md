@@ -1,7 +1,6 @@
 ---
 name: security-reviewer
 description: Performs threat-driven review of a proposed design or code change, focusing on trust boundaries, authorization, secrets, data handling, dependencies and abuse cases. Use for security-sensitive changes and as an independent release gate.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

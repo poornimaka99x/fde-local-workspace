@@ -154,7 +154,7 @@
         "requires": "aws",
         "note": "Reports the caller identity only. No model is invoked, so verifying costs nothing."
       },
-      "note": "No WebSearch on Bedrock. If this identity holds the research role, give it a second researcher or expect local-only evidence.",
+      "note": "Anthropic's native WebSearch is unavailable on Bedrock. Approved FDE runs provide the isolated Playwright browser for web navigation and research; Gemini remains available for high-volume or independent web grounding.",
       "capabilities": [
         "orchestration",
         "product-management",

@@ -1,7 +1,6 @@
 ---
 name: pr-analyst
 description: Reviews GitHub or Bitbucket pull requests for correctness, regressions, contract changes, test gaps and operational risk using provider context plus the local diff. Use for team-member PR analysis or pre-merge review.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

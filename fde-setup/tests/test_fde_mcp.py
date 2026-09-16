@@ -340,6 +340,25 @@ class Activation(unittest.TestCase):
         self.assertIn("atlassian", chosen)
         self.assertIn("figma", chosen)
 
+    def test_orchestrator_gets_the_isolated_browser_in_every_profile_and_stage(self):
+        server = self.catalog.get("playwright")
+        self.assertIn("role:orchestrator", server["targets"])
+        self.assertEqual(server["profiles"], [])
+        self.assertTrue(set(mcp.KNOWN_STAGES) <= set(server["stages"]))
+        self.make_ready("playwright", [
+            {"name": "browser_navigate"},
+            {"name": "browser_snapshot", "readOnlyHint": True},
+        ])
+        chosen, _rejected = self.effective(
+            roles={"orchestrator"}, stages=["research"], profile="data")
+        self.assertIn("playwright", chosen)
+
+    def test_browser_navigation_is_search_scope_not_page_mutation(self):
+        server = self.catalog.get("playwright")
+        self.assertEqual(mcp.scope_of_tool("browser_navigate", server), "search")
+        self.assertEqual(mcp.scope_of_tool("browser_navigate_back", server), "search")
+        self.assertEqual(mcp.scope_of_tool("browser_click", server), "update")
+
     def test_every_orchestrator_evidence_connector_declares_review_scope(self):
         for name in ("atlassian", "figma", "dbhub", "aws", "azure"):
             server = self.catalog.get(name)
@@ -544,7 +563,8 @@ class GatewayPlanning(unittest.TestCase):
 
     def test_a_profile_restricts_what_the_gateway_would_own(self):
         plan = mcp.gateway_plan(self.catalog, profile="data", available=True)
-        self.assertEqual(sorted(plan["routedThroughGateway"]), ["context7", "dbhub"])
+        self.assertEqual(sorted(plan["routedThroughGateway"]),
+                         ["context7", "dbhub", "playwright"])
 
 
 class SyncBehaviour(unittest.TestCase):
@@ -650,6 +670,27 @@ class SyncBehaviour(unittest.TestCase):
         self.assertEqual(effective["servers"]["atlassian"]["identities"], ["claude_work"])
         self.assertEqual(oct((run_dir / "mcp/claude-work.mcp.json").stat().st_mode & 0o777),
                          "0o600")
+
+    def test_bedrock_orchestrator_binding_contains_ready_browser_tools(self):
+        self.write_health({"playwright": {
+            "initialize": 200,
+            "authenticated": True,
+            "outcome": "ok",
+            "tools": [
+                {"name": "browser_navigate"},
+                {"name": "browser_snapshot", "readOnlyHint": True},
+                {"name": "browser_click"},
+            ],
+        }})
+        run_dir = self.make_run(
+            "run-browser", {"orchestrator": "claude_work"}, ["research"], profile="data")
+        self.sync("--run", "run-browser")
+        config = json.loads((run_dir / "mcp/claude-work.mcp.json").read_text())
+        self.assertIn("playwright", config["mcpServers"])
+        permissions = json.loads((run_dir / "mcp/claude-work.settings.json").read_text())
+        self.assertIn("mcp__playwright__browser_navigate", permissions["permissions"]["allow"])
+        self.assertIn("mcp__playwright__browser_snapshot", permissions["permissions"]["allow"])
+        self.assertIn("mcp__playwright__browser_click", permissions["permissions"]["allow"])
 
     def test_a_stale_binding_is_removed_when_the_role_moves(self):
         run_dir = self.make_run("run-b", {"orchestrator": "claude_work"}, ["intake"])

@@ -15,7 +15,7 @@ asked for.
 
 | Need | Surface | Because |
 |---|---|---|
-| Research volume, long documents, web grounding | assigned Gemini via `fde invoke` | large context, ~1,000 req/day, and Bedrock has no WebSearch; pass run evidence with `--context-file` |
+| Research volume, long documents, independent web grounding | assigned Gemini via `fde invoke` | large context and a separate model family; Bedrock orchestration can use the run-scoped isolated browser, while Gemini receives bounded evidence with `--context-file` |
 | Independent critique from another model family | assigned Codex via `fde invoke` | disagreement is the point; read-only sandbox plus eligible run-scoped MCP |
 | Implementation by Codex | `fde approve-codex` then `fde invoke ... --write` | write needs a one-time, hash-bound approval every time |
 | Microsoft estate — SharePoint, Outlook, Teams, Copilot Notebooks | `ask-ms-copilot`, or `ms-intake` for the manual path | Microsoft Copilot is the enterprise-context surface, not a coding agent |

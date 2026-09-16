@@ -131,7 +131,7 @@
             "bounded-formatting"
           ],
           "limitations": [
-            "no WebSearch on Bedrock \u2014 local evidence only",
+            "no native WebSearch on Bedrock; use the run-scoped isolated browser for external evidence",
             "not for ambiguous synthesis"
           ]
         },
@@ -155,7 +155,7 @@
             "test-engineering"
           ],
           "limitations": [
-            "no WebSearch on Bedrock \u2014 pair with a second researcher for external evidence"
+            "no native WebSearch on Bedrock; use the run-scoped isolated browser or pair with a second researcher"
           ]
         },
         {
@@ -179,7 +179,7 @@
             "security-review"
           ],
           "limitations": [
-            "no WebSearch on Bedrock"
+            "no native WebSearch on Bedrock; run-scoped isolated browser available"
           ]
         }
       ]

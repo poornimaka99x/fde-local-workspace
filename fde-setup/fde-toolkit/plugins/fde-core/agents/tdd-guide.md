@@ -1,7 +1,6 @@
 ---
 name: tdd-guide
 description: Guides a repository-native RED-GREEN-REFACTOR cycle and produces durable evidence connecting acceptance criteria to failing and passing tests. Use for features, defects and behavior-preserving refactors where executable tests are available.
-tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 ---
 

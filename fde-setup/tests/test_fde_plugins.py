@@ -126,6 +126,16 @@ class ImportRefusalTest(PluginTestCase):
         self.assertIn("plugin:user:acme", ids)
         self.assertIn("skill:user:acme:alpha", ids)
 
+    def test_fde_subagents_inherit_the_orchestrator_tool_surface(self):
+        agents = self.plugins / "fde-core" / "agents"
+        restricted = []
+        for path in sorted(agents.glob("*.md")):
+            metadata = cap.frontmatter(path.read_text(encoding="utf-8"))
+            if metadata.get("tools") or metadata.get("allowed-tools"):
+                restricted.append(path.name)
+        self.assertEqual(restricted, [],
+                         "FDE agents must omit tool allowlists so runtime inheritance works")
+
     def test_an_import_records_a_checksum_and_its_provenance(self):
         source = self.candidate("acme")
         self.fde("plugins", "add", str(source), "--ref", "v1.0.0",

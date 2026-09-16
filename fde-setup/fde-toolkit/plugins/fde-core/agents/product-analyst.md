@@ -1,7 +1,6 @@
 ---
 name: product-analyst
 description: Converts business inputs into a testable product brief, outcome measures, scope, assumptions and acceptance criteria. Use for discovery, requirement refinement, Jira epic analysis, backlog shaping or when business intent is ambiguous.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

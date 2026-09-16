@@ -1,7 +1,6 @@
 ---
 name: reliability-reviewer
 description: Reviews changed code for silent failures, swallowed errors, unsafe fallbacks, missing timeouts, retry/idempotency defects and weak operational signals. Use for integrations, background jobs and production-critical PRs.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

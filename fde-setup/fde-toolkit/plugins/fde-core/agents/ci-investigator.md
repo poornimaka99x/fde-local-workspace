@@ -1,7 +1,6 @@
 ---
 name: ci-investigator
 description: Diagnoses failing GitHub Actions or Bitbucket Pipelines checks and distinguishes code failures, flaky tests, configuration faults and infrastructure problems. Use when a PR pipeline is red or local and CI results disagree.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

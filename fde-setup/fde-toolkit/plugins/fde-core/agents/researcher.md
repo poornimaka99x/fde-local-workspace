@@ -1,7 +1,6 @@
 ---
 name: researcher
 description: Gathers and analyses the material behind a requirement — Confluence pages, Jira history, filed Microsoft intake, and outside research via Gemini — and returns a findings brief with the gaps named. Use as the first stage of solutioning, or whenever a question needs evidence gathered before an opinion is worth having.
-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: sonnet
 ---
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "forward-deployed-engineer",
   "label": "Forward Deployed Engineer",
-  "revision": "2026-09-15.2",
+  "revision": "2026-09-16.1",
   "description": "The full forward-deployed delivery lifecycle: business intent through operations, with an independent reviewer at every stage.",
   "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
   "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
@@ -24,6 +24,7 @@
           "mcp:fde:atlassian",
           "mcp:fde:context7",
           "mcp:fde:figma",
+          "mcp:fde:playwright",
           "skill:fde:client-context",
           "skill:fde:context-budget",
           "skill:fde:crosscheck",
@@ -62,6 +63,10 @@
         "mcp:fde:serena"
       ],
       "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "search"
+        ],
         "mcp:fde:atlassian": [
           "read",
           "search"
@@ -93,6 +98,7 @@
           "mcp:fde:atlassian",
           "mcp:fde:context7",
           "mcp:fde:figma",
+          "mcp:fde:playwright",
           "skill:fde:client-context",
           "skill:fde:crosscheck",
           "skill:fde:product-discovery",
@@ -128,6 +134,10 @@
       },
       "optional": [],
       "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "search"
+        ],
         "mcp:fde:atlassian": [
           "read",
           "search"
@@ -151,6 +161,7 @@
         "enable": [
           "mcp:fde:context7",
           "mcp:fde:figma",
+          "mcp:fde:playwright",
           "mcp:fde:serena",
           "skill:fde:crosscheck",
           "skill:fde:design-system",
@@ -194,6 +205,10 @@
         "skill:ponytail:ponytail-debt"
       ],
       "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "search"
+        ],
         "mcp:fde:serena": [
           "read",
           "search"
@@ -233,6 +248,7 @@
         "enable": [
           "mcp:fde:atlassian",
           "mcp:fde:context7",
+          "mcp:fde:playwright",
           "mcp:fde:serena",
           "skill:fde:crosscheck",
           "skill:fde:jira-delivery",
@@ -267,6 +283,10 @@
       },
       "optional": [],
       "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "search"
+        ],
         "mcp:fde:atlassian": [
           "read",
           "search",
@@ -490,6 +510,7 @@
       "common": {
         "enable": [
           "mcp:fde:context7",
+          "mcp:fde:playwright",
           "skill:fde:handover",
           "skill:fde:verification-evidence",
           "tool:fde:Glob",
@@ -524,6 +545,10 @@
         "skill:fde:design-system"
       ],
       "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "search"
+        ],
         "mcp:fde:context7": [
           "read",
           "search"
@@ -549,6 +574,7 @@
         "enable": [
           "mcp:fde:atlassian",
           "mcp:fde:langfuse",
+          "mcp:fde:playwright",
           "skill:fde:ci-diagnose",
           "skill:fde:handover",
           "skill:fde:release-observability",
@@ -588,6 +614,10 @@
         "mcp:fde:azure"
       ],
       "mcpScopes": {
+        "mcp:fde:playwright": [
+          "read",
+          "search"
+        ],
         "mcp:fde:atlassian": [
           "read",
           "search",
@@ -678,7 +708,8 @@
           "search"
         ],
         "mcp:fde:playwright": [
-          "read"
+          "read",
+          "search"
         ],
         "mcp:fde:chrome-devtools": [
           "read"

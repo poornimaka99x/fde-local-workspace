@@ -1,7 +1,6 @@
 ---
 name: test-engineer
 description: Designs and executes independent verification across unit, integration, contract, UI, accessibility, performance and end-to-end layers. Use before release, for regression analysis or when acceptance evidence is incomplete.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

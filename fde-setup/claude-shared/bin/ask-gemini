@@ -5,8 +5,9 @@
 #   ask-gemini --check          report whether a sign-in resolves (prints no credential)
 #   ask-gemini --models         the models this sign-in can reach
 #
-# Lane: bulk reading, long context, and web-grounded research (Claude on Bedrock
-# has no WebSearch, so this is the research fallback there).
+# Lane: bulk reading, long context, and independent web-grounded research.
+# Bedrock has no native WebSearch; approved FDE runs also expose an isolated
+# browser, while this lane remains useful for volume and model-family diversity.
 #
 # Accounts: Antigravity keeps its token in the operating system's keyring, not in
 # a per-account directory, so this machine has ONE Antigravity sign-in and the

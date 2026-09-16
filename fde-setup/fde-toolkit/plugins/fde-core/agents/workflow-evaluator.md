@@ -1,7 +1,6 @@
 ---
 name: workflow-evaluator
 description: Evaluates an FDE skill, subagent, run artifact or completed workflow against explicit capability, regression, safety and evidence criteria. Use for harness changes, retrospectives and agent-behavior regression testing.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: solutioner
 description: Turns a findings brief into a technical proposal — architecture, the options considered, the trade-offs, and an ADR ready for Confluence. Use after the researcher has gathered evidence, or when a decision needs to be written up defensibly for both a CTO and the engineers who will maintain it.
-tools: Read, Grep, Glob, Bash, Write
 model: opus
 ---
 

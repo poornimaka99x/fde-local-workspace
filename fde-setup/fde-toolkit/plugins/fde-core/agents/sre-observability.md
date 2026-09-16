@@ -1,7 +1,6 @@
 ---
 name: sre-observability
 description: Defines and validates production observability, SLOs, alerts, dashboards, operational readiness and post-deployment monitoring. Use during architecture, before release and after deployment.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

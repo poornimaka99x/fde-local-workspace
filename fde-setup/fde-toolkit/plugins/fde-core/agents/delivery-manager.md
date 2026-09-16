@@ -1,7 +1,6 @@
 ---
 name: delivery-manager
 description: Builds and maintains an executable delivery plan across Jira, repositories, designs, testing and releases. Use for decomposition, dependency mapping, estimation readiness, project health, RAID logs and cross-team sequencing.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

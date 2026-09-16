@@ -1,7 +1,6 @@
 ---
 name: integration-scout
 description: Investigates how to integrate with an external or internal system — reads its API docs, SDKs, auth model and rate limits, and returns a concrete integration plan with the failure modes named. Use when scoping work against a third-party API, a client's internal service, or an unfamiliar identity provider.
-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: sonnet
 ---
 

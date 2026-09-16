@@ -47,8 +47,10 @@ infer a role from what an identity is good at, do not reuse the last run's
 assignment, and do not read Jira, Confluence, SharePoint, email, a repository or a
 client context file until the user has confirmed the roles for *this* run.
 
-- `ask-gemini` — bulk reading, long context, and web research. **Use it for
-  research when running on the Bedrock profile, which has no WebSearch.**
+- `ask-gemini` — bulk reading, long context, and independent web research.
+  Bedrock has no native WebSearch, but an approved FDE run exposes the isolated
+  Playwright browser for web navigation and search; use Gemini when volume or
+  model-family independence makes it the better lane.
   Roughly 1,000 requests/day on the personal tier, so it is the cheap lane.
 - `ask-codex --read-only` — an independent read of a design or diff from a
   different model family. Worth it when being wrong is expensive.
@@ -56,6 +58,11 @@ client context file until the user has confirmed the roles for *this* run.
   30-minute approval the user types out (`fde approve-codex`), bound to one task
   file in one repository. Being assigned the implementation role is *not* that
   approval. There is no bypass flag in this toolkit.
+
+FDE subagents intentionally omit a `tools` allowlist. They inherit every
+built-in and run-scoped MCP tool the orchestrator can delegate, including the
+isolated browser and approved evidence connectors. This does not widen the
+run's stage, connector scopes, mutation approvals, or publication gates.
 - `ask-ms-copilot` — Microsoft 365 Copilot / Copilot Studio: SharePoint, Outlook,
   Teams, M365 documents, Copilot Notebook material. Not source code, not git, not
   Bitbucket, not creating Jira work. `ms-intake` is the manual path for anything

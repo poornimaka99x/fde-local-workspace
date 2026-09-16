@@ -1,7 +1,6 @@
 ---
 name: design-system-steward
 description: Governs design tokens, reusable components, variants and the Figma-to-code contract. Use when UI work introduces or changes a component, when Figma and code drift, or before accepting a one-off visual pattern.
-tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---
 

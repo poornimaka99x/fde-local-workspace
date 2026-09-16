@@ -1,7 +1,6 @@
 ---
 name: release-manager
 description: Plans and verifies safe releases, migrations, approvals, rollout, rollback and release communication. Use after verification and before any deployment or production-changing action.
-tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

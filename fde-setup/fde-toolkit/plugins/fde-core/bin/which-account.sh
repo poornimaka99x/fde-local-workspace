@@ -9,7 +9,7 @@ cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 if [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" || "${CLAUDE_CODE_USE_BEDROCK:-}" == "true" ]]; then
   provider="Amazon Bedrock (${AWS_REGION:-region unset}, profile ${AWS_PROFILE:-default})"
-  note="WebSearch is unavailable on Bedrock."
+  note="Native WebSearch is unavailable; approved FDE runs use the isolated browser."
 elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   provider="Anthropic API key"
   note=""
