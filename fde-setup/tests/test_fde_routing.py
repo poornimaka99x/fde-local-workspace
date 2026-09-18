@@ -1765,6 +1765,39 @@ class TestAttempts(AttemptTest):
         self.assertTrue(exhausted)
         self.assertEqual(exhausted[-1]["limit"], "maxRetries")
 
+    def test_an_explicit_user_refresh_grants_three_more_without_erasing_history(self):
+        run_id = self.approved(requirement=STANDARD_REQUEST,
+                               stages=("intake", "solutioning"),
+                               roles={"solutioning": "claude_msc"})
+        allowed = self.routing_doc(run_id)["limits"]["maxRetries"]
+        for _ in range(allowed + 1):
+            self.assertIn(self.attempt(run_id).returncode, (0, 1))
+            self.outcome(run_id, classification="transient-provider")
+        blocked = self.attempt(run_id)
+        self.assertEqual(blocked.returncode, 9, blocked.stderr)
+        self.assertIn("refresh-retries", blocked.stderr)
+
+        refused = self.sb.fde(
+            "routing", "refresh-retries", run_id, "--task-id", "solutioning-1",
+            "--reason", "the user asked for another bounded batch", "--json")
+        self.assertEqual(refused.returncode, 8)
+
+        refreshed = json.loads(self.sb.fde(
+            "routing", "refresh-retries", run_id, "--task-id", "solutioning-1",
+            "--reason", "the user asked for another bounded batch", "--approve",
+            "--json").stdout)
+        self.assertEqual(refreshed["grant"]["retriesGranted"], 3)
+        self.assertEqual(refreshed["progress"]["maxRetries"], allowed + 3)
+        self.assertEqual(refreshed["progress"]["attempts"], allowed + 1)
+        self.assertGreater(refreshed["spentCostUnits"], 0)
+
+        attempts = json.loads(self.sb.fde(
+            "routing", "attempts", run_id, "--task-id", "solutioning-1",
+            "--json").stdout)
+        self.assertEqual(len(attempts["retryGrants"]), 1)
+        self.assertEqual(attempts["progress"][0]["retryRefreshes"], 1)
+        self.assertIn(self.attempt(run_id).returncode, (0, 1))
+
     def test_the_cost_ceiling_pauses_instead_of_continuing(self):
         tight = json.loads(json.dumps(FAKE_POLICY))
         for band in tight["limits"].values():

@@ -6969,6 +6969,7 @@ ROUTING_MAX_EVIDENCE_CHARS = 200
 ROUTING_MAX_ALTERNATIVES = 3
 ROUTING_MAX_REJECTED = 6
 ROUTING_MAX_STATUS_TASKS = 50
+ROUTING_RETRY_REFRESH_SIZE = 3
 
 # The ambiguous account default is never selected automatically: its quality and
 # its cost cannot be compared with anything, so a decision naming it explains
@@ -6991,6 +6992,7 @@ ROUTING_CAPABILITIES = [
     "routing.attempts",
     "routing.outcome",
     "routing.retry-ceilings",
+    "routing.retry-refresh",
     "routing.usage-provenance",
     "routing.report",
     "routing.design-panel-auto",
@@ -7003,6 +7005,7 @@ ROUTING_EVENT_KINDS = (
     "routing.overridden",
     "routing.escalated",
     "routing.budget_exhausted",
+    "routing.retry_refreshed",
 )
 
 
@@ -9839,6 +9842,26 @@ def routing_attempts_path(run: Run) -> pathlib.Path:
     return run.dir / "routing-attempts.jsonl"
 
 
+def routing_retry_grants_path(run: Run) -> pathlib.Path:
+    return run.dir / "routing-retry-grants.jsonl"
+
+
+def routing_retry_grants(run: Run, task_id=None):
+    """Explicit user-approved retry batches, preserved as an append-only ledger."""
+    records = [record for record in read_jsonl(routing_retry_grants_path(run))
+               if isinstance(record, dict)]
+    if task_id is None:
+        return records
+    return [record for record in records if record.get("taskId") == task_id]
+
+
+def routing_retry_allowance(run: Run, doc, task_id):
+    base = int((doc.get("limits") or {}).get("maxRetries") or 0)
+    refreshed = sum(int(record.get("retriesGranted") or 0)
+                    for record in routing_retry_grants(run, task_id))
+    return base + refreshed
+
+
 def routing_attempt_ledger(run: Run, task_id=None):
     """Every line ever written, in order, exactly as written.
 
@@ -9939,6 +9962,8 @@ def routing_task_progress(run: Run, doc, task_id):
                                                                last.get("effort")):
                 break
             same_rung += 1
+    grants = routing_retry_grants(run, task_id)
+    base_retries = int(policy_limits.get("maxRetries") or 0)
     return {
         "taskId": task_id,
         "attempts": len(attempts),
@@ -9952,7 +9977,9 @@ def routing_task_progress(run: Run, doc, task_id):
         "lastEffort": (last or {}).get("effort") or (task or {}).get("effort"),
         "spentCostUnits": round(sum(float(record.get("estimatedCostUnits") or 0.0)
                                     for record in attempts), 2),
-        "maxRetries": policy_limits.get("maxRetries"),
+        "baseMaxRetries": base_retries,
+        "retryRefreshes": len(grants),
+        "maxRetries": routing_retry_allowance(run, doc, task_id),
     }
 
 
@@ -10084,14 +10111,15 @@ def plan_next_attempt(run: Run, agents, doc, task, *, probe=False):
               f"plan instead of retrying it.",
             exit_code=5)
 
-    max_retries = int(limits.get("maxRetries") or 0)
+    max_retries = routing_retry_allowance(run, doc, task_id)
     if progress["retries"] >= max_retries:
         _exhausted(limit="maxRetries", allowed=max_retries, used=progress["retries"])
         raise RoutingError(
             "routing-retry-ceiling",
             f"task '{task_id}' has used its {max_retries} approved retry attempt(s)",
-            f"Nothing runs past an approved ceiling. Widen the plan, or approve a new "
-            f"route: fde approve-plan {run.id} --reapprove",
+            f"Nothing runs past an approved ceiling. If the user wants another batch "
+            f"of {ROUTING_RETRY_REFRESH_SIZE}, record that approval with: fde routing "
+            f"refresh-retries {run.id} --task-id {task_id} --reason '<why>'",
             exit_code=9)
 
     provider = routing_provider_for(agents, task["accountId"])
@@ -10355,6 +10383,99 @@ def cmd_routing_outcome(args):
 
 
 @routing_command
+def cmd_routing_refresh_retries(args):
+    """Grant one more bounded retry batch after the current batch is exhausted.
+
+    This is deliberately task-scoped and append-only. It does not erase failed
+    attempts, reset cost already spent, widen the model ladder, or silently turn
+    a user's request into an unlimited loop.
+    """
+    run = Run(args.run_id)
+    doc = load_routing(run, required=True)
+    task_id = str(args.task_id or "")
+    if not ROUTING_TASK_ID_RE.match(task_id):
+        raise RoutingError("routing-task-id-invalid",
+                           f"'{_safe_line(task_id, 60)}' is not a usable task id",
+                           exit_code=2)
+    task = next((entry for entry in doc.get("tasks") or []
+                 if entry.get("taskId") == task_id), None)
+    if task is None:
+        raise RoutingError("routing-task-unknown",
+                           f"run {run.id} has no routed task '{_safe_line(task_id, 60)}'",
+                           exit_code=4)
+    reason = (args.reason or "").strip()
+    if not reason:
+        raise RoutingError("routing-refresh-no-reason",
+                           "a retry refresh needs a reason so the extra spend is auditable")
+
+    progress = routing_task_progress(run, doc, task_id)
+    attempts = routing_attempts(run, task_id)
+    if not attempts:
+        raise RoutingError("routing-refresh-not-exhausted",
+                           f"task '{task_id}' has not used an initial attempt",
+                           "Run the approved task before granting retries.", exit_code=5)
+    last = attempts[-1]
+    if last.get("outcome") != "fail" or not last.get("classification"):
+        raise RoutingError("routing-refresh-unclassified",
+                           f"task '{task_id}' does not end in a classified failure",
+                           "Record a classified failed outcome before granting more retries.",
+                           exit_code=5)
+    if progress["retries"] < progress["maxRetries"]:
+        remaining = progress["maxRetries"] - progress["retries"]
+        raise RoutingError("routing-refresh-not-exhausted",
+                           f"task '{task_id}' still has {remaining} approved retry "
+                           f"attempt(s)",
+                           "Use the existing batch before approving another one.", exit_code=5)
+
+    expected = f"APPROVE RETRIES {run.id} {task_id}"
+    if not args.approve:
+        print(f"\nThis grants {ROUTING_RETRY_REFRESH_SIZE} more retry attempts to "
+              f"{task_id} without erasing its history or spent cost.")
+        print(f"Reason: {reason}")
+        print(f"\nType exactly: {expected}")
+        typed = input("> ").strip() if sys.stdin.isatty() else sys.stdin.readline().strip()
+        if typed != expected:
+            die("confirmation did not match; no retries were granted", 8)
+
+    prior_limit = progress["maxRetries"]
+    grants = routing_retry_grants(run, task_id)
+    record = {
+        "at": iso(),
+        "runId": run.id,
+        "taskId": task_id,
+        "batch": len(grants) + 1,
+        "retriesGranted": ROUTING_RETRY_REFRESH_SIZE,
+        "priorRetryLimit": prior_limit,
+        "newRetryLimit": prior_limit + ROUTING_RETRY_REFRESH_SIZE,
+        "attemptsAlreadyUsed": progress["attempts"],
+        "retriesAlreadyUsed": progress["retries"],
+        "decisionHash": doc.get("decisionHash"),
+        "reason": _safe_line(reason, ROUTING_MAX_REASON_CHARS),
+        "approvedBy": _routing_operator(),
+    }
+    append_jsonl(routing_retry_grants_path(run), record)
+    routing_event(run, "routing.retry_refreshed", taskId=task_id,
+                  batch=record["batch"], retriesGranted=ROUTING_RETRY_REFRESH_SIZE,
+                  priorRetryLimit=prior_limit, newRetryLimit=record["newRetryLimit"])
+    payload = {
+        "schemaVersion": ROUTING_SCHEMA_VERSION,
+        "runId": run.id,
+        "taskId": task_id,
+        "grant": record,
+        "progress": routing_task_progress(run, doc, task_id),
+        "spentCostUnits": routing_spent_cost_units(run),
+        "approvedCostUnits": (doc.get("limits") or {}).get("maxCostUnits"),
+    }
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"\nrefreshed  {task_id}: {ROUTING_RETRY_REFRESH_SIZE} more retries approved")
+    print(f"limit      {prior_limit} -> {record['newRetryLimit']} total retries")
+    print(f"history    {progress['attempts']} attempt(s) retained; spent cost retained")
+    print(f"reason     {reason}\n")
+    return 0
+
+
+@routing_command
 def cmd_routing_attempts(args):
     """Every attempt at this run's routed tasks, and what each one cost."""
     run = Run(args.run_id)
@@ -10370,6 +10491,7 @@ def cmd_routing_attempts(args):
         "runId": run.id,
         "attempts": records,
         "ledger": ledger,
+        "retryGrants": routing_retry_grants(run, task_id),
         "progress": progress,
         "spentCostUnits": routing_spent_cost_units(run),
         "approvedCostUnits": (doc.get("limits") or {}).get("maxCostUnits"),
@@ -13896,6 +14018,18 @@ def main(argv=None):
                         "fields are stored, and nothing is inferred from a missing one")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_routing_outcome)
+
+    c = rt.add_parser(
+        "refresh-retries",
+        help="after a task exhausts its retry batch, approve three more attempts")
+    c.add_argument("run_id")
+    c.add_argument("--task-id", dest="task_id", required=True, metavar="TASK-ID")
+    c.add_argument("--reason", required=True,
+                   help="why another bounded batch is worth its cost")
+    c.add_argument("--approve", action="store_true",
+                   help="the user has explicitly asked for this retry refresh")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_routing_refresh_retries)
 
     c = rt.add_parser("report",
                       help="read-only aggregate over the routing record, with "

@@ -404,6 +404,7 @@ fde routing preview ... --json
 fde routing show <run-id> --json
 fde routing explain <run-id> [--task-id <id>] --json
 fde routing override <run-id> ... --json
+fde routing refresh-retries <run-id> --task-id <id> --reason <text> --json
 fde status <run-id> --json
 ```
 

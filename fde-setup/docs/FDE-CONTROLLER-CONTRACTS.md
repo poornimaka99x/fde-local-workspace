@@ -51,6 +51,8 @@ fde routing attempts <run-id> [--task-id <task-id>] --json
 fde routing outcome <run-id> --task-id <task-id> --status pass|fail
           [--classification transient-provider|invalid-contract|failed-validation|failed-checkpoint]
           [--evidence <text> ...] [--usage-file <path>] --json
+fde routing refresh-retries <run-id> --task-id <task-id> --reason <text>
+          [--approve] --json
 fde routing report [--project <project-id>] [--since <iso>] [--min-sample N] --json
 fde design-panel create <run-id> ... [--routing manual|auto] [--strategy <s>]
 fde invoke <run-id> <identity> (<task-file> | --task-file <path>)
@@ -829,6 +831,14 @@ what I wanted". A disliked answer is a scoping problem; spending the budget agai
 on the same prompt is the most expensive way of not fixing it, and the refusal
 says so.
 
+The shipped policy grants three retries per task. Once that batch is exhausted,
+an explicit user request can grant exactly three more with `routing
+refresh-retries`. The grant is task-scoped and append-only: prior attempts,
+classifications, artifacts, and cost remain in the record. A refresh is refused
+before the current batch is exhausted or when the last attempt is not a
+classified failure. It does not widen the escalation ladder or the run's total
+cost ceiling.
+
 The cost ceiling is checked on **every** attempt including a task's first,
 because a later task's opening attempt spends from the same approved budget an
 earlier task's retries have already drawn on. `routing.budget_exhausted` is
@@ -845,8 +855,8 @@ rung. `routing.escalated` records each climb with its from/to.
 ### `routing attempts --json`
 
 Returns `attempts` (the replay, one entry per attempt), `ledger` (every line as
-written), `progress` per task, `spentCostUnits`, `approvedCostUnits`, and a
-`usage` roll-up.
+written), `retryGrants`, `progress` per task, `spentCostUnits`,
+`approvedCostUnits`, and a `usage` roll-up.
 
 ### `routing outcome --json`
 
