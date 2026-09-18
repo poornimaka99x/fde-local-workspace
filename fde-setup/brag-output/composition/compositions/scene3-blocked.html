@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <style>
+        #scene3-blocked-root {
+          position: absolute;
+          inset: 0;
+          background: var(--bg);
+          overflow: hidden;
+        }
+        #scene3-blocked-root .bg-glyph {
+          position: absolute;
+          left: -80px;
+          bottom: -160px;
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 560px;
+          color: var(--danger);
+          opacity: 0.035;
+          line-height: 1;
+        }
+        #scene3-blocked-root .card {
+          position: absolute;
+          left: 160px;
+          top: 430px;
+          width: 1600px;
+          padding: 40px 48px;
+          border: 1px solid var(--border);
+          border-radius: 16px;
+          background: #ffffff;
+          opacity: 0;
+        }
+        #scene3-blocked-root .accent-bar {
+          position: absolute;
+          left: 160px;
+          top: 430px;
+          width: 6px;
+          height: 0;
+          background: var(--danger);
+          border-radius: 4px 0 0 4px;
+          transform-origin: top center;
+        }
+        #scene3-blocked-root .row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        #scene3-blocked-root .conn-name {
+          font-family: var(--sans);
+          font-size: 46px;
+          font-weight: 700;
+          color: var(--text);
+        }
+        #scene3-blocked-root .conn-sub {
+          margin-top: 10px;
+          font-family: var(--mono);
+          font-size: 23px;
+          color: var(--text-muted);
+        }
+        #scene3-blocked-root .badge {
+          font-family: var(--mono);
+          font-size: 27px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          padding: 16px 30px;
+          border-radius: 999px;
+          background: var(--border);
+          color: var(--text-muted);
+        }
+        #scene3-blocked-root .reason {
+          margin-top: 26px;
+          font-family: var(--mono);
+          font-size: 27px;
+          color: var(--danger);
+          opacity: 0;
+        }
+      </style>
+
+      <div data-hf-id="hf-01kf" id="scene3-blocked-root" data-composition-id="scene3-blocked" data-width="1920" data-height="1080" data-duration="5">
+        <div data-hf-id="hf-sdoj" class="bg-glyph">!</div>
+
+        <div data-hf-id="hf-z93i" class="accent-bar" id="scene3-accent-bar"></div>
+
+        <div data-hf-id="hf-7vja" class="card" id="scene3-card">
+          <div data-hf-id="hf-thy4" class="row">
+            <div data-hf-id="hf-yeow">
+              <div data-hf-id="hf-23ta" class="conn-name">figma</div>
+              <div data-hf-id="hf-zbb3" class="conn-sub">mutation-capable · tenant-data</div>
+            </div>
+            <div data-hf-id="hf-09zd" class="badge" id="scene3-badge">pending</div>
+          </div>
+          <div data-hf-id="hf-5rm0" class="reason" id="scene3-reason">no role in this run holds this connector</div>
+        </div>
+
+        <audio data-hf-id="hf-cc1o" id="scene3-flip" src="assets/sfx/impactSoft_medium_002.ogg" data-start="1.3" data-duration="0.3" data-track-index="21" data-volume="0.6"></audio>
+
+        <script>
+          const tl = gsap.timeline({ paused: true });
+          const badgeEl = document.getElementById("scene3-badge");
+
+          tl.fromTo("#scene3-card", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.2);
+
+          // The flip: text swap + color change + a small punch, all pinned to the same beat.
+          tl.call(() => { badgeEl.textContent = "blocked"; }, null, 1.3);
+          tl.to(
+            "#scene3-badge",
+            { backgroundColor: "#fbeceb", color: "#a03530", scale: 1.08, duration: 0.22, ease: "power4.in" },
+            1.3,
+          );
+          tl.to("#scene3-badge", { scale: 1.0, duration: 0.18, ease: "power2.out" }, 1.52);
+
+          tl.fromTo(
+            "#scene3-accent-bar",
+            { height: 0 },
+            { height: 200, duration: 0.28, ease: "power4.out" },
+            1.3,
+          );
+
+          tl.fromTo(
+            "#scene3-reason",
+            { opacity: 0, x: -14 },
+            { opacity: 1, x: 0, duration: 0.4, ease: "power3.out" },
+            1.45,
+          );
+
+          window.__timelines["scene3-blocked"] = tl;
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

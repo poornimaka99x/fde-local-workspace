@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <style>
+        #scene4-outro-root {
+          position: absolute;
+          inset: 0;
+          background: var(--bg);
+          overflow: hidden;
+        }
+        #scene4-outro-root .phase {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        #scene4-outro-root .claim {
+          max-width: 1500px;
+          text-align: center;
+          font-family: var(--display);
+          font-weight: 700;
+          font-size: 74px;
+          line-height: 1.2;
+          color: var(--text);
+          opacity: 0;
+        }
+        #scene4-outro-root .glow {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 1100px;
+          height: 1100px;
+          transform: translate(-50%, -50%);
+          border-radius: 50%;
+          background: radial-gradient(circle, var(--accent-soft) 0%, rgba(246, 235, 229, 0) 70%);
+          opacity: 0;
+        }
+        #scene4-outro-root .mark-wrap {
+          position: relative;
+          text-align: center;
+          opacity: 0;
+        }
+        #scene4-outro-root .mark {
+          font-family: var(--display);
+          font-weight: 700;
+          font-size: 140px;
+          letter-spacing: 0.02em;
+          color: var(--text);
+        }
+        #scene4-outro-root .sub {
+          margin-top: 18px;
+          font-family: var(--mono);
+          font-size: 30px;
+          color: var(--accent);
+          opacity: 0;
+        }
+      </style>
+
+      <div data-hf-id="hf-5xbc" id="scene4-outro-root" data-composition-id="scene4-outro" data-width="1920" data-height="1080" data-duration="6">
+        <div data-hf-id="hf-crhx" class="glow" id="scene4-glow"></div>
+
+        <div data-hf-id="hf-pbwt" class="phase">
+          <div data-hf-id="hf-n1yh" class="claim" id="scene4-claim">
+            <div data-hf-id="hf-w6q5">Read-only is enforced,</div>
+            <div data-hf-id="hf-1y8s">or it is not claimed.</div>
+          </div>
+        </div>
+
+        <div data-hf-id="hf-z9a9" class="phase">
+          <div data-hf-id="hf-mvt9" class="mark-wrap" id="scene4-mark-wrap">
+            <div data-hf-id="hf-lj87" class="mark">FLOW</div>
+            <div data-hf-id="hf-rjrr" class="sub" id="scene4-sub">fde-start</div>
+          </div>
+        </div>
+
+        <script>
+          const tl = gsap.timeline({ paused: true });
+
+          tl.fromTo("#scene4-claim", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.2);
+          tl.to("#scene4-claim", { opacity: 0, duration: 0.4, ease: "power2.in" }, 3.0);
+
+          tl.fromTo("#scene4-glow", { opacity: 0 }, { opacity: 0.9, duration: 0.6, ease: "sine.out" }, 3.1);
+          tl.fromTo(
+            "#scene4-mark-wrap",
+            { opacity: 0, scale: 0.96 },
+            { opacity: 1, scale: 1, duration: 0.55, ease: "power2.out" },
+            3.25,
+          );
+          tl.fromTo("#scene4-sub", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4, ease: "sine.out" }, 3.55);
+
+          // Ambient breathing on the wordmark — attached to tl, sequential after the entrance settles.
+          tl.to("#scene4-mark-wrap", { scale: 1.015, duration: 2.2, yoyo: true, repeat: 1, ease: "sine.inOut" }, 4.0);
+
+          window.__timelines["scene4-outro"] = tl;
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

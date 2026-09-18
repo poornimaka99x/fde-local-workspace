@@ -88,6 +88,16 @@ class FdeStartTest(unittest.TestCase):
             "schemaVersion": 1,
             "disabled": ["skill:fde-core:crosscheck", "tool:WebSearch"],
         }))
+        (self.profiles / "work" / "settings.json").write_text(json.dumps({
+            "enabledPlugins": {"fde-core@fde-toolkit": True},
+            "extraKnownMarketplaces": {
+                "fde-toolkit": {"source": {
+                    "source": "directory",
+                    "path": str(self.shared / "fde-toolkit"),
+                }},
+            },
+            "apiKeyHelper": "must-not-leak-into-the-run",
+        }))
         env = dict(os.environ)
         env.update({
             "HOME": str(self.home),
@@ -134,6 +144,15 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("executionApprovedAt", plan)
         self.assertTrue((runs[0] / "mcp/claude-work.mcp.json").is_file())
         self.assertTrue((runs[0] / "mcp/claude-work.settings.json").is_file())
+        run_settings = json.loads(
+            (runs[0] / "mcp/claude-work.settings.json").read_text())
+        self.assertEqual(run_settings["enabledPlugins"],
+                         {"fde-core@fde-toolkit": True})
+        self.assertEqual(
+            run_settings["extraKnownMarketplaces"]["fde-toolkit"]["source"]["path"],
+            str(self.shared / "fde-toolkit"),
+        )
+        self.assertNotIn("apiKeyHelper", run_settings)
 
     def test_resume_uses_an_existing_recorded_request_without_asking_again(self):
         env = dict(os.environ)

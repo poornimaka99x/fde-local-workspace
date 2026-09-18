@@ -101,6 +101,14 @@ class InstallScriptTest(unittest.TestCase):
             self.assertTrue((installed_skills / skill / "SKILL.md").is_file())
             self.assertTrue((installed_skills / skill / "SOURCE.json").is_file())
 
+    def test_an_update_refreshes_existing_profile_plugin_caches(self):
+        (self.home / ".claude-profiles" / "work").mkdir(parents=True)
+        self.run_install("--update", "--yes", "work", with_claude=True)
+        calls = (self.home / "claude-calls.log").read_text()
+        self.assertIn("plugin marketplace update fde-toolkit", calls)
+        for plugin in ("fde-core", "code-simplifier", "ponytail"):
+            self.assertIn(f"plugin update {plugin}@fde-toolkit", calls)
+
 
 if __name__ == "__main__":
     unittest.main()

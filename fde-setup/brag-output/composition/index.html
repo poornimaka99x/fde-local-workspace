@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>FLOW — brag</title>
+    <link rel="stylesheet" href="assets/theme.css">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+      .clip { position: absolute; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-at0g" id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="20">
+      <div data-hf-id="hf-cpl9" id="el-gate" class="clip" data-composition-id="scene1-gate" data-composition-src="compositions/scene1-gate.html" data-start="0" data-duration="3" data-track-index="1"></div>
+
+      <div data-hf-id="hf-5jt7" id="el-matrix" class="clip" data-composition-id="scene2-matrix" data-composition-src="compositions/scene2-matrix.html" data-start="3" data-duration="6" data-track-index="1"></div>
+
+      <div data-hf-id="hf-fkov" id="el-blocked" class="clip" data-composition-id="scene3-blocked" data-composition-src="compositions/scene3-blocked.html" data-start="9" data-duration="5" data-track-index="1"></div>
+
+      <div data-hf-id="hf-23j7" id="el-outro" class="clip" data-composition-id="scene4-outro" data-composition-src="compositions/scene4-outro.html" data-start="14" data-duration="6" data-track-index="1"></div>
+
+      <!-- Continuous bed, survives scene cuts. Volume automated on the main timeline. -->
+      <audio data-hf-id="hf-stlp" id="bgm" src="assets/music/happy-beats-business-moves-vol-9-by-ende-dot-app.mp3" data-start="0" data-duration="20" data-media-start="0" data-track-index="30" data-volume="1"></audio>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      // Quiet bed throughout; small lift under the matrix reveal (scene 2),
+      // settle for the blocked beat (scene 3), clean fade under the outro (scene 4).
+      // data-volume is neutral (1); the tween carries the absolute level from t=0.
+      tl.set("#bgm", { volume: 0.22 }, 0);
+      tl.to("#bgm", { volume: 0.3, duration: 1.0, ease: "sine.inOut" }, 2.6);
+      tl.to("#bgm", { volume: 0.2, duration: 1.0, ease: "sine.inOut" }, 8.6);
+      tl.to("#bgm", { volume: 0.0, duration: 2.4, ease: "sine.in" }, 17.6);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

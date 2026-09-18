@@ -1,0 +1,13 @@
+:root {
+  --bg: #faf9f5;
+  --text: #1f1e1d;
+  --text-muted: #6f6e68;
+  --border: #e5e3d9;
+  --accent: #b0553a;
+  --accent-soft: #f6ebe5;
+  --danger: #a03530;
+  --danger-bg: #fbeceb;
+  --display: "Playfair Display", Georgia, serif;
+  --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}

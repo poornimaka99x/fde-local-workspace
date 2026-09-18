@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <style>
+        #scene1-gate-root {
+          position: absolute;
+          inset: 0;
+          background: var(--bg);
+          overflow: hidden;
+        }
+        #scene1-gate-root .bg-glyph {
+          position: absolute;
+          right: -60px;
+          bottom: -120px;
+          font-family: var(--mono);
+          font-size: 620px;
+          font-weight: 700;
+          color: var(--text);
+          opacity: 0.045;
+          line-height: 1;
+          user-select: none;
+        }
+        #scene1-gate-root .panel {
+          position: absolute;
+          left: 160px;
+          top: 430px;
+          width: 1500px;
+        }
+        #scene1-gate-root .kicker {
+          font-family: var(--sans);
+          font-size: 32px;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+          color: var(--text-muted);
+          margin-bottom: 22px;
+          opacity: 0;
+        }
+        #scene1-gate-root .text-wrap {
+          display: inline-flex;
+          align-items: baseline;
+          min-width: 1180px;
+          white-space: nowrap;
+        }
+        #scene1-gate-root .phrase {
+          font-family: var(--mono);
+          font-size: 62px;
+          font-weight: 500;
+          letter-spacing: -0.01em;
+          color: var(--text);
+        }
+        #scene1-gate-root .cursor {
+          display: inline-block;
+          width: 20px;
+          height: 58px;
+          background: var(--accent);
+          margin-left: 6px;
+          transform: translateY(6px);
+        }
+        #scene1-gate-root .rule {
+          margin-top: 26px;
+          height: 3px;
+          width: 1180px;
+          background: var(--accent);
+          transform: scaleX(0);
+          transform-origin: left center;
+        }
+      </style>
+
+      <div data-hf-id="hf-6k07" id="scene1-gate-root" data-composition-id="scene1-gate" data-width="1920" data-height="1080" data-duration="3">
+        <div data-hf-id="hf-oaj3" class="bg-glyph">&gt;_</div>
+
+        <div data-hf-id="hf-owjm" class="panel">
+          <div data-hf-id="hf-43as" class="kicker" id="scene1-kicker">Type exactly:</div>
+          <div data-hf-id="hf-klni" class="text-wrap">
+            <span data-hf-id="hf-jxup" class="phrase" id="scene1-phrase"></span><span data-hf-id="hf-p3nz" class="cursor" id="scene1-cursor"></span>
+          </div>
+          <div data-hf-id="hf-3wrw" class="rule" id="scene1-rule"></div>
+        </div>
+
+        <audio data-hf-id="hf-33nl" id="scene1-key1" src="assets/sfx/keypress-001.wav" data-start="0.65" data-duration="0.2" data-track-index="10" data-volume="0.4"></audio>
+        <audio data-hf-id="hf-qej6" id="scene1-key2" src="assets/sfx/keypress-002.wav" data-start="0.90" data-duration="0.2" data-track-index="11" data-volume="0.4"></audio>
+        <audio data-hf-id="hf-envp" id="scene1-key3" src="assets/sfx/keypress-003.wav" data-start="1.15" data-duration="0.2" data-track-index="12" data-volume="0.4"></audio>
+        <audio data-hf-id="hf-y5oo" id="scene1-key4" src="assets/sfx/keypress-004.wav" data-start="1.40" data-duration="0.2" data-track-index="13" data-volume="0.4"></audio>
+        <audio data-hf-id="hf-jgz4" id="scene1-key5" src="assets/sfx/keypress-001.wav" data-start="1.65" data-duration="0.2" data-track-index="14" data-volume="0.4"></audio>
+        <audio data-hf-id="hf-cp9f" id="scene1-key6" src="assets/sfx/keypress-002.wav" data-start="1.90" data-duration="0.2" data-track-index="15" data-volume="0.4"></audio>
+        <audio data-hf-id="hf-n7a1" id="scene1-confirm" src="assets/sfx/impactSoft_medium_001.ogg" data-start="2.05" data-duration="0.3" data-track-index="16" data-volume="0.75"></audio>
+
+        <script>
+          const tl = gsap.timeline({ paused: true });
+
+          // Kicker fades in first — offset from t=0 per guardrail.
+          tl.fromTo(
+            "#scene1-kicker",
+            { opacity: 0, y: 14 },
+            { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" },
+            0.15,
+          );
+
+          // Smooth character-slice reveal (discrete-text-sequence, smooth variant).
+          const fullText = "APPROVE PLAN 20260918-x9a2";
+          const phraseEl = document.getElementById("scene1-phrase");
+          const len = { v: 0 };
+          tl.to(
+            len,
+            {
+              v: fullText.length,
+              duration: 1.4,
+              ease: "power1.inOut",
+              onUpdate: () => {
+                phraseEl.textContent = fullText.substring(0, Math.floor(len.v));
+              },
+            },
+            0.65,
+          );
+
+          // Hairline rule draws in step with the phrase.
+          tl.fromTo(
+            "#scene1-rule",
+            { scaleX: 0 },
+            { scaleX: 1, duration: 1.4, ease: "power1.inOut" },
+            0.65,
+          );
+
+          // Cursor blink — deterministic sin square wave on the timeline.
+          const cursorEl = document.getElementById("scene1-cursor");
+          const blink = { p: 0 };
+          tl.to(
+            blink,
+            {
+              p: Math.PI * 2 * 4,
+              duration: 3,
+              ease: "none",
+              onUpdate: () => {
+                cursorEl.style.opacity = Math.sin(blink.p) > 0 ? "1" : "0";
+              },
+            },
+            0,
+          );
+
+          // Completion pulse the instant the phrase finishes typing.
+          tl.to("#scene1-phrase", { scale: 1.04, duration: 0.15, yoyo: true, repeat: 1, ease: "power1.inOut" }, 2.05);
+
+          window.__timelines["scene1-gate"] = tl;
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

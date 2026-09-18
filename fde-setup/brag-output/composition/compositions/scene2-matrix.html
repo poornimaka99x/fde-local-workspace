@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <style>
+        #scene2-matrix-root {
+          position: absolute;
+          inset: 0;
+          background: var(--bg);
+          overflow: hidden;
+        }
+        #scene2-matrix-root .bg-glyph {
+          position: absolute;
+          right: -40px;
+          top: -180px;
+          font-family: var(--display);
+          font-weight: 700;
+          font-size: 720px;
+          color: var(--text);
+          opacity: 0.04;
+          line-height: 1;
+        }
+        #scene2-matrix-root .head {
+          position: absolute;
+          left: 160px;
+          top: 110px;
+          width: 1300px;
+        }
+        #scene2-matrix-root .headline {
+          font-family: var(--display);
+          font-weight: 700;
+          font-size: 62px;
+          color: var(--text);
+          letter-spacing: -0.01em;
+          opacity: 0;
+        }
+        #scene2-matrix-root .subline {
+          margin-top: 16px;
+          font-family: var(--mono);
+          font-size: 24px;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--accent);
+          opacity: 0;
+        }
+        #scene2-matrix-root .rule {
+          margin-top: 22px;
+          height: 3px;
+          width: 1180px;
+          background: var(--border);
+          transform: scaleX(0);
+          transform-origin: left center;
+        }
+        #scene2-matrix-root .row {
+          position: absolute;
+          left: 160px;
+          top: 400px;
+          display: flex;
+          gap: 40px;
+        }
+        #scene2-matrix-root .card {
+          width: 380px;
+          padding: 30px 26px;
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          background: #ffffff;
+          opacity: 0;
+        }
+        #scene2-matrix-root .card .label {
+          font-family: var(--mono);
+          font-size: 21px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--text-muted);
+          margin-bottom: 14px;
+        }
+        #scene2-matrix-root .card .value {
+          font-family: var(--sans);
+          font-size: 32px;
+          font-weight: 600;
+          color: var(--text);
+          line-height: 1.25;
+        }
+        #scene2-matrix-root .card.accent .value { color: var(--accent); }
+      </style>
+
+      <div data-hf-id="hf-b8k0" id="scene2-matrix-root" data-composition-id="scene2-matrix" data-width="1920" data-height="1080" data-duration="6">
+        <div data-hf-id="hf-xjnw" class="bg-glyph">4</div>
+
+        <div data-hf-id="hf-z992" class="head">
+          <div data-hf-id="hf-2h22" class="headline" id="scene2-headline">Four different things. Never one badge.</div>
+          <div data-hf-id="hf-q7gg" class="subline" id="scene2-subline">the routing / execution matrix</div>
+          <div data-hf-id="hf-tce5" class="rule" id="scene2-rule"></div>
+        </div>
+
+        <div data-hf-id="hf-thy4" class="row">
+          <div data-hf-id="hf-vuj6" class="card" id="scene2-card1">
+            <div data-hf-id="hf-65vh" class="label">Account</div>
+            <div data-hf-id="hf-wcu8" class="value">Claude: msc</div>
+          </div>
+          <div data-hf-id="hf-rwf5" class="card" id="scene2-card2">
+            <div data-hf-id="hf-ng5r" class="label">Method</div>
+            <div data-hf-id="hf-vvdd" class="value">orchestrator does it</div>
+          </div>
+          <div data-hf-id="hf-r4rc" class="card" id="scene2-card3">
+            <div data-hf-id="hf-r26t" class="label">Model &amp; effort</div>
+            <div data-hf-id="hf-w58c" class="value">sonnet · medium</div>
+          </div>
+          <div data-hf-id="hf-k55d" class="card accent" id="scene2-card4">
+            <div data-hf-id="hf-8582" class="label">Cost &amp; ceiling</div>
+            <div data-hf-id="hf-jijh" class="value">~4.6 units · standard/high</div>
+          </div>
+        </div>
+
+        <audio data-hf-id="hf-djdp" id="scene2-tick1" src="assets/sfx/click2.ogg" data-start="1.00" data-duration="0.2" data-track-index="17" data-volume="0.45"></audio>
+        <audio data-hf-id="hf-uzaz" id="scene2-tick2" src="assets/sfx/click2.ogg" data-start="1.80" data-duration="0.2" data-track-index="18" data-volume="0.45"></audio>
+        <audio data-hf-id="hf-27p4" id="scene2-tick3" src="assets/sfx/click2.ogg" data-start="2.55" data-duration="0.2" data-track-index="19" data-volume="0.45"></audio>
+        <audio data-hf-id="hf-r8pw" id="scene2-tick4" src="assets/sfx/click2.ogg" data-start="3.35" data-duration="0.2" data-track-index="20" data-volume="0.45"></audio>
+
+        <script>
+          const tl = gsap.timeline({ paused: true });
+
+          tl.fromTo("#scene2-headline", { opacity: 0, y: -18 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 0.2);
+          tl.fromTo("#scene2-subline", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "sine.out" }, 0.55);
+          tl.fromTo("#scene2-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.out" }, 0.35);
+
+          tl.fromTo("#scene2-card1", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.4)" }, 1.0);
+          tl.fromTo("#scene2-card2", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 1.8);
+          tl.fromTo("#scene2-card3", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 2.55);
+          tl.fromTo("#scene2-card4", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 3.35);
+
+          window.__timelines["scene2-matrix"] = tl;
+        </script>
+      </div>
+    </template>
+  </body>
+</html>

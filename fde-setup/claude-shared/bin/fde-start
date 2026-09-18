@@ -330,6 +330,28 @@ settings_file="$run_dir/mcp/claude-$orchestrator.settings.json"
   exit 6
 }
 
+# Claude treats an explicit --settings file as the effective custom settings
+# source when a persisted session is resumed. Keep the narrowly generated MCP
+# permissions, but also carry forward the selected account's plugin discovery
+# settings. Without this merge a run can scope its connectors correctly while
+# silently replacing fde-core skills with an unrelated project plugin set.
+# Copy only plugin configuration; credentials and unrelated account preferences
+# must never be written into the run directory.
+python3 - "$profile_dir/settings.json" "$settings_file" <<'PY'
+import json, pathlib, sys
+
+profile_path = pathlib.Path(sys.argv[1])
+run_path = pathlib.Path(sys.argv[2])
+run_settings = json.loads(run_path.read_text())
+if profile_path.is_file():
+    profile_settings = json.loads(profile_path.read_text())
+    for key in ("enabledPlugins", "extraKnownMarketplaces"):
+        value = profile_settings.get(key)
+        if isinstance(value, dict):
+            run_settings[key] = value
+run_path.write_text(json.dumps(run_settings, indent=2) + "\n")
+PY
+
 execution_prompt="/engage $run_id
 The combined plan and roles are approved. Continue this same conversation and
 execute only the approved stages. Use configured tools autonomously where the

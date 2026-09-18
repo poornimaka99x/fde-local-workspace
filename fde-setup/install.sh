@@ -50,9 +50,9 @@ say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 act()  { if (( DRY )); then printf '    would %s\n' "$*"; else printf '    %s\n' "$*"; fi; }
 
-# The Claude CLI is needed to create profiles and install the plugin — both of
-# which only happen on a fresh install. An update just syncs files, so a missing
-# claude must not stand between you and an up-to-date controller.
+# The Claude CLI is required for a fresh install. During an update it is
+# optional: files can still be synced without it, but when present it also
+# refreshes each existing profile's installed plugin cache.
 find_claude() {
   command -v claude >/dev/null 2>&1 && return 0
   local candidate
@@ -310,6 +310,23 @@ if [[ "$MODE" == "install" ]]; then
   done
 else
   note "update mode: profiles, credentials and settings.json left exactly as they are"
+  if command -v claude >/dev/null 2>&1; then
+    for p in "${PROFILES[@]}"; do
+      dir="$HOME/.claude-profiles/$p"
+      [[ -d "$dir" ]] || continue
+      say "refreshing FDE plugin cache for profile: $p"
+      if (( DRY )); then
+        act "refresh marketplace and shipped plugins for $p"
+        continue
+      fi
+      CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace update fde-toolkit \
+        >/dev/null 2>&1 || note "($p marketplace refresh skipped — register fde-toolkit in that profile first)"
+      for plugin in fde-core code-simplifier ponytail; do
+        CLAUDE_CONFIG_DIR="$dir" claude plugin update "$plugin@fde-toolkit" \
+          >/dev/null 2>&1 || true
+      done
+    done
+  fi
 fi
 
 # ---- 6. MCP wiring -----------------------------------------------------------
