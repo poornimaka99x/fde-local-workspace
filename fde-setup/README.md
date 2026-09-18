@@ -385,7 +385,8 @@ design (`/ui-prototype`, `/design-system`, `/design-to-code`); implementation
 and quality (`/implementation`, `/tdd-evidence`, `/verification-evidence`,
 `/quality-gates`, `/ci-diagnose`); operations and continuous improvement
 (`/release-observability`, `/context-budget`, `/retrospective`,
-`/harness-evaluation`, `/agent-config-audit`).
+`/harness-evaluation`, `/agent-config-audit`); audience-aware explanations
+(`/eli5`); and shareable launch-video production (`/brag`).
 
 **Agents** — the original research, architecture and review agents plus focused
 product, UI/UX, design-system, delivery, implementation, PR analysis, standards,

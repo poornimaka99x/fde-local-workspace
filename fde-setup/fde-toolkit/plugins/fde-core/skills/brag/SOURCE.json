@@ -1,0 +1,7 @@
+{
+  "upstream": "https://github.com/latent-spaces/brag",
+  "path": "skills/brag",
+  "commit": "1f8d9ade17d0ad4419cca9305fbc1398a4dd5b39",
+  "license": "MIT",
+  "importedWith": "Codex skill-installer"
+}

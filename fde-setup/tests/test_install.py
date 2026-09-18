@@ -93,6 +93,13 @@ class InstallScriptTest(unittest.TestCase):
         calls = (self.home / "claude-calls.log").read_text()
         for plugin in ("fde-core", "code-simplifier", "ponytail"):
             self.assertIn(f"plugin install {plugin}@fde-toolkit", calls)
+        installed_skills = (
+            self.home / ".claude-shared" / "fde-toolkit" / "plugins"
+            / "fde-core" / "skills"
+        )
+        for skill in ("eli5", "brag"):
+            self.assertTrue((installed_skills / skill / "SKILL.md").is_file())
+            self.assertTrue((installed_skills / skill / "SOURCE.json").is_file())
 
 
 if __name__ == "__main__":

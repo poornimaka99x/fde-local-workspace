@@ -1,0 +1,7 @@
+{
+  "upstream": "https://github.com/dreambigou/eli5",
+  "path": "skills/eli5",
+  "commit": "a766623b062331fdde53467001379b4ddf3acc2f",
+  "license": "MIT",
+  "importedWith": "Codex skill-installer"
+}

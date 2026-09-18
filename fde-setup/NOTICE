@@ -72,6 +72,31 @@ the lock file beside its manifest. Re-verify them at any time with
    for other agents.
 
 --------------------------------------------------------------------------
+Vendored skills
+--------------------------------------------------------------------------
+
+The following third-party skills are distributed inside `fde-core`, pinned to
+immutable upstream commits. Their complete skill directories are installed for
+every user who installs FDE from this repository.
+
+6. ELI5
+   https://github.com/dreambigou/eli5
+   Licensed under the MIT License.
+   Pinned at commit a766623b062331fdde53467001379b4ddf3acc2f.
+   Full text: fde-toolkit/plugins/fde-core/skills/eli5/LICENSE
+   Provenance: fde-toolkit/plugins/fde-core/skills/eli5/SOURCE.json
+
+7. BRAG
+   https://github.com/latent-spaces/brag
+   Copyright (c) 2026 Shunit Haviv Hakimi
+   Licensed under the MIT License.
+   Pinned at commit 1f8d9ade17d0ad4419cca9305fbc1398a4dd5b39.
+   Full text: fde-toolkit/plugins/fde-core/skills/brag/LICENSE
+   Provenance: fde-toolkit/plugins/fde-core/skills/brag/SOURCE.json
+   Includes the upstream skill references, analysis script, music, and sound
+   assets required by the skill.
+
+--------------------------------------------------------------------------
 Considered and not included
 --------------------------------------------------------------------------
 
