@@ -39,7 +39,11 @@ Create `artifacts/implementation/implementation-task.md` with bounded scope and
 acceptance criteria. Use `/implementation` and `/tdd-evidence`. If Codex holds
 the role, obtain `fde approve-codex` for the exact task file and repository,
 then invoke through the gated controller. Claude implementation remains subject
-to the active session's normal permissions.
+to the active session's normal permissions. Do not leave implementation merely
+because an agent turn ended. When every approved slice and acceptance criterion
+is implemented, record a passing implementation checkpoint with bounded
+evidence. Record `blocked` or `fail` when work remains; the controller will not
+enter verification without an implementation pass.
 
 ## Verification
 
@@ -47,7 +51,11 @@ Use `/quality-gates`, `/scm-pr-review`, `/ci-diagnose` and specialist reviewers
 as applicable. Write `artifacts/implementation/verification-report.md`; include
 RED/GREEN mapping, commands, results, environment, unavailable checks and
 residual risk. Then use `/verification-evidence` to record a passing checkpoint.
-The controller blocks entry to the deployment gate without both artifacts.
+A passing checkpoint means the approved requirement is satisfied, not merely
+that the implemented subset has tests. If required slices or acceptance criteria
+remain, record `blocked` or `fail` even when the available tests pass. The
+controller blocks every exit from verification—including direct completion—
+without the report and a passing checkpoint.
 
 ## Deployment and observability
 

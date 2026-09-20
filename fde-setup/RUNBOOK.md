@@ -471,6 +471,18 @@ expired or was already used, marks it consumed *before* the process starts, and
 runs Codex in a `workspace-write` sandbox bounded to the approved root with
 network off.
 
+After the full approved implementation scope is complete, record the stage
+checkpoint before moving to verification:
+
+```bash
+fde checkpoint <run-id> --stage implementation --status pass \
+  --evidence artifacts/implementation/implementation-task.md
+fde resume <run-id> --next
+```
+
+If any approved slice or acceptance criterion remains, record `blocked` or
+`fail`; do not use `pass` for a tested subset.
+
 If Codex needs network, another repository, or a wider writable root: stop and
 approve a new, narrower task. Never widen an existing approval. There is no
 `--yolo` and no `danger-full-access` in this toolkit, and `fde doctor` fails if

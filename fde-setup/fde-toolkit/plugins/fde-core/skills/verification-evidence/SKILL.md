@@ -16,7 +16,10 @@ result and exit status.
 
 For the verification stage, write
 `artifacts/implementation/verification-report.md`, then append its immutable
-hash to the run ledger:
+hash to the run ledger. Use `pass` only when the full approved scope and its
+acceptance criteria are satisfied. Passing tests for a partial implementation
+is not a passing stage; record `fail` or `blocked` when any required slice or
+acceptance criterion remains:
 
 ```bash
 fde checkpoint <run-id> --stage verification --status pass \

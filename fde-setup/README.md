@@ -201,9 +201,11 @@ Artifacts land under the run, and only the ones the plan calls for:
 `reconciliation.md`, `solution-presentation.pptx`, `development-plan.md`,
 `jira-plan.json`, `implementation-task.md`, `verification-report.md`,
 `deployment-report.md`, `observability-plan.md` and
-`publication-manifest.json`. Verification and observability also carry
-append-only evidence checkpoints; a passing checkpoint is required before
-release progression.
+`publication-manifest.json`. Implementation, verification and observability
+carry append-only evidence checkpoints. Implementation cannot advance to
+verification without a pass, and verification cannot advance to deployment or
+direct completion without its report and a pass. A tested subset is not a
+passing checkpoint when approved slices or acceptance criteria remain.
 
 Every legal transition into `publication` or `complete` runs
 provenance-preserving output hygiene first. It scans only `artifacts/`, never
