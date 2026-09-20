@@ -1366,6 +1366,15 @@ class TestStateMachine(FDETest):
         run_id = self.sb.start_full()
         self.sb.full_roles(run_id, implementation="claude_work")
         for s in expected[4:expected.index("publication")]:
+            if s == "verification":
+                task = (self.sb.run_dir(run_id) / "artifacts" /
+                        "implementation" / "implementation-task.md")
+                task.write_text("# Implementation task\n\nCompleted test slice.\n")
+                self.assertEqual(self.sb.fde(
+                    "checkpoint", run_id, "--stage", "implementation",
+                    "--status", "pass", "--evidence",
+                    "artifacts/implementation/implementation-task.md",
+                ).returncode, 0)
             if s == "awaiting_deployment_approval":
                 report = (self.sb.run_dir(run_id) / "artifacts" /
                           "implementation" / "verification-report.md")
@@ -1600,6 +1609,49 @@ class TestPlanning(FDETest):
         events = (self.sb.run_dir(run_id) / "events.jsonl").read_text()
         self.assertIn("approval.implementation.not-required", events)
         self.assertIn("under the user's own supervision", events)
+
+    def test_implementation_and_verification_evidence_gate_direct_completion(self):
+        run_id = self.sb.start("ACME-17b finish the whole approved build", shape="build")
+        self.sb.fde("roles", run_id, "--set", "orchestrator=claude_alt",
+                    "--set", "implementation=claude_work",
+                    "--set", "testEngineering=claude_work",
+                    "--set", "microsoftContext=none")
+        self.sb.advance_to(run_id, "implementation")
+        task = (self.sb.run_dir(run_id) / "artifacts" /
+                "implementation" / "implementation-task.md")
+        task.write_text("# Implementation task\n\nAll approved slices.\n")
+
+        missing_implementation = self.sb.fde("resume", run_id, "--next")
+        self.assertEqual(missing_implementation.returncode, 9)
+        self.assertIn("no checkpoint is recorded", missing_implementation.stderr)
+        self.assertEqual(self.sb.fde(
+            "checkpoint", run_id, "--stage", "implementation",
+            "--status", "pass", "--evidence",
+            "artifacts/implementation/implementation-task.md",
+        ).returncode, 0)
+        self.assertEqual(self.sb.fde("resume", run_id, "--next").returncode, 0)
+
+        # The build shape ends at verification, so its next state is directly
+        # `complete`. That path must enforce the same gate as a release-shaped
+        # verification -> awaiting_deployment_approval transition.
+        missing_verification = self.sb.fde("resume", run_id, "--next")
+        self.assertEqual(missing_verification.returncode, 9)
+        self.assertIn("verification-report.md", missing_verification.stderr)
+        report = (self.sb.run_dir(run_id) / "artifacts" /
+                  "implementation" / "verification-report.md")
+        report.write_text("# Verification\n\nAll acceptance criteria passed.\n")
+        no_checkpoint = self.sb.fde("resume", run_id, "--next")
+        self.assertEqual(no_checkpoint.returncode, 9)
+        self.assertIn("no checkpoint is recorded", no_checkpoint.stderr)
+        self.assertEqual(self.sb.fde(
+            "checkpoint", run_id, "--stage", "verification",
+            "--status", "pass", "--evidence",
+            "artifacts/implementation/verification-report.md",
+        ).returncode, 0)
+        self.assertEqual(self.sb.fde("resume", run_id, "--next").returncode, 0)
+        self.assertEqual(
+            json.loads((self.sb.run_dir(run_id) / "manifest.json").read_text())["state"],
+            "complete")
 
     def test_legacy_runs_without_a_plan_are_treated_as_full(self):
         run_id = self.sb.start_full("ACME-18 legacy")

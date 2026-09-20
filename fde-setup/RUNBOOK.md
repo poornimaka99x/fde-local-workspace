@@ -395,6 +395,14 @@ controller stops and tells you, rather than spending past what you approved.
 Every attempt keeps its own artifact, so the cheap attempt that failed is still
 there as the reason the expensive one was allowed.
 
+Implementation has one automatic recovery path: when Claude explicitly reports
+that the assigned account reached a session, usage, or rate limit, FDE classifies
+the attempt as `transient-provider` and continues with the next available Claude
+account that has implementation capability. The continuation inspects and keeps
+partial working-tree changes. It does not bypass the approved provider,
+model/effort route, retry count, or cost ceiling, and every failover remains in
+the attempt and event ledgers.
+
 Token counts are not available through this invocation path, so they are recorded
 as unavailable rather than as zero. If you have provider figures, pass them:
 `--usage-file usage.json` stores only the allowlisted numeric fields.

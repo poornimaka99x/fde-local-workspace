@@ -2944,7 +2944,19 @@ class Run:
         old = m.get("state")
         if new == old:
             return old
-        if old == "verification" and new == "awaiting_deployment_approval":
+        # Leaving implementation is a completion claim about the approved code
+        # slice, even when the next planned stage is verification rather than a
+        # release gate. Require an explicit passing checkpoint so a session
+        # limit, partial handoff, or premature `resume --next` cannot silently
+        # turn unfinished implementation into verification work.
+        if old == "implementation" and new != "blocked":
+            self.require_passing_checkpoint("implementation", [
+                self.artifacts_dir / "implementation" / "implementation-task.md",
+            ])
+        # Verification may lead to deployment, another later stage, or directly
+        # to complete depending on the run shape. The evidence gate applies to
+        # every one of those exits, not only the deployment-shaped transition.
+        if old == "verification" and new != "blocked":
             self.require_passing_checkpoint("verification", [
                 self.artifacts_dir / "implementation" / "verification-report.md",
             ])
@@ -5897,7 +5909,7 @@ STAGE_HINT = {
     "reconciliation": "orchestrator reconciles → artifacts/review/reconciliation.md",
     "presentation": "presentation author builds artifacts/presentation/solution-presentation.pptx",
     "planning": "write development-plan.md and jira-plan.json (preview only — no Jira issues yet)",
-    "implementation": "fde invoke {id} <agent> artifacts/implementation/implementation-task.md --write",
+    "implementation": "finish the approved task, then: fde checkpoint {id} --stage implementation --status pass --evidence artifacts/implementation/implementation-task.md",
     "verification": "write verification-report.md, then: fde checkpoint {id} --stage verification --status pass --evidence artifacts/implementation/verification-report.md",
     "deployment": "release manager deploys the approved release and writes artifacts/deployment/deployment-report.md",
     "observability": "SRE verifies telemetry, writes observability-plan.md, then records a passing checkpoint",

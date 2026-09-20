@@ -486,6 +486,14 @@ allowed. Usage is recorded with its provenance — reported by a provider,
 estimated by the controller, or unavailable — and never as a zero standing in for
 a measurement nobody made.
 
+During the implementation stage, a Claude response that explicitly reports a
+session, usage, or rate limit is handled as a transient provider failure. FDE
+automatically continues the same approved task with the next locally available
+Claude account that has implementation capability. It stays within the original
+provider, model/effort route, retry count, and cost ceiling; each account is tried
+once, partial working-tree changes are preserved, and the failover is recorded in
+the run events and attempt ledger.
+
 `fde routing report` reads all of it back and produces calibration
 recommendations for a person. It changes no policy, and nothing reads it back as
 configuration.
