@@ -6581,10 +6581,19 @@ def _run_mcp_options(run: Run, agent_id: str, agent: dict) -> list[str]:
 
 
 def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path,
-                     write: bool, route=None, context_files=()):
+                     write: bool, route=None, context_files=(), continuation_from=None):
     a = agents["agents"][agent_id]
     kind = a.get("kind")
     body = task.read_text(encoding="utf-8", errors="replace")
+    if continuation_from:
+        body = (
+            "# Session-limit continuation\n\n"
+            f"Claude account `{continuation_from}` began this implementation but its "
+            "session limit was reached. The working tree may contain partial changes. "
+            "Inspect the current repository state, preserve correct existing work, avoid "
+            "repeating completed edits, and continue the task below.\n\n"
+            + body
+        )
     env = {}
     options = _routed_options(route)
     # One source for the per-account environment: the provider template, via
@@ -6637,6 +6646,68 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
     if kind == "copilot-studio":
         return [_bin("ask-ms-copilot"), body], env
     die(f"no invocation defined for kind '{kind}'", 2)
+
+
+CLAUDE_SESSION_LIMIT_RE = re.compile(
+    r"(?:usage|rate|session|weekly|five[- ]hour).*limit|"
+    r"limit.*(?:reached|exceeded|resets?)|"
+    r"you(?:'ve| have) hit (?:your|the) .*limit|"
+    r"too many requests|http\s*429",
+    re.IGNORECASE,
+)
+
+
+def _claude_session_limited(proc):
+    """A failed Claude process that explicitly says the account is exhausted."""
+    return proc.returncode != 0 and bool(CLAUDE_SESSION_LIMIT_RE.search(
+        f"{proc.stdout}\n{proc.stderr}"))
+
+
+def _implementation_failover_accounts(agents, current_id, tried, *, provider):
+    """Eligible Claude profiles in deterministic next-account order.
+
+    The registry remains the source of truth. A failover never widens provider,
+    capability, or local-availability boundaries, and each account is tried at
+    most once during one invocation.
+    """
+    ids = list((agents.get("agents") or {}).keys())
+    if current_id in ids:
+        pivot = ids.index(current_id) + 1
+        ids = ids[pivot:] + ids[:pivot]
+    capability = (agents.get("roleCapability") or {}).get(
+        "implementation", "implementation")
+    candidates = []
+    for candidate in ids:
+        account = agents["agents"].get(candidate) or {}
+        if candidate in tried or account.get("kind") != "claude":
+            continue
+        if capability not in (account.get("capabilities") or []):
+            continue
+        if routing_provider_for(agents, candidate) != provider:
+            continue
+        available, _detail = agent_available(agents, candidate)
+        if available:
+            candidates.append(candidate)
+    return candidates
+
+
+def _record_automatic_session_limit(run, route, artifact):
+    """Judge the just-recorded attempt without erasing its original record."""
+    attempts = routing_attempts(run, route["taskId"])
+    if not attempts:
+        return
+    last = attempts[-1]
+    record = dict(last)
+    record["at"] = iso()
+    record["outcome"] = "fail"
+    record["classification"] = "transient-provider"
+    record["supersedes"] = {"attempt": last.get("attempt"), "at": last.get("at")}
+    record["evidence"] = [artifact]
+    record["recordedBy"] = "fde-controller:auto-session-limit"
+    record["notes"] = list(last.get("notes") or []) + [
+        "Claude reported that this account's session or usage limit was reached."
+    ]
+    append_jsonl(routing_attempts_path(run), record)
 
 
 @routing_command
@@ -6740,72 +6811,174 @@ def cmd_invoke(args):
                           "route": resolved_route}))
         return 0
 
-    run.event("invoke.start", agent=agent_id, stage=stage, roles=held,
-              write=bool(args.write), taskFile=str(task), argv0=argv[0],
-              contextFiles=[{"path": str(path.relative_to(run.dir.resolve())),
-                             "sha256": sha256_file(path)} for path in context_files],
-              route=resolved_route)
-    env = dict(os.environ, **extra_env)
-    started = now()
-    try:
-        proc = subprocess.run(argv, env=env, capture_output=True, text=True)
-    except OSError as e:
-        run.event("invoke.error", agent=agent_id, stage=stage, error=str(e))
-        die(f"could not run {argv[0]}: {e}", 127)
+    # Implementation can outlive one Claude profile's session allowance. Keep
+    # the approved task, model, effort, retry and cost bounds, but move a
+    # session-limited attempt to the next locally available Claude profile with
+    # the same provider and implementation capability. Every failed and resumed
+    # attempt is filed and remains visible in the immutable ledgers.
+    current_id = agent_id
+    current_roles = held
+    current_route = route
+    current_resolved_route = resolved_route
+    continuation_from = None
+    tried = {agent_id}
+    provider = routing_provider_for(agents, agent_id)
 
-    out_dir = run.artifacts_dir / STAGE_DIR.get(stage, stage)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    # A routed attempt names itself in the filename. A failed attempt is
-    # evidence for the escalation that follows it, so it is filed beside its
-    # successor rather than replaced by it.
-    attempt_marker = (f"-a{resolved_route['attempt']}"
-                      if resolved_route.get("attempt") else "")
-    out = out_dir / f"{stage}-{agent_id}{attempt_marker}-{started:%Y%m%dT%H%M%S}.md"
-    write_atomic(out, (
-        f"# {stage} — {agent_label(agents, agent_id)}\n\n"
-        f"- run: {run.id}\n- stage: {stage}\n- roles held: {', '.join(held)}\n"
-        f"- mode: {'write (approved)' if args.write else 'read-only'}\n"
-        + (f"- routed task: {resolved_route['taskId']}"
-           f" (attempt {resolved_route['attempt']}, {resolved_route['mode']})\n"
-           f"- model/effort: {resolved_route['model']} / {resolved_route['effort']}\n"
-           if resolved_route["taskId"] else
-           "- model/effort: selected manually for this run\n")
-        + f"- started: {iso(started)}\n- exit: {proc.returncode}\n"
-        f"- task: {task}\n"
-        + ("- context: " + ", ".join(str(path.relative_to(run.dir.resolve()))
-                                      for path in context_files) + "\n" if context_files else "")
-        + "\n"
-        f"> Output of a separate agent with its own context. Evidence, not authority —\n"
-        f"> verify claims about the codebase against the codebase.\n\n"
-        f"---\n\n{proc.stdout.strip()}\n"
-        + (f"\n\n## stderr\n\n```\n{proc.stderr.strip()[:4000]}\n```\n" if proc.stderr.strip() else "")))
-    # The attempt is recorded whatever happened, before anything is judged. Its
-    # duration is measured here so it is 'reported'; token counts are not
-    # available on this path, so they stay 'unavailable' rather than becoming 0.
-    attempt_usage = None
-    if route and route.get("plan"):
-        attempt_usage = blank_usage(
-            "the CLI invocation path does not return provider usage")
-        attempt_usage["durationMs"] = usage_value(
-            "reported", int((now() - started).total_seconds() * 1000),
-            "measured by the controller")
-        record_routing_attempt(
-            run, route["routing"], route["task"], route["plan"],
-            usage=attempt_usage,
-            outcome="fail" if proc.returncode != 0 else "unknown",
-            artifact=str(out.relative_to(run.dir)), exit_code=proc.returncode)
-    run.event("invoke.end", agent=agent_id, stage=stage, exit=proc.returncode,
-              artifact=str(out), route=resolved_route,
-              # Usage is reported by a provider or it is unavailable. It is never
-              # inferred, and never written as zero.
-              usage=attempt_usage or {"state": "unavailable", "reason":
-                                      "this run selects its model and effort manually"})
+    while True:
+        run.event("invoke.start", agent=current_id, stage=stage, roles=current_roles,
+                  write=bool(args.write), taskFile=str(task), argv0=argv[0],
+                  continuationFrom=continuation_from,
+                  contextFiles=[{"path": str(path.relative_to(run.dir.resolve())),
+                                 "sha256": sha256_file(path)} for path in context_files],
+                  route=current_resolved_route)
+        env = dict(os.environ, **extra_env)
+        started = now()
+        try:
+            proc = subprocess.run(argv, env=env, capture_output=True, text=True)
+        except OSError as e:
+            run.event("invoke.error", agent=current_id, stage=stage, error=str(e))
+            die(f"could not run {argv[0]}: {e}", 127)
 
-    sys.stdout.write(proc.stdout)
-    if proc.stderr.strip():
-        sys.stderr.write(proc.stderr)
-    print(f"\n[filed {out}]", file=sys.stderr)
-    return proc.returncode
+        out_dir = run.artifacts_dir / STAGE_DIR.get(stage, stage)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # A routed attempt names itself in the filename. A failed attempt is
+        # evidence for the escalation that follows it, so it is filed beside its
+        # successor rather than replaced by it.
+        attempt_marker = (f"-a{current_resolved_route['attempt']}"
+                          if current_resolved_route.get("attempt") else "")
+        out = out_dir / (
+            f"{stage}-{current_id}{attempt_marker}-{started:%Y%m%dT%H%M%S}.md")
+        write_atomic(out, (
+            f"# {stage} — {agent_label(agents, current_id)}\n\n"
+            f"- run: {run.id}\n- stage: {stage}\n"
+            f"- roles held: {', '.join(current_roles)}\n"
+            f"- mode: {'write (approved)' if args.write else 'read-only'}\n"
+            + (f"- routed task: {current_resolved_route['taskId']}"
+               f" (attempt {current_resolved_route['attempt']}, "
+               f"{current_resolved_route['mode']})\n"
+               f"- model/effort: {current_resolved_route['model']} / "
+               f"{current_resolved_route['effort']}\n"
+               if current_resolved_route["taskId"] else
+               "- model/effort: selected manually for this run\n")
+            + (f"- continued from: {continuation_from}\n" if continuation_from else "")
+            + f"- started: {iso(started)}\n- exit: {proc.returncode}\n"
+            f"- task: {task}\n"
+            + ("- context: " + ", ".join(str(path.relative_to(run.dir.resolve()))
+                                          for path in context_files) + "\n"
+               if context_files else "")
+            + "\n"
+            f"> Output of a separate agent with its own context. Evidence, not authority —\n"
+            f"> verify claims about the codebase against the codebase.\n\n"
+            f"---\n\n{proc.stdout.strip()}\n"
+            + (f"\n\n## stderr\n\n```\n{proc.stderr.strip()[:4000]}\n```\n"
+               if proc.stderr.strip() else "")))
+
+        # The attempt is recorded whatever happened, before anything is judged.
+        attempt_usage = None
+        if current_route and current_route.get("plan"):
+            attempt_usage = blank_usage(
+                "the CLI invocation path does not return provider usage")
+            attempt_usage["durationMs"] = usage_value(
+                "reported", int((now() - started).total_seconds() * 1000),
+                "measured by the controller")
+            record_routing_attempt(
+                run, current_route["routing"], current_route["task"],
+                current_route["plan"], usage=attempt_usage,
+                outcome="fail" if proc.returncode != 0 else "unknown",
+                artifact=str(out.relative_to(run.dir)), exit_code=proc.returncode)
+        run.event("invoke.end", agent=current_id, stage=stage, exit=proc.returncode,
+                  artifact=str(out), route=current_resolved_route,
+                  usage=attempt_usage or {"state": "unavailable", "reason":
+                                          "this run selects its model and effort manually"})
+
+        sys.stdout.write(proc.stdout)
+        if proc.stderr.strip():
+            sys.stderr.write(proc.stderr)
+        print(f"\n[filed {out}]", file=sys.stderr)
+
+        limited = (stage == "implementation"
+                   and agents["agents"][current_id].get("kind") == "claude"
+                   and _claude_session_limited(proc))
+        if not limited:
+            return proc.returncode
+
+        artifact = str(out.relative_to(run.dir))
+        if current_route and current_route.get("plan"):
+            _record_automatic_session_limit(run, current_route, artifact)
+
+        candidates = _implementation_failover_accounts(
+            agents, current_id, tried, provider=provider)
+        if not candidates:
+            run.event("implementation.account_failover_unavailable",
+                      exhaustedAccount=current_id, stage=stage,
+                      reason="no other available Claude account has implementation capability")
+            return proc.returncode
+        next_id = candidates[0]
+
+        next_route = current_route
+        if current_route and current_route.get("plan"):
+            fallback_task = dict(current_route["task"])
+            fallback_task.update({
+                "accountId": next_id,
+                "accountLabel": agent_label(agents, next_id),
+                "provider": routing_provider_for(agents, next_id),
+            })
+            try:
+                next_plan = plan_next_attempt(
+                    run, agents, current_route["routing"], fallback_task)
+            except RoutingError as exc:
+                run.event("implementation.account_failover_blocked",
+                          exhaustedAccount=current_id, candidateAccount=next_id,
+                          code=exc.code, reason=exc.message)
+                print(f"\nAutomatic account failover stopped: {exc.message}", file=sys.stderr)
+                if exc.hint:
+                    print(f"{exc.hint}", file=sys.stderr)
+                return proc.returncode
+            next_plan = dict(next_plan)
+            next_plan["reason"] = (
+                f"{next_plan.get('reason')}; Claude account {current_id} reached its "
+                f"session limit, so implementation continued with {next_id}")
+            next_route = {
+                **current_route,
+                "model": next_plan["model"],
+                "effort": next_plan["effort"],
+                "tier": next_plan["tier"],
+                "attempt": next_plan["attempt"],
+                "mode": next_plan["mode"],
+                "attemptReason": next_plan["reason"],
+                "estimatedCostUnits": next_plan.get("estimatedCostUnits"),
+                "task": fallback_task,
+                "plan": next_plan,
+            }
+
+        run.event("implementation.account_failover", **{
+            "from": current_id, "to": next_id, "stage": stage,
+            "taskId": (current_route or {}).get("taskId"),
+            "reason": "Claude session limit reached",
+        })
+        previous_id = current_id
+        current_id = next_id
+        tried.add(next_id)
+        current_roles = ["implementation (automatic session-limit failover)"]
+        current_route = next_route
+        current_resolved_route = {
+            "taskId": (next_route or {}).get("taskId"),
+            "model": (next_route or {}).get("model"),
+            "effort": (next_route or {}).get("effort"),
+            "tier": (next_route or {}).get("tier"),
+            "attempt": (next_route or {}).get("attempt"),
+            "mode": (next_route or {}).get("mode"),
+            "specialist": (next_route or {}).get("specialist"),
+            "accountId": next_id,
+            "source": "automatic-session-limit-failover",
+        }
+        continuation_from = previous_id
+        argv, extra_env = build_invocation(
+            agents, run, current_id, stage, task, args.write,
+            route=current_route, context_files=context_files,
+            continuation_from=continuation_from)
+        if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
+            die("refusing to run: the failover invocation contains a sandbox-bypass flag", 8)
 
 
 def cmd_log(args):

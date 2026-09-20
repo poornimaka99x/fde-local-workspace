@@ -1692,6 +1692,44 @@ class TestAttempts(AttemptTest):
                          [1, 2])
         self.assertEqual({a["model"] for a in attempts}, {"big"})
 
+    def test_implementation_session_limit_fails_over_to_next_claude_account(self):
+        self.sb.bindir.joinpath("claude").write_text(
+            "#!/usr/bin/env bash\n"
+            "case \"$CLAUDE_CONFIG_DIR\" in\n"
+            "  */msc) echo \"You've hit your session limit; resets at 4pm\" >&2; exit 1 ;;\n"
+            "  */alt) echo \"continued implementation with alt\"; exit 0 ;;\n"
+            "  *) echo \"unexpected account: $CLAUDE_CONFIG_DIR\" >&2; exit 3 ;;\n"
+            "esac\n",
+            encoding="utf-8")
+        self.sb.bindir.joinpath("claude").chmod(0o755)
+        run_id = self.approved(
+            requirement=STANDARD_REQUEST,
+            stages=("implementation",),
+            roles={"implementation": "claude_msc"})
+
+        result = self.sb.fde(
+            "invoke", run_id, "claude_msc", "tasks/s.md",
+            "--stage", "implementation", "--task-id", "implementation-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("continued implementation with alt", result.stdout)
+        attempts = [entry for entry in self.ledger(run_id)
+                    if entry["taskId"] == "implementation-1"]
+        effective = {}
+        for entry in attempts:
+            effective[entry["attempt"]] = entry
+        self.assertEqual([effective[1]["accountId"], effective[2]["accountId"]],
+                         ["claude_msc", "claude_alt"])
+        self.assertEqual(effective[1]["classification"], "transient-provider")
+        self.assertEqual(effective[2]["outcome"], "unknown")
+        events = [json.loads(line) for line in
+                  (self.sb.shared / "runs" / run_id / "events.jsonl")
+                  .read_text().splitlines() if line]
+        failovers = [event for event in events
+                     if event["event"] == "implementation.account_failover"]
+        self.assertEqual([(event["from"], event["to"]) for event in failovers],
+                         [("claude_msc", "claude_alt")])
+
     def test_a_contract_failure_escalates_one_rung_of_the_frozen_ladder(self):
         run_id = self.approved()
         self.attempt(run_id)
