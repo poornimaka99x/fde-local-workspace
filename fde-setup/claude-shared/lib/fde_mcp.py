@@ -30,9 +30,12 @@ import hashlib
 import json
 import os
 import pathlib
+import queue
 import re
 import shutil
 import subprocess
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1571,34 +1574,69 @@ def _verify_stdio(name, server, settings, env, initialize, listing, timeout, rec
         record.update(outcome="failed", detail=redact(str(exc))[:240])
         return record
     try:
-        payload = json.dumps(initialize) + "\n" + json.dumps(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n" + \
-            json.dumps(listing) + "\n"
-        try:
-            out, err = child.communicate(payload, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.communicate()
-            record.update(outcome="failed",
-                          detail=f"the server did not answer within {timeout}s")
-            return record
+        # Keep stdin open until tools/list answers. `communicate(payload)` closes
+        # it immediately; proxies that first establish an upstream session (the
+        # AWS proxy is one) then discard their delayed response as the local
+        # transport has already gone away.
+        messages = queue.Queue()
+        stderr = []
+
+        def read_stdout():
+            for line in child.stdout:
+                messages.put(line)
+            messages.put(None)
+
+        def read_stderr():
+            for line in child.stderr:
+                if sum(map(len, stderr)) < 8192:
+                    stderr.append(line)
+
+        threading.Thread(target=read_stdout, daemon=True).start()
+        threading.Thread(target=read_stderr, daemon=True).start()
+        deadline = time.monotonic() + timeout
         results = {}
-        for line in (out or "").splitlines():
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                message = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(message, dict) and message.get("id") in (1, 2):
-                results[message["id"]] = message
+
+        def send(message):
+            child.stdin.write(json.dumps(message) + "\n")
+            child.stdin.flush()
+
+        def wait_for(message_id):
+            while time.monotonic() < deadline:
+                try:
+                    line = messages.get(timeout=max(0.01, deadline - time.monotonic()))
+                except queue.Empty:
+                    break
+                if line is None:
+                    break
+                try:
+                    message = json.loads(line.strip())
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+                if isinstance(message, dict) and message.get("id") in (1, 2):
+                    results[message["id"]] = message
+                    if message.get("id") == message_id:
+                        return
+
+        try:
+            send(initialize)
+            wait_for(1)
+            if 1 in results:
+                send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                send(listing)
+                wait_for(2)
+        except (BrokenPipeError, OSError):
+            pass
         if 1 not in results:
             record.update(outcome="failed",
-                          detail=redact((err or "the server produced no initialize result"))[:240])
+                          detail=redact(("".join(stderr) or
+                                         "the server produced no initialize result"))[:240])
             return record
         record["initialize"] = 200
         record["authenticated"] = True
+        if 2 not in results:
+            record.update(outcome="failed",
+                          detail=f"the server did not answer within {timeout}s")
+            return record
         tools = ((results.get(2, {}).get("result") or {}).get("tools") or [])
         record["tools"] = _tool_summaries(tools)
         record["outcome"] = "ok" if record["tools"] else "failed"

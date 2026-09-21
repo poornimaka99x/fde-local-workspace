@@ -394,10 +394,12 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-proxy-for-aws-cli==1.6.6",
+        "mcp-proxy-for-aws-cli==1.7.0",
         "https://aws-mcp.{{config.endpointRegion}}.api.aws/mcp",
         "--profile", "{{config.awsProfile}}",
         "--region", "{{config.operationRegion}}",
+        "--metadata", "AWS_REGION={{config.operationRegion}}",
+        "--retries", "3",
         "--read-only"
       ],
       "mutationRemovesArgs": ["--read-only"],
@@ -413,7 +415,7 @@
         "setup": "Install the AWS CLI and sign in with `aws sso login --profile <profile>` (or configure credentials). FDE never copies AWS credentials into its own metadata.",
         "docsUrl": "https://github.com/aws/mcp-proxy-for-aws"
       },
-      "package": { "manager": "uv", "name": "mcp-proxy-for-aws-cli", "version": "1.6.6", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "package": { "manager": "uv", "name": "mcp-proxy-for-aws-cli", "version": "1.7.0", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
       "userConfig": [
         { "name": "awsProfile", "label": "AWS profile", "required": true, "type": "text", "placeholder": "the name in ~/.aws/config" },
         { "name": "endpointRegion", "label": "Managed MCP endpoint region", "required": true, "type": "text", "defaultValue": "us-east-1" },
