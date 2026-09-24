@@ -747,9 +747,10 @@ Codex and Gemini sidecar invocations also accept repeatable `--context-file`
 arguments. Each path must resolve to a regular file inside the run; symlinks and
 paths outside it are refused, and the combined payload is capped at 512 KiB.
 The start event records each relative path and SHA-256. Codex additionally gets
-the review role's eligible MCP servers as per-invocation overrides. Antigravity
-has no safe per-invocation MCP config surface, so Gemini gets the explicit
-evidence packet and no generated run config is represented as live.
+the role's eligible MCP servers as per-invocation overrides. Antigravity uses a
+run-local workspace MCP config and isolated permission file, so Gemini gets the
+role's eligible MCP servers without widening its machine-global configuration.
+Both providers also receive the explicit evidence packet.
 
 A run with no `routing.json` keeps the original behaviour exactly: `claude -p
 <body>`, no `--task-id`, `route.source: "manual"`. Passing `--task-id` to such a

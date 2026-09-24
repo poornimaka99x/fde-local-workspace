@@ -222,7 +222,7 @@ class ClientRendering(unittest.TestCase):
         self.assertEqual(mcp.render_claude(selection)["context7"],
                          {"type": "http", "url": "https://mcp.context7.com/mcp"})
         self.assertEqual(mcp.render_gemini(selection)["context7"],
-                         {"httpUrl": "https://mcp.context7.com/mcp"})
+                         {"serverUrl": "https://mcp.context7.com/mcp"})
         block = mcp.render_codex_block(selection)
         self.assertIn("[mcp_servers.context7]", block)
         self.assertIn('url = "https://mcp.context7.com/mcp"', block)
@@ -248,8 +248,12 @@ class ClientRendering(unittest.TestCase):
         selection = self.selection("serena")
         self.assertIn('enabled_tools = ["find_symbol", "list_dir"]',
                       mcp.render_codex_block(selection, health=self.health))
-        self.assertEqual(mcp.render_gemini(selection, health=self.health)["serena"]["includeTools"],
-                         ["find_symbol", "list_dir"])
+        self.assertEqual(mcp.render_gemini(selection, health=self.health)["serena"]["disabledTools"],
+                         ["execute_shell_command", "replace_symbol_body"])
+        rules = mcp.render_gemini_permissions(selection, health=self.health)["permissions"]
+        self.assertIn("read_url(*)", rules["allow"])
+        self.assertIn("mcp(serena/find_symbol)", rules["allow"])
+        self.assertIn("write_file(*)", rules["deny"])
         permissions = mcp.render_claude_permissions(selection, health=self.health)["permissions"]
         self.assertEqual(permissions["allow"],
                          ["mcp__serena__find_symbol", "mcp__serena__list_dir"])
@@ -704,7 +708,7 @@ class SyncBehaviour(unittest.TestCase):
         self.assertFalse((run_dir / "mcp/claude-work.settings.json").exists())
         self.assertTrue((run_dir / "mcp/codex.toml").exists())
 
-    def test_gemini_uses_an_explicit_evidence_handoff_not_a_dead_config(self):
+    def test_gemini_gets_a_run_scoped_workspace_config_and_permissions(self):
         run_dir = self.make_run("run-gemini", {"review": "gemini"}, ["review"],
                                 profile="client-delivery")
         stale = run_dir / "mcp/gemini.json"
@@ -712,11 +716,17 @@ class SyncBehaviour(unittest.TestCase):
         stale_readme = run_dir / "mcp/README.md"
         stale_readme.write_text("old live binding")
         result = self.sync("--run", "run-gemini")
-        self.assertIn("fde invoke --context-file", result.stdout)
+        self.assertIn(".agents/mcp_config.json", result.stdout)
         self.assertFalse(stale.exists())
-        self.assertFalse(stale_readme.exists())
+        config = json.loads((run_dir / ".agents/mcp_config.json").read_text())
+        self.assertIn("atlassian", config["mcpServers"])
+        permissions = json.loads(
+            (run_dir / "mcp/gemini-app-data/settings.json").read_text())
+        self.assertIn("read_url(*)", permissions["permissions"]["allow"])
+        self.assertTrue(any(rule.startswith("mcp(atlassian/")
+                            for rule in permissions["permissions"]["allow"]))
         effective = json.loads((run_dir / "mcp/effective.json").read_text())
-        self.assertEqual(effective["servers"], {})
+        self.assertEqual(effective["servers"]["atlassian"]["identities"], ["gemini"])
 
     def test_an_unconfigured_connector_is_refused_with_its_reason(self):
         run_dir = self.make_run("run-c", {"observability": "claude_work"},

@@ -71,11 +71,10 @@ run's stage, connector scopes, mutation approvals, or publication gates.
 Inside an FDE run, never call `ask-codex` or `ask-gemini` directly. Put the
 self-contained request in the run's `tasks/` directory and invoke the assigned
 identity with `fde invoke`. Codex then receives the eligible run-scoped MCP
-servers. For Gemini, save the exact connector material retrieved by the
-orchestrator under the run's `artifacts/` directory and pass it with repeatable
-`--context-file` options; Antigravity does not expose a safe per-invocation MCP
-configuration surface. Evidence files must retain source URLs or IDs and
-retrieval times where available.
+servers. Gemini runs from an isolated run workspace with its eligible MCP
+servers, MCP environment and read-only web permission bound to that invocation.
+Use repeatable `--context-file` options for additional sealed evidence; those
+files must retain source URLs or IDs and retrieval times where available.
 
 GitHub Copilot is not part of this ecosystem. `ask-copilot` is a stub that says so.
 

@@ -44,7 +44,7 @@ close, and it closes it in the client's own mechanism:
 | --- | --- | --- |
 | Claude Code | `permissions.allow` / `permissions.deny` in a generated settings file, loaded with `--settings` beside `--mcp-config` | exact `mcp__<server>__<tool>` names — wildcards are not accepted for MCP specifiers, which is *why* an unverified server cannot be allow-listed |
 | Codex CLI | `enabled_tools` on the `[mcp_servers.<name>]` table | exact tool names |
-| Gemini / Antigravity | `includeTools` on a persistent `mcpServers` entry | exact tool names, but Antigravity exposes no safe per-invocation MCP config; FDE does not pretend a generated run file is active and instead passes bounded evidence files through `fde invoke --context-file` |
+| Gemini / Antigravity | workspace-local `.agents/mcp_config.json` plus isolated app-data permissions | eligible servers are bound to the run workspace, remote transports use `serverUrl`, disallowed discovered tools are listed in `disabledTools`, and headless access is limited to read-only web and exact MCP tool permissions |
 
 How a server's safe subset is established is declared per entry as
 `readOnlyPolicy`:

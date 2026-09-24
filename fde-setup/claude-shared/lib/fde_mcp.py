@@ -1315,24 +1315,30 @@ def render_claude_permissions(servers, *, settings_by_name=None, health=None):
 
 
 def render_gemini(servers, *, settings_by_name=None, health=None, approved=()):
-    """Gemini CLI: streamable HTTP is `httpUrl`; `url` means SSE. Tool scope is
-    `includeTools` / `excludeTools` on the server entry itself."""
+    """Antigravity CLI workspace MCP shape.
+
+    Current Antigravity uses ``serverUrl`` for every remote transport.  Its
+    enforceable per-server filter is a deny list, so turn FDE's verified read
+    allowlist into the complement of the server's discovered tool set.  This
+    keeps a newly discovered mutation tool unavailable until the next explicit
+    ``fde mcp verify`` rather than silently widening the run.
+    """
     out = {}
     for name, server in servers.items():
         view = client_view(name, server, "gemini",
                            settings=(settings_by_name or {}).get(name), health=health,
                            approved_mutation=name in set(approved))
         entry = {}
-        if view["transport"] == "http":
-            entry["httpUrl"] = view["url"]
-        elif view["transport"] == "sse":
-            entry["url"] = view["url"]
+        if view["transport"] in ("http", "sse"):
+            entry["serverUrl"] = view["url"]
         else:
             entry["command"] = view["command"]
             if view["args"]:
                 entry["args"] = list(view["args"])
             if view["env"]:
                 entry["env"] = dict(view["env"])
+            if view.get("cwd"):
+                entry["cwd"] = view["cwd"]
         if view["httpHeaders"]:
             entry["headers"] = {header: "${%s}" % spec["envVar"]
                                 for header, spec in view["httpHeaders"].items()}
@@ -1340,9 +1346,38 @@ def render_gemini(servers, *, settings_by_name=None, health=None, approved=()):
             entry["timeout"] = int(view["startupTimeoutSeconds"]) * 1000
         tools = view["allowedTools"]
         if tools is not None:
-            entry["includeTools"] = list(tools)
+            discovered = {
+                tool.get("name") for tool in ((health or {}).get(name) or {}).get("tools", [])
+                if isinstance(tool, dict) and tool.get("name")
+            }
+            entry["disabledTools"] = sorted(discovered - set(tools))
         out[name] = entry
     return out
+
+
+def render_gemini_permissions(servers, *, settings_by_name=None, health=None):
+    """Headless Antigravity rules for web reads and verified MCP read tools.
+
+    MCP and URL access default to interactive approval in Antigravity.  A
+    headless FDE researcher cannot answer that prompt, so it receives an
+    isolated settings directory containing only these run-scoped grants.
+    Mutating browser actions and file writes stay explicitly denied.
+    """
+    allow = ["read_url(*)"]
+    for name, server in sorted(servers.items()):
+        view = client_view(name, server, "gemini",
+                           settings=(settings_by_name or {}).get(name), health=health)
+        tools = view["allowedTools"]
+        if tools is None:
+            allow.append(f"mcp({name}/*)")
+        else:
+            allow.extend(f"mcp({name}/{tool})" for tool in tools)
+    return {
+        "permissions": {
+            "allow": allow,
+            "deny": ["write_file(*)", "execute_url(*)", "unsandboxed(*)"],
+        }
+    }
 
 
 def toml_value(value):
@@ -1818,7 +1853,8 @@ __all__ = [
     "secret_fields", "public_fields", "child_environment", "missing_dependencies",
     "resolved_version", "missing_configuration", "enforceable_tools", "server_state",
     "status_record", "load_health", "save_health", "effective_servers", "client_view",
-    "render_claude", "render_claude_permissions", "render_gemini", "render_codex_block",
+    "render_claude", "render_claude_permissions", "render_gemini",
+    "render_gemini_permissions", "render_codex_block",
     "claude_launch_env", "effective_values", "field_visible",
     "generated_files", "generated_path", "verify_server", "gateway_available",
     "gateway_plan", "mutation_targets", "tool_is_mutation", "catalog_path",

@@ -1,0 +1,8 @@
+{
+  "upstream": "https://github.com/blader/humanizer",
+  "path": ".",
+  "commit": "9862685f575c65a8247f90369951df1b3416e3d6",
+  "license": "MIT",
+  "importedWith": "Codex skill-installer",
+  "adaptation": "Frontmatter description normalized to one quoted line for FDE."
+}

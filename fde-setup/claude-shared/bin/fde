@@ -6550,9 +6550,8 @@ def _run_mcp_options(run: Run, agent_id: str, agent: dict) -> list[str]:
             return []
         return ["--mcp-config", str(config), "--settings", str(settings)]
     if kind != "codex":
-        # Antigravity currently has only machine-global `agy mcp` management and
-        # no per-invocation config option. A role-scoped server must therefore
-        # remain absent rather than being enabled globally for a short window.
+        # Antigravity receives its binding through the run directory's
+        # workspace-local .agents/mcp_config.json rather than argv.
         return []
     _catalog, user_doc, health, chosen, _refused = run_mcp_effective(run, agent_id)
     options = []
@@ -6653,6 +6652,13 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
                 + context_options + options + mcp_options), env
     if kind == "gemini":
         env["FDE_ROUTED_INVOCATION"] = "1"
+        gemini_config = run.dir / ".agents" / "mcp_config.json"
+        gemini_settings = run.dir / "mcp" / "gemini-app-data" / "settings.json"
+        if gemini_config.is_file() and gemini_settings.is_file():
+            env.update(_run_mcp_env(run, agent_id))
+            env["FDE_GEMINI_WORKSPACE"] = str(run.dir)
+            env["FDE_GEMINI_PROJECT_DIR"] = str(pathlib.Path.cwd().resolve())
+            env["ANTIGRAVITY_APP_DATA_DIR"] = str(gemini_settings.parent)
         return ([_bin("ask-gemini"), "--task-file", str(task)]
                 + context_options + options), env
     if kind == "copilot-studio":

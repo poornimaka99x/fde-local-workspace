@@ -116,7 +116,7 @@ fi
 if [[ -n "${FDE_RUN_ID:-}" && "${FDE_ROUTED_INVOCATION:-}" != "1" ]]; then
   die "inside FDE run $FDE_RUN_ID, invoke the assigned Gemini identity through:
             fde invoke $FDE_RUN_ID <gemini-identity> <task-file> --stage <stage>
-       Direct sidecar calls bypass role checks and the run's evidence handoff."
+       Direct sidecar calls bypass role checks and the run-scoped MCP boundary."
 fi
 
 prompt="$(compose_prompt "$prompt" ${context_files[@]+"${context_files[@]}"})"
@@ -136,9 +136,29 @@ if [[ -n "$effort" && "$effort" != "auto" ]]; then
   esac
 fi
 
+# A governed run may provide a workspace-local MCP configuration. Antigravity
+# discovers it only from the active workspace, so enter that run directory and
+# add the caller's project back as read context. The controller also points
+# ANTIGRAVITY_APP_DATA_DIR at isolated, exact web/MCP permission rules; no
+# machine-global setting is edited.
+workspace_options=()
+if [[ -n "${FDE_GEMINI_WORKSPACE:-}" ]]; then
+  [[ "$FDE_GEMINI_WORKSPACE" == /* && -d "$FDE_GEMINI_WORKSPACE" ]] ||
+    die "the governed Gemini workspace is not an absolute directory"
+  [[ -f "$FDE_GEMINI_WORKSPACE/.agents/mcp_config.json" ]] ||
+    die "the governed Gemini workspace has no MCP configuration"
+  if [[ -n "${FDE_GEMINI_PROJECT_DIR:-}" && "$FDE_GEMINI_PROJECT_DIR" != "$FDE_GEMINI_WORKSPACE" ]]; then
+    [[ "$FDE_GEMINI_PROJECT_DIR" == /* && -d "$FDE_GEMINI_PROJECT_DIR" ]] ||
+      die "the governed Gemini project directory is not an absolute directory"
+    workspace_options+=(--add-dir "$FDE_GEMINI_PROJECT_DIR")
+  fi
+  cd "$FDE_GEMINI_WORKSPACE" || die "cannot enter the governed Gemini workspace"
+fi
+
 # The prompt is the value of -p and always the last argument, so a question that
 # begins with a dash is text and can never become a flag.
-"$AGY" ${options[@]+"${options[@]}"} --mode plan --sandbox --output-format text -p "$prompt"
+"$AGY" ${workspace_options[@]+"${workspace_options[@]}"} \
+  ${options[@]+"${options[@]}"} --mode plan --sandbox --output-format text -p "$prompt"
 rc=$?
 # 0 ok | non-zero: no response, or an error. agy reports the reason itself.
 [[ $rc -ne 0 ]] && echo "(agy exited $rc — run 'ask-gemini --check' if this looks like a sign-in problem)" >&2

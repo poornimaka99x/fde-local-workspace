@@ -5,7 +5,7 @@ Claude Code, Gemini CLI and Codex CLI all speak MCP, but each stores it
 somewhere different and in a different shape:
 
   Claude Code   <plugin>/.mcp.json          JSON  {"mcpServers": {...}}  type optional
-  Gemini CLI    ~/.gemini/settings.json     JSON  streamable HTTP is "httpUrl", not "url"
+  Antigravity   .agents/mcp_config.json     JSON  remote transports use "serverUrl"
   Codex CLI     ~/.codex/config.toml        TOML  [mcp_servers.<name>]
 
 GitHub Copilot is not part of this ecosystem. Nothing here reads or writes
@@ -30,10 +30,11 @@ Run-scoped servers never enter a global config. That is the point: there is no
 permanently privileged orchestrator identity, so a connector that speaks for the
 whole engagement must not be sitting in every profile waiting to be used.
 
-Antigravity currently has no safe per-invocation MCP configuration argument.
-FDE therefore does not write a misleading run-level Gemini config: the
-orchestrator retrieves the approved evidence and passes the exact bounded files
-through `fde invoke --context-file` instead.
+Antigravity has no per-invocation MCP flag, but it does support workspace-local
+`.agents/mcp_config.json`. FDE launches a Gemini specialist from the run
+directory and gives it the original project as an additional read context. Its
+web/MCP permissions live in an isolated app-data directory for that invocation,
+so neither the user's global MCP config nor global permission policy is widened.
 
   mcp-sync                      global targets only
   mcp-sync claude gemini        global, restricted to those CLIs
@@ -79,9 +80,8 @@ KIND_TARGET = {"claude": "claude", "codex": "codex", "gemini": "gemini"}
 #
 #   codex   `enabled_tools` on the [mcp_servers.<name>] table — user config or
 #           per-invocation override, so global and run-scoped both work.
-#   gemini  `includeTools` on the settings.json entry — but FDE reaches Gemini
-#           through `agy mcp add`, which has no place to put it, so only the
-#           legacy settings.json path can enforce anything.
+#   gemini  `disabledTools` on a workspace-local mcp_config.json entry. FDE
+#           derives it from the complement of the verified read-tool allowlist.
 #   claude  permission rules, not `.mcp.json`. A run-scoped binding ships its own
 #           settings file alongside the MCP config; a plugin-level global
 #           `.mcp.json` has nowhere to carry one.
@@ -225,9 +225,9 @@ def sync_global(catalog, user_doc, health, only, dry, report, profile=None):
                 installed = []
                 for name in sorted(manageable):
                     entry, server = manageable[name], usable[name]
-                    if entry.get("httpUrl") or entry.get("url"):
+                    if entry.get("serverUrl"):
                         argv = [agy, "mcp", "add", "--type", "http", name,
-                                entry.get("httpUrl") or entry["url"]]
+                                entry["serverUrl"]]
                     else:
                         argv = [agy, "mcp", "add", name, entry["command"],
                                 *[str(value) for value in entry.get("args", [])]]
@@ -346,18 +346,18 @@ def sync_run(catalog, user_doc, health, run_id, dry, report, profile=None):
                 {"server": names, "target": str(kind), "state": mcp.BLOCKED,
                  "reason": f"no MCP surface for kind '{kind}'"})
             continue
-        if kind == "gemini":
-            names = ", ".join(sorted(selected))
-            reason = ("Antigravity has no per-invocation MCP config; retrieve the approved "
-                      "evidence through the orchestrator and pass it with "
-                      "fde invoke --context-file")
-            print(f"  handoff {names} for {aid}: {reason}")
-            report.setdefault("skipped", []).append(
-                {"server": names, "target": "gemini", "identity": aid,
-                 "state": mcp.BLOCKED, "reason": reason})
-            continue
         maps = settings_map(catalog, user_doc, selected)
-        if kind == "claude":
+        if kind == "gemini":
+            workspace_config = run_dir / ".agents" / "mcp_config.json"
+            commit(workspace_config, {
+                "mcpServers": mcp.render_gemini(
+                    selected, settings_by_name=maps, health=health)
+            }, dry, "run", report, mode=0o600)
+            app_data = out_dir / "gemini-app-data"
+            commit(app_data / "settings.json", mcp.render_gemini_permissions(
+                selected, settings_by_name=maps, health=health),
+                dry, "run", report, mode=0o600)
+        elif kind == "claude":
             profile_name = a.get("profile", aid)
             p = out_dir / f"claude-{profile_name}.mcp.json"
             cfg = read_json(p, {})
@@ -431,10 +431,17 @@ def prune_stale(out_dir, bindings, agents, dry, report):
         elif kind == "codex":
             has_live_binding = True
             keep.add("codex.toml")
+        elif kind == "gemini":
+            has_live_binding = True
+            keep.add("gemini-app-data")
     if has_live_binding:
         keep.add("README.md")
     for path in sorted(out_dir.iterdir()):
-        if not path.is_file() or path.name in keep:
+        if path.name in keep:
+            continue
+        if path.is_dir():
+            continue
+        if not path.is_file():
             continue
         if not (path.name.startswith("claude-") or
                 path.name in ("gemini.json", "codex.toml", "README.md")):
@@ -446,6 +453,16 @@ def prune_stale(out_dir, bindings, agents, dry, report):
             path.unlink()
             print(f"  removed run      {path.name} (no longer applicable)")
             report.setdefault("removed", []).append(str(path))
+    workspace_config = out_dir.parent / ".agents" / "mcp_config.json"
+    if not any((agents.get(aid) or {}).get("kind") == "gemini" for aid in bindings):
+        if workspace_config.is_file():
+            if dry:
+                print("  would remove run      .agents/mcp_config.json (no longer applicable)")
+                report.setdefault("wouldRemove", []).append(str(workspace_config))
+            else:
+                workspace_config.unlink()
+                print("  removed run      .agents/mcp_config.json (no longer applicable)")
+                report.setdefault("removed", []).append(str(workspace_config))
 
 
 def run_readme(run_id, out_dir, effective, catalog):

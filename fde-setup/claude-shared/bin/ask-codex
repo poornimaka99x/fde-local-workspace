@@ -14,7 +14,8 @@
 # and consumed here, once, immediately before the process starts.
 #
 # Codex's sandbox decides what it CAN touch. The gate is outer (this script +
-# fde) and the sandbox is bounded (workspace-write, network off). `codex exec`
+# fde). Read mode uses a read-only permission profile with network access for
+# research; write mode remains workspace-write with network off. `codex exec`
 # is non-interactive by default; never pass an auto-approval or sandbox-bypass
 # option here.
 #
@@ -175,7 +176,10 @@ if [[ "$mode" == "read" ]]; then
   fi
   [[ -n "${prompt// }" ]] || die "nothing to ask"
   exec codex exec \
-    --sandbox read-only \
+    -c 'default_permissions="fde-readonly-network"' \
+    -c 'permissions.fde-readonly-network.extends=":read-only"' \
+    -c 'permissions.fde-readonly-network.network.enabled=true' \
+    -c 'web_search="live"' \
     --skip-git-repo-check \
     ${model_options[@]+"${model_options[@]}"} \
     ${config_options[@]+"${config_options[@]}"} \

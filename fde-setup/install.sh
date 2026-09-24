@@ -107,6 +107,9 @@ PRESERVE=(
   # Plugins you imported yourself, and the trees kept so an update can be rolled
   # back. Neither is toolkit material and neither is ours to replace.
   "fde-toolkit/plugins/.versions/*"
+  # The repository seeds reviewed user skills, but locally authored additions
+  # and edits remain operator-owned across updates.
+  "fde-toolkit/plugins/fde-user/*"
 )
 CONFIRM=(
   "config/agents.json"          # you may add or relabel identities
@@ -302,7 +305,7 @@ if [[ "$MODE" == "install" ]]; then
     say "installing FDE plugins into profile: $p"
     if (( ! DRY )); then
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$SHARED/fde-toolkit" 2>/dev/null || true
-      for plugin in fde-core code-simplifier ponytail; do
+      for plugin in fde-core code-simplifier fde-user ponytail; do
         CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" 2>/dev/null || \
           note "($plugin install needs an interactive session first — run 'cc-$p' and use /plugin)"
       done
@@ -321,7 +324,7 @@ else
       fi
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace update fde-toolkit \
         >/dev/null 2>&1 || note "($p marketplace refresh skipped — register fde-toolkit in that profile first)"
-      for plugin in fde-core code-simplifier ponytail; do
+      for plugin in fde-core code-simplifier fde-user ponytail; do
         CLAUDE_CONFIG_DIR="$dir" claude plugin update "$plugin@fde-toolkit" \
           >/dev/null 2>&1 || true
       done

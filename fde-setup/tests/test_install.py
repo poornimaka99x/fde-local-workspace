@@ -91,7 +91,7 @@ class InstallScriptTest(unittest.TestCase):
     def test_a_fresh_install_registers_every_shipped_plugin(self):
         self.run_install("work", with_claude=True)
         calls = (self.home / "claude-calls.log").read_text()
-        for plugin in ("fde-core", "code-simplifier", "ponytail"):
+        for plugin in ("fde-core", "code-simplifier", "fde-user", "ponytail"):
             self.assertIn(f"plugin install {plugin}@fde-toolkit", calls)
         installed_skills = (
             self.home / ".claude-shared" / "fde-toolkit" / "plugins"
@@ -100,13 +100,20 @@ class InstallScriptTest(unittest.TestCase):
         for skill in ("eli5", "brag"):
             self.assertTrue((installed_skills / skill / "SKILL.md").is_file())
             self.assertTrue((installed_skills / skill / "SOURCE.json").is_file())
+        user_skills = (
+            self.home / ".claude-shared" / "fde-toolkit" / "plugins"
+            / "fde-user" / "skills"
+        )
+        for skill in ("humanizer", "i-have-adhd"):
+            self.assertTrue((user_skills / skill / "SKILL.md").is_file())
+            self.assertTrue((user_skills / skill / "SOURCE.json").is_file())
 
     def test_an_update_refreshes_existing_profile_plugin_caches(self):
         (self.home / ".claude-profiles" / "work").mkdir(parents=True)
         self.run_install("--update", "--yes", "work", with_claude=True)
         calls = (self.home / "claude-calls.log").read_text()
         self.assertIn("plugin marketplace update fde-toolkit", calls)
-        for plugin in ("fde-core", "code-simplifier", "ponytail"):
+        for plugin in ("fde-core", "code-simplifier", "fde-user", "ponytail"):
             self.assertIn(f"plugin update {plugin}@fde-toolkit", calls)
 
 

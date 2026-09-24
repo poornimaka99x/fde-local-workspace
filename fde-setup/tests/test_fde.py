@@ -38,6 +38,7 @@ sandbox="unset"
 prev=""
 for a in "$@"; do
   [[ "$prev" == "--sandbox" ]] && sandbox="$a"
+  [[ "$a" == 'default_permissions="fde-readonly-network"' ]] && sandbox="read-only"
   prev="$a"
 done
 
@@ -533,13 +534,14 @@ class TestCodexGate(FDETest):
         r = self.sb.ask_codex("--read-only", "have a look",
                               CODEX_TRY_WRITE=str(victim))
         self.assertEqual(victim.read_text(), "original")
-        self.assertIn("--sandbox read-only", self.sb.codex_calls())
+        self.assertIn('default_permissions="fde-readonly-network"', self.sb.codex_calls())
+        self.assertIn('web_search="live"', self.sb.codex_calls())
         self.assertIn("refusing to write", r.stderr)
 
     def test_read_only_argv_is_bounded(self):
         self.sb.ask_codex("--read-only", "hello")
         calls = self.sb.codex_calls()
-        self.assertIn("--sandbox read-only", calls)
+        self.assertIn('default_permissions="fde-readonly-network"', calls)
         self.assertNotIn("--approve-for-me", calls)
 
     def test_read_only_accepts_only_bounded_mcp_config_overrides(self):

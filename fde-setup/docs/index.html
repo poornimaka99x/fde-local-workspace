@@ -1612,7 +1612,7 @@ fde routing override &lt;run-id&gt; <span class="kw">--task-id</span> &lt;id&gt;
         </div>
         <div class="panel">
           <h4>Offered only where it can be enforced</h4>
-          <p>Codex chats get an explicit allowlist of read-only tools in a read-only sandbox. Claude chats get a connection only when every tool it offers reads. Gemini chats get none — its CLI cannot load per-chat MCP config, and FLOW will not widen the machine-global setting to fake it.</p>
+          <p>Codex chats get explicit read-only network and MCP permissions. Claude chats get a connection only when every tool it offers reads. Gemini chats run in an isolated workspace with run-scoped MCP configuration and exact read-only web and MCP permissions.</p>
         </div>
         <div class="panel">
           <h4>Its own storage and its own bin</h4>

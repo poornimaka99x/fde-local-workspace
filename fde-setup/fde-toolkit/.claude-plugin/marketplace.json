@@ -15,6 +15,11 @@
       "description": "End-to-end FDE toolkit with per-run roles, product/design/delivery workflows, GitHub and Bitbucket PR review, TDD and evidence checkpoints, bounded context and learning, harness audits, deployment and observability."
     },
     {
+      "name": "fde-user",
+      "source": "./plugins/fde-user",
+      "description": "User-defined and externally installed skills managed by FDE."
+    },
+    {
       "name": "ponytail",
       "source": "./plugins/ponytail",
       "description": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions."

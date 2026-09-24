@@ -247,7 +247,7 @@ Edit `~/.claude-shared/mcp/mcp-servers.json`, run `mcp-sync`:
 
 ```
 Claude Code   <plugin>/.mcp.json          type optional, stdio inferred
-Gemini CLI    ~/.gemini/settings.json     streamable HTTP is "httpUrl", not "url"
+Gemini CLI    ~/.gemini/settings.json     remote transports use "serverUrl"
 Codex CLI     ~/.codex/config.toml        TOML, [mcp_servers.<name>]
 ```
 

@@ -233,6 +233,27 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
             self.assertIn("fde invoke run-123", result.stderr)
             self.assertNotIn("should-not-run", result.stdout)
 
+    def test_governed_gemini_call_loads_the_run_workspace_and_original_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "run"
+            project = root / "project"
+            (workspace / ".agents").mkdir(parents=True)
+            project.mkdir()
+            (workspace / ".agents/mcp_config.json").write_text('{"mcpServers":{}}')
+            stub = root / "agy"
+            stub.write_text('#!/usr/bin/env bash\nprintf "CWD=%s\\n" "$PWD"\nprintf "ARGV=%s\\n" "$*"\n')
+            stub.chmod(0o755)
+            result = sh(SHARED / "bin" / "ask-gemini", "research this",
+                        env={"PATH": f"{tmp}:{os.environ['PATH']}",
+                             "FDE_RUN_ID": "run-123",
+                             "FDE_ROUTED_INVOCATION": "1",
+                             "FDE_GEMINI_WORKSPACE": str(workspace),
+                             "FDE_GEMINI_PROJECT_DIR": str(project)}, expected=0)
+            self.assertIn(f"CWD={workspace}", result.stdout)
+            self.assertIn(f"--add-dir {project}", result.stdout)
+            self.assertIn("--mode plan --sandbox", result.stdout)
+
     def test_write_mode_prompt_is_not_wrapped(self):
         # The approval is hash-bound to the task file: what Codex is told in
         # write mode must be exactly what the user approved.
