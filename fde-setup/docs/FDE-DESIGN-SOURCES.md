@@ -1,6 +1,6 @@
 # Vendored design sources — provenance and audit
 
-Three third-party repositories feed the design panel. All three are **data**:
+Four third-party repositories feed the design panel. All four are **data**:
 pinned to an immutable commit, filtered against an explicit allowlist, hashed,
 and imported without executing anything from them. Instructions written inside
 an upstream document have no authority here; the sealed context says so to the
@@ -17,6 +17,7 @@ Everything below is recorded machine-readably in
 | [voltagent/awesome-design-md](https://github.com/voltagent/awesome-design-md) | MIT | `8147538b4226ae41e2487a9179e3bcc1f68e8554` | 2026-07-31 | 76 files, 2.2 MB | 2026-09-06 |
 | [leonxlnx/taste-skill](https://github.com/leonxlnx/taste-skill) | MIT | `ccbc15639c97057cbfcf32ecebc38ef716e4bb37` | 2026-08-24 | 5 files, 144 KB | 2026-09-06 |
 | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 | `831cabee8b4bc1a2b66e5ae22003e9a19b57d464` | 2026-09-05 | 9 files, 95 KB | 2026-09-06 |
+| [emilkowalski/skills](https://github.com/emilkowalski/skills) | MIT | `d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128` | 2026-09-24 | 10 files | 2026-09-25 |
 
 Licences were verified **at those commits**, not from a README claim: each
 upstream `LICENSE` is vendored beside the content it covers, Impeccable's
@@ -118,6 +119,20 @@ approval, because those are typed by a person and recorded in the run ledger.
 Impeccable's `PRODUCT.md` (product truth) and `DESIGN.md` (visual direction) stay
 separate concepts, and FDE overwrites neither if a project already has one.
 
+### emilkowalski/skills — design-panel guidance, not an execution layer
+
+Imported as an optional `emil-design` guidance pack: `emil-design-eng`,
+`animate`, `apple-design`, `find-animation-opportunities`,
+`improve-animations`, `mobile-native`, `prototype`, and `review-animations`.
+Their YAML frontmatter is removed and an FDE authority notice is prepended.
+They contribute UI-polish and motion judgement during solutioning, focused
+motion review during review, and a bounded polish reminder during
+reconciliation.
+
+Not imported: the Sonner- and Swift-specific skills, setup tooling, or any
+executable content. The pack can advise a panel but cannot write a repository,
+publish to Figma, or widen the panel's connector scope.
+
 ## Supply-chain rules this integration follows
 
 - Pinned to an immutable commit SHA in a checked-in lock. No moving branch, and
@@ -169,3 +184,5 @@ never replaced silently), and re-runs the audit afterwards.
   skill document adapted as described above. Impeccable's own `NOTICE.md`
   (covering platform-design material derived from ehmo's
   `platform-design-skills`, MIT) is vendored alongside it.
+- Emil Kowalski Skills © Emil Kowalski, MIT. Selected design and motion skill
+  documents are vendored with frontmatter removed and an FDE notice added.

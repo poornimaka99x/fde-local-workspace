@@ -82,8 +82,9 @@ web page. What it is not: a service, a shared tool, or anything with an account.
   no way to assign a role, approve a plan, grant a Codex write, deploy or
   publish, and adds none.
 - The console can now run design-panel participants: real Claude processes,
-  one per participant, up to three at a time. They have no tools, no MCP and no
-  write path, and the controller decides which of them may start — but they do
+  one per participant, up to three at a time. They have no built-in file or
+  shell tools; only generated Figma/Playwright MCP scope may be exposed, with
+  no repository write path, and the controller decides which may start — but they do
   spend the operator's provider usage, and a stopped participant is a killed
   process rather than a cancelled request.
 - A design panel adds no approval and removes none. Plan approval, role

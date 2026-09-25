@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { GuiConfig } from '../config'
 import type { AccountService } from './accounts'
@@ -294,7 +296,8 @@ export class DesignPanelService {
       throw error
     }
     this.watcher.touch()
-    void this.execute(runId, started.participantId, account.id, started.model, started.effort,
+    void this.execute(runId, started.participantId, account.id,
+      String(started.profile ?? account.profile), started.model, started.effort,
       started.prompt, started.mediaPaths)
     return await this.show(runId)
   }
@@ -303,6 +306,7 @@ export class DesignPanelService {
     runId: string,
     participantId: string,
     accountId: string,
+    profile: string,
     model: string,
     effort: string,
     prompt: string,
@@ -314,7 +318,7 @@ export class DesignPanelService {
     let command: RunningPanelCommand
     try {
       const media = await this.accounts.mediaSupport()
-      const args = this.claudeArgs(prompt, model, effort)
+      const args = this.claudeArgs(prompt, model, effort, runId, profile)
       if (media.support === 'file' && media.flag !== null) {
         for (const file of mediaPaths) args.push(media.flag, file)
       }
@@ -359,20 +363,55 @@ export class DesignPanelService {
     }
   }
 
-  private claudeArgs(prompt: string, model: string, effort: string): string[] {
-    // The same restricted surface a general chat gets: a conversation, with no
-    // tools, no MCP, no slash commands and plan-only permissions. A participant
-    // cannot touch the repository even if its prompt told it to.
+  private panelMcp(runId: string, profile: string): { options: string[]; tools: string[] } {
+    if (!/^[A-Za-z0-9._-]{1,200}$/.test(runId) || !/^[a-z][a-z0-9_-]{0,39}$/.test(profile)) {
+      return { options: [], tools: [] }
+    }
+    const mcpDir = path.join(this.config.runsRoot, runId, 'mcp')
+    const config = path.join(mcpDir, `claude-${profile}.mcp.json`)
+    const settings = path.join(mcpDir, `claude-${profile}.settings.json`)
+    if (!existsSync(config) || !existsSync(settings)) return { options: [], tools: [] }
+    try {
+      const parsed = JSON.parse(readFileSync(settings, 'utf8')) as {
+        permissions?: { allow?: unknown }
+      }
+      const allow = Array.isArray(parsed.permissions?.allow) ? parsed.permissions.allow : []
+      // Keep built-in file, shell and web tools unavailable. The panel receives
+      // only the two run-scoped design evidence surfaces the operator requested.
+      const tools = allow.filter((item): item is string =>
+        typeof item === 'string' && /^mcp__(figma|playwright)(?:__|$)/.test(item))
+      if (tools.length === 0) return { options: [], tools: [] }
+      return { options: ['--mcp-config', config, '--settings', settings], tools }
+    } catch {
+      // A malformed or incomplete scope fails closed to the original tool-less
+      // panel instead of widening access.
+      return { options: [], tools: [] }
+    }
+  }
+
+  private claudeArgs(
+    prompt: string,
+    model: string,
+    effort: string,
+    runId: string,
+    profile: string,
+  ): string[] {
+    // The process remains restricted, plan-only and unable to use built-in
+    // repository or shell tools. When mcp-sync generated an enforceable scope,
+    // it may inspect Figma and an isolated Playwright browser through those MCP
+    // tools only; missing or malformed scope falls back to no tools.
+    const mcp = this.panelMcp(runId, profile)
     const args = [
       '--print', prompt,
       '--output-format', 'json',
       '--permission-mode', 'plan',
       '--permission-prompts', 'none',
-      '--tools', '',
+      '--tools', ...(mcp.tools.length > 0 ? mcp.tools : ['']),
       '--restricted',
       '--strict-mcp-config',
       '--no-chrome',
       '--disable-slash-commands',
+      ...mcp.options,
     ]
     if (model !== 'default') args.push('--model', model)
     if (effort !== 'auto') args.push('--effort', effort)
@@ -466,14 +505,15 @@ export class DesignPanelService {
         'The orchestrator account for this run is not configured on this machine.')
       return await this.show(runId)
     }
-    void this.executeReconciliation(runId, account.id, started.model, started.effort,
-      started.prompt)
+    void this.executeReconciliation(runId, account.id,
+      String(started.profile ?? account.profile), started.model, started.effort, started.prompt)
     return await this.show(runId)
   }
 
   private async executeReconciliation(
     runId: string,
     accountId: string,
+    profile: string,
     model: string,
     effort: string,
     prompt: string,
@@ -483,7 +523,7 @@ export class DesignPanelService {
     try {
       command = this.runCommand({
         file: this.config.claudeBin,
-        args: this.claudeArgs(prompt, model, effort),
+        args: this.claudeArgs(prompt, model, effort, runId, profile),
         cwd: this.config.sharedRoot,
         env: this.accounts.profileEnv(accountId),
       })

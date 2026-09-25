@@ -957,7 +957,7 @@ class GuidancePacks(PanelTestCase):
     def test_the_vendored_packs_describe_what_they_change(self):
         packs = {pack["packId"]: pack
                  for pack in self.json_fde("design-panel", "packs", "--json")["packs"]}
-        self.assertEqual(set(packs), {"taste", "impeccable"})
+        self.assertEqual(set(packs), {"taste", "impeccable", "emil-design"})
         self.assertEqual(packs["taste"]["license"], "MIT")
         self.assertEqual(packs["impeccable"]["license"], "Apache-2.0")
         self.assertEqual(packs["taste"]["stability"], "experimental")
@@ -1086,7 +1086,8 @@ class VendoredSourceIntegrity(PanelTestCase):
             (TOOLKIT / "vendor" / "design-sources.lock.json").read_text())
         self.assertEqual(lock["schemaVersion"], 1)
         self.assertEqual(set(lock["sources"]),
-                         {"awesome-design-md", "taste-skill", "impeccable"})
+                         {"awesome-design-md", "taste-skill", "impeccable",
+                          "emilkowalski-skills"})
         for name, source in lock["sources"].items():
             self.assertRegex(source["commit"], r"^[0-9a-f]{40}$", name)
             self.assertIn(source["license"], ("MIT", "Apache-2.0"), name)

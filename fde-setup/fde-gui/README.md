@@ -193,7 +193,8 @@ The rules it is built to:
   authenticated through AWS credentials.
 - **A design panel is the controller's, not the console's.** Every panel fact
   comes from `fde design-panel … --json`. The console asks for a participant's
-  prompt, runs that one account under its own profile with all tools disabled,
+  prompt, runs that one account under its own profile with built-in tools disabled
+  and only the run-generated Figma/Playwright MCP scope when available,
   and hands the answer back to `fde design-panel record`. It composes no prompt,
   writes nothing under `artifacts/design-panel/`, never returns a prompt to the
   browser, and never logs provider output — only an exit code. Three

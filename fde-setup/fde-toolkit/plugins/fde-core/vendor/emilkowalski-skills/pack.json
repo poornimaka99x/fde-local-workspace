@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "packId": "emil-design",
+  "label": "Emil Design Engineering",
+  "source": "emilkowalski-skills",
+  "sourceUrl": "https://github.com/emilkowalski/skills",
+  "commit": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+  "license": "MIT",
+  "stability": "stable",
+  "changes": [
+    "Adds UI-polish and component-design judgement to concept generation.",
+    "Adds purposeful motion, native-mobile and Apple interaction guidance where relevant.",
+    "Adds a strict animation review lens without granting repository-write authority."
+  ],
+  "conflictsWith": [],
+  "documents": {
+    "designEngineering": "guidance/emil-design-eng.md",
+    "animate": "guidance/animate.md",
+    "appleDesign": "guidance/apple-design.md",
+    "findMotion": "guidance/find-animation-opportunities.md",
+    "improveMotion": "guidance/improve-animations.md",
+    "mobileNative": "guidance/mobile-native.md",
+    "prototype": "guidance/prototype.md",
+    "reviewMotion": "guidance/review-animations.md"
+  },
+  "phases": {
+    "solutioning": {
+      "documents": [
+        "designEngineering",
+        "animate",
+        "appleDesign",
+        "findMotion",
+        "mobileNative",
+        "prototype"
+      ],
+      "maxBytes": 30000
+    },
+    "review": {
+      "documents": [
+        "reviewMotion",
+        "improveMotion"
+      ],
+      "maxBytes": 22000
+    },
+    "reconciliation": {
+      "documents": [
+        "designEngineering"
+      ],
+      "maxBytes": 8000
+    }
+  }
+}

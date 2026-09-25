@@ -337,7 +337,7 @@
       "preferOver": ["reimplementing spacing and colour from a screenshot"],
       "doNotUseWhen": "The run has no design stage, or the question is answerable from the design system documentation already in the repository.",
       "gateway": { "docker": "client-delivery" },
-      "note": "Official remote Figma MCP server. Run-scoped to the selected UI/UX designer, orchestrator or assigned reviewer after plan approval; OAuth remains in that provider's MCP client. Reading is allowed within the approved plan. Any canvas write or transfer of a reconciled design requires fde approve-publish <run-id> figma. The isolated design-panel runner still disables tools, so panel participants produce governed proposals rather than racing on one canvas."
+      "note": "Official remote Figma MCP server. Run-scoped to the selected UI/UX designer, orchestrator or assigned reviewer after plan approval; OAuth remains in that provider's MCP client. Reading is allowed within the approved plan. Any canvas write or transfer of a reconciled design requires fde approve-publish <run-id> figma. Design-panel participants receive only the generated Figma and isolated Playwright MCP tool scope; built-in file and shell tools remain unavailable."
     },
 
     "dbhub": {

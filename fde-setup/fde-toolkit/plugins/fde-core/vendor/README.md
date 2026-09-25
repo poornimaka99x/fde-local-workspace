@@ -10,6 +10,7 @@ standing against this toolkit's plan, role and approval gates.
 | [awesome-design-md](https://github.com/voltagent/awesome-design-md) | MIT | Catalog of design-language references the operator may select from |
 | [taste-skill](https://github.com/leonxlnx/taste-skill) | MIT | Optional visual-direction guidance pack with three dials |
 | [impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 | Optional shaping, critique, audit and polish guidance |
+| [emilkowalski/skills](https://github.com/emilkowalski/skills) | MIT | Optional UI-polish, motion, mobile and design-review guidance |
 
 `design-sources.lock.json` records, per source: the upstream URL, the pinned
 commit and its date, the SPDX identifier, the imported paths, the review date

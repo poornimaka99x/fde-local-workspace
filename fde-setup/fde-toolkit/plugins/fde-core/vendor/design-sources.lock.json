@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-06T12:39:42+00:00",
+  "generatedAt": "2026-09-25T12:33:41+00:00",
   "sources": {
     "awesome-design-md": {
       "sourceUrl": "https://github.com/voltagent/awesome-design-md",
@@ -693,6 +693,96 @@
           "upstreamPath": "(generated)",
           "bytes": 2050,
           "sha256": "41b37c52647f3ab377393abbf572489f0c71568d849f899afada917a65d1ddd7",
+          "adapted": true
+        }
+      ]
+    },
+    "emilkowalski-skills": {
+      "sourceUrl": "https://github.com/emilkowalski/skills",
+      "commit": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+      "commitDate": "2026-09-24T01:18:27+02:00",
+      "license": "MIT",
+      "licenseFile": "emilkowalski-skills/LICENSE",
+      "role": "Optional UI-polish, motion, mobile and design-review guidance for design panels.",
+      "importedPaths": [
+        "LICENSE",
+        "skills/{emil-design-eng,animate,apple-design,find-animation-opportunities,improve-animations,mobile-native,prototype,review-animations}/SKILL.md"
+      ],
+      "reviewedAt": "2026-09-25",
+      "reviewNote": "Markdown design skills only. Imported UI-polish, motion, mobile, prototype and review guidance as inert panel data. Implementation-specific Sonner and Swift skills, supporting scripts and generated assets are not imported or executed.",
+      "adapterVersion": "1.0.0",
+      "fileCount": 10,
+      "totalBytes": 116851,
+      "treeSha256": "3473a96889d1446e191680ef3476976d9b09e131b3ecd46be9b4b4a04b1d747f",
+      "files": [
+        {
+          "path": "emilkowalski-skills/LICENSE",
+          "upstreamPath": "LICENSE",
+          "bytes": 1070,
+          "sha256": "4ff5bdb7887ec1435c9cab0e8d1a7caee704d894d65c2a008ccc68b1cc2f260b",
+          "adapted": false
+        },
+        {
+          "path": "emilkowalski-skills/guidance/animate.md",
+          "upstreamPath": "skills/animate/SKILL.md",
+          "bytes": 11926,
+          "sha256": "802de55780396884f2008e05bd8bc89ba79aca0fe41bc17b07ced4e462b5b74e",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/apple-design.md",
+          "upstreamPath": "skills/apple-design/SKILL.md",
+          "bytes": 23146,
+          "sha256": "9a7547eef724fe5476190ad3137452e430a4fff2c955f5441d770175037f9d1e",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/emil-design-eng.md",
+          "upstreamPath": "skills/emil-design-eng/SKILL.md",
+          "bytes": 27500,
+          "sha256": "f59276032450ba243d1e1fdb8061e799ce433d44b12582061eedb54bd48da288",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/find-animation-opportunities.md",
+          "upstreamPath": "skills/find-animation-opportunities/SKILL.md",
+          "bytes": 9969,
+          "sha256": "f53f8a2c2ece7465bbf6da06ddf5123217972b14656cd4f67060e91368fd9862",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/improve-animations.md",
+          "upstreamPath": "skills/improve-animations/SKILL.md",
+          "bytes": 8288,
+          "sha256": "f024a92bf8a16cf2388fc82da4a38c35bc69a481c97f5fe435059c030ad3dd30",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/mobile-native.md",
+          "upstreamPath": "skills/mobile-native/SKILL.md",
+          "bytes": 16632,
+          "sha256": "ed9b9517e4a92449b5ff0f7de2438661adc7f1e797d1ec867e9cadd8f178c9de",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/prototype.md",
+          "upstreamPath": "skills/prototype/SKILL.md",
+          "bytes": 8095,
+          "sha256": "3b7b041a90f636c60ee2800dcd6989d9a6884a539723888a9c641ac65ad99a35",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/guidance/review-animations.md",
+          "upstreamPath": "skills/review-animations/SKILL.md",
+          "bytes": 8747,
+          "sha256": "3bd41b84dae0b60aad135f1c455516316e88caa0d233702e408adcb1356895d8",
+          "adapted": true
+        },
+        {
+          "path": "emilkowalski-skills/pack.json",
+          "upstreamPath": "(generated)",
+          "bytes": 1478,
+          "sha256": "6df496a1e0611ded3aad6e82bd8ab8c8c1e8215363d4103ccb5072d7e8afdfa6",
           "adapted": true
         }
       ]

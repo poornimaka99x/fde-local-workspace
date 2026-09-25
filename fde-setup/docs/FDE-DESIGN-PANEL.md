@@ -26,9 +26,11 @@ Everything else is unchanged and deliberately so:
   and one run, and shows up in both histories.
 - **Credentials never move.** Each participant runs under its own
   `CLAUDE_CONFIG_DIR`; no profile's environment is merged with another's.
-- **Concept generation writes nothing but the run.** Participants run with all
-  tools disabled. Implementation remains a separate stage behind its own
-  approval.
+- **Concept generation writes nothing but the run.** Participants have no
+  built-in file or shell tools. When the approved run generated Figma and
+  Playwright MCP bindings, they receive only those tools for design evidence
+  and isolated browser inspection. Implementation remains a separate stage
+  behind its own approval.
 
 ## Starting one
 
@@ -275,9 +277,10 @@ what was recorded stays recorded.
   and it authorises no repository write.
 - The console runs the accounts; the controller owns the record. If the console
   is not running, nothing progresses — and nothing is lost.
-- Participants have no tools. They cannot read the repository themselves; they
-  see what you sealed into the context and nothing else. That is the trade for
-  the guarantee that concept generation writes nothing.
+- Participants have no built-in file or shell tools. They cannot read or modify
+  the repository themselves; they see the sealed context and may inspect only
+  the run-scoped Figma/Playwright evidence surfaces when available. That is the
+  trade for the guarantee that concept generation writes nothing.
 - The reconciliation is one model call with a required shape. It is evidence
   and a recommendation, not an approval: implementation, publication and
   deployment keep their own gates.

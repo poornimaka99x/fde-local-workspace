@@ -11904,9 +11904,11 @@ def build_common_context(run: Run, panel, selection, sealed):
     add(f"\nOutput target: **{panel['outputTarget']}**. "
         f"Collaboration: **{panel['mode']}**.\n")
     add("\nThis is a governed FDE run. You are producing a design proposal as a "
-        "document. Do not modify any repository, do not run a build, do not "
-        "publish anything and do not call an external system: implementation is "
-        "a separate stage behind its own approval.\n")
+        "document. Do not modify any repository, do not run a build and do not "
+        "publish or mutate an external system: implementation is a separate stage "
+        "behind its own approval. When the runner supplies run-scoped Figma or "
+        "Playwright MCP tools, use them only to inspect design evidence and an "
+        "isolated browser; their presence grants no write or publication authority.\n")
     add(f"\n{UNTRUSTED_CONTEXT_NOTICE}\n")
     add("\n<shared-context>\n")
 

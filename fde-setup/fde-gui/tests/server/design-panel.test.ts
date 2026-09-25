@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { authed, makeHarness, type Harness } from './harness'
 import type { PanelCommandRunner, RunningPanelCommand } from '../../server/src/services/design-panel'
 
@@ -419,12 +421,51 @@ describe('running participants', () => {
     expect(call.env.CLAUDE_PROFILE).toBe('msc')
     expect(call.env.FDE_TEST_PANEL_SECRET).toBeUndefined()
     expect(Object.keys(call.env)).not.toContain('AWS_SECRET_ACCESS_KEY')
-    // A conversation, not a session with tools: it cannot touch a repository.
+    // No generated MCP scope means no tools at all: it cannot touch a repository.
     expect(call.args).toContain('--tools')
     expect(call.args[call.args.indexOf('--tools') + 1]).toBe('')
     expect(call.args).toContain('--restricted')
     expect(call.args).toContain('--strict-mcp-config')
     expect(call.args).toContain('--permission-mode')
+  })
+
+  it('exposes only run-scoped Figma and Playwright tools when mcp-sync generated them', async () => {
+    const started: Started[] = []
+    harness = await makePanelHarness({ panelRunner: recordingRunner(started) })
+    harness.fixture(`design-panel-show-${RUN}`, panelEnvelope())
+    startFixture(harness, RUN, 'claude_msc')
+    const mcp = path.join(harness.config.runsRoot, RUN, 'mcp')
+    mkdirSync(mcp, { recursive: true })
+    writeFileSync(path.join(mcp, 'claude-msc.mcp.json'), JSON.stringify({
+      mcpServers: {
+        figma: { type: 'http', url: 'https://mcp.figma.com/mcp' },
+        playwright: { command: 'npx', args: ['-y', '@playwright/mcp@0.0.80'] },
+        atlassian: { type: 'http', url: 'https://mcp.atlassian.com/v2/mcp' },
+      },
+    }))
+    writeFileSync(path.join(mcp, 'claude-msc.settings.json'), JSON.stringify({
+      permissions: {
+        allow: [
+          'mcp__figma',
+          'mcp__playwright__browser_snapshot',
+          'mcp__atlassian__getJiraIssue',
+        ],
+        deny: [],
+      },
+    }))
+
+    await post(harness, `/api/runs/${RUN}/design-panel/participants/claude_msc/start`)
+    await settle(() => started.length === 1, 'the MCP-scoped account to be started')
+
+    const args = started[0]!.args
+    expect(args).toEqual(expect.arrayContaining([
+      '--mcp-config', path.join(mcp, 'claude-msc.mcp.json'),
+      '--settings', path.join(mcp, 'claude-msc.settings.json'),
+      'mcp__figma',
+      'mcp__playwright__browser_snapshot',
+    ]))
+    expect(args).not.toContain('mcp__atlassian__getJiraIssue')
+    expect(args).not.toContain('default')
   })
 
   it('never returns the prompt to the browser', async () => {

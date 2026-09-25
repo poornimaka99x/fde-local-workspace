@@ -337,6 +337,73 @@ def _impeccable_pack(meta: dict, engine_version: str) -> bytes:
     return (json.dumps(document, indent=2) + "\n").encode("utf-8")
 
 
+def _import_emil_design_skills(tree: pathlib.Path, out: pathlib.Path, meta: dict) -> list[dict]:
+    """Design and motion guidance only; implementation-specific skills stay upstream."""
+    written = [_copy_verbatim(meta, tree / "LICENSE", out / "LICENSE", "LICENSE")]
+    wanted = {
+        "designEngineering": "emil-design-eng",
+        "animate": "animate",
+        "appleDesign": "apple-design",
+        "findMotion": "find-animation-opportunities",
+        "improveMotion": "improve-animations",
+        "mobileNative": "mobile-native",
+        "prototype": "prototype",
+        "reviewMotion": "review-animations",
+    }
+    documents = {}
+    for key, skill in wanted.items():
+        upstream = f"skills/{skill}/SKILL.md"
+        source = tree / upstream
+        if not source.is_file():
+            die(f"expected {upstream} in the fetched emilkowalski/skills tree")
+        body, _front = strip_frontmatter(read_text_file(source).decode("utf-8"))
+        notice = ADAPTED_NOTICE.format(
+            url=meta["url"], commit=meta["commit"], license=meta["license"])
+        relative = f"guidance/{skill}.md"
+        written.append(_write(meta, out / relative, (notice + body).encode("utf-8"),
+                              upstream, adapted=True))
+        documents[key] = relative
+    written.append(_write(meta, out / "pack.json", _emil_design_pack(meta, documents),
+                          "(generated)", adapted=True))
+    return [item for item in written if item is not None]
+
+
+def _emil_design_pack(meta: dict, documents: dict) -> bytes:
+    document = {
+        "schemaVersion": SCHEMA_VERSION,
+        "packId": "emil-design",
+        "label": "Emil Design Engineering",
+        "source": "emilkowalski-skills",
+        "sourceUrl": meta["url"],
+        "commit": meta["commit"],
+        "license": meta["license"],
+        "stability": "stable",
+        "changes": [
+            "Adds UI-polish and component-design judgement to concept generation.",
+            "Adds purposeful motion, native-mobile and Apple interaction guidance where relevant.",
+            "Adds a strict animation review lens without granting repository-write authority.",
+        ],
+        "conflictsWith": [],
+        "documents": documents,
+        "phases": {
+            "solutioning": {
+                "documents": ["designEngineering", "animate", "appleDesign", "findMotion",
+                              "mobileNative", "prototype"],
+                "maxBytes": 30000,
+            },
+            "review": {
+                "documents": ["reviewMotion", "improveMotion"],
+                "maxBytes": 22000,
+            },
+            "reconciliation": {
+                "documents": ["designEngineering"],
+                "maxBytes": 8000,
+            },
+        },
+    }
+    return (json.dumps(document, indent=2) + "\n").encode("utf-8")
+
+
 SOURCES: dict[str, dict] = {
     "awesome-design-md": {
         "url": "https://github.com/voltagent/awesome-design-md",
@@ -374,6 +441,18 @@ SOURCES: dict[str, dict] = {
             "ENGINE_VERSION",
             "skill/SKILL.src.md",
             "skill/reference/{shape,critique,audit,polish,craft-floor}.md",
+        ],
+    },
+    "emilkowalski-skills": {
+        "url": "https://github.com/emilkowalski/skills",
+        "clone": "https://github.com/emilkowalski/skills.git",
+        "license": "MIT",
+        "commit": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+        "role": "Optional UI-polish, motion, mobile and design-review guidance for design panels.",
+        "importer": _import_emil_design_skills,
+        "importedPaths": [
+            "LICENSE",
+            "skills/{emil-design-eng,animate,apple-design,find-animation-opportunities,improve-animations,mobile-native,prototype,review-animations}/SKILL.md",
         ],
     },
 }
@@ -540,6 +619,11 @@ REVIEW_NOTES = {
         "neither is imported. No lifecycle scripts exist in the upstream package. The "
         "core skill document is adapted to remove its launcher setup section."
     ),
+    "emilkowalski-skills": (
+        "Markdown design skills only. Imported UI-polish, motion, mobile, prototype and "
+        "review guidance as inert panel data. Implementation-specific Sonner and Swift "
+        "skills, supporting scripts and generated assets are not imported or executed."
+    ),
 }
 
 
@@ -683,9 +767,11 @@ def cmd_update(args) -> int:
             SOURCES[name]["importer"](tree, preview, meta)
             existing = VENDOR / name
             text = _diff(existing, preview) if existing.is_dir() else "(new source; every file is an addition)\n"
-            if text.strip() == "":
+            if text.strip() == "" and current:
                 print("   no change")
                 continue
+            if text.strip() == "":
+                text = "(source files already match incoming; lock entry will be created)\n"
             print("\n--- diff ---")
             sys.stdout.write(text[:200000])
             if len(text) > 200000:
