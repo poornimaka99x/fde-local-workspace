@@ -1,0 +1,17 @@
+{
+  "description": "FDE pattern-only security guidance after code edits; no SDK installation or outbound LLM review",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ENABLE_CODE_SECURITY_REVIEW=0 ENABLE_COMMIT_REVIEW=0 ENABLE_STOP_REVIEW=0 bash \"${CLAUDE_PLUGIN_ROOT}/hooks/sg-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/security_reminder_hook.py\""
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit"
+      }
+    ]
+  }
+}
+

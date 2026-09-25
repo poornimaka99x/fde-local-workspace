@@ -1,0 +1,99 @@
+{
+  "accepted": {
+    "executables": false,
+    "hooks": false
+  },
+  "commit": "bcab6a1b8503100e8618c3b4e32cc78de43de769",
+  "commitDate": null,
+  "commitVerified": false,
+  "executables": [],
+  "fileCount": 13,
+  "files": [
+    {
+      "bytes": 463,
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "b6d8572788fe8387939673572c25916a26e9204858202e2df0414aa7395752d8"
+    },
+    {
+      "bytes": 1388,
+      "path": "FDE-SELECTION.md",
+      "sha256": "8cb2ba90699b87c94068a19c2142b43ff6c9867a31d2aa8a4be0cf343f313ba0"
+    },
+    {
+      "bytes": 1069,
+      "path": "LICENSE",
+      "sha256": "dd93bb14907b1160b40b96d8bb074d9122cd075a7dcccdc377b6a2030807fd3f"
+    },
+    {
+      "bytes": 13140,
+      "path": "references/performance-checklist.md",
+      "sha256": "9f52399d851d21de5c7f51dfd7dbef1026f7947fbabb9ae63fdf94ac439ccf3f"
+    },
+    {
+      "bytes": 14361,
+      "path": "references/security-checklist.md",
+      "sha256": "96920f3dbbab99c216a7cc4e72b8752ed855ac3a55b891d5a32dfeecd88bef20"
+    },
+    {
+      "bytes": 14884,
+      "path": "skills/api-and-interface-design/SKILL.md",
+      "sha256": "5dafd0c44a3aabf11cae5bcb34f6fcc24dfa5c01ba6e0d3176bce997f4d68bc8"
+    },
+    {
+      "bytes": 10913,
+      "path": "skills/debugging-and-error-recovery/SKILL.md",
+      "sha256": "21f3960f5d7ae2cc95c40896545004dbbcbbd752ea65fc2d53962554d4174220"
+    },
+    {
+      "bytes": 12642,
+      "path": "skills/deprecation-and-migration/SKILL.md",
+      "sha256": "6a624f942e09c69863a4219b9bd5d56975026b67b0c70bc83385ffd2120b6142"
+    },
+    {
+      "bytes": 9848,
+      "path": "skills/documentation-and-adrs/SKILL.md",
+      "sha256": "87ae44a0c7bb3eefc2131a9d11caabcc14e4d8dcb27d66a3a675551ee2ce1671"
+    },
+    {
+      "bytes": 21717,
+      "path": "skills/performance-optimization/SKILL.md",
+      "sha256": "00694d0c69bbde674d0e39de24052d90afea32d9fef9553eaee21a50a7e9b8cf"
+    },
+    {
+      "bytes": 17559,
+      "path": "skills/security-and-hardening/SKILL.md",
+      "sha256": "2e3fc60eed5aba97fe416f3f3c9317fdb014a682925ec70a733c3ff99e4b9858"
+    },
+    {
+      "bytes": 13036,
+      "path": "skills/security-and-hardening/references/hardening-patterns.md",
+      "sha256": "d8ba58cad151aeca4804e48fc768240af0dd6b0ecddd07fbf24a1562140ba97a"
+    },
+    {
+      "bytes": 10038,
+      "path": "skills/source-driven-development/SKILL.md",
+      "sha256": "c59faf851377f0eeda45306398d16eb96d77ab1c2fd3e1a7fb58e9a0af33c1e9"
+    }
+  ],
+  "hooks": [],
+  "importedPaths": null,
+  "installFiles": [],
+  "installedAt": "2026-09-25T08:30:38+05:30",
+  "license": "MIT",
+  "licenseFile": "LICENSE",
+  "localPath": "/private/tmp/fde-agent-skills-stage.wkrPX3",
+  "name": "addy-agent-skills",
+  "ref": "v0.6.10",
+  "reviewNote": "Reviewed 2026-09-25. Vendored seven non-overlapping development skills plus the two shared checklists they reference and MIT license. Excluded upstream hooks, commands, agents, scripts, package manifests, meta-routing skill, and lifecycle skills already covered by FDE. No hooks, executables, network code, or runtime dependencies.",
+  "runtimes": [],
+  "schemaVersion": 1,
+  "subdirectory": null,
+  "totalBytes": 141058,
+  "treeSha256": "4aca92697233492fd98e94c50707c73de60dcb3c79df71572a9b71410e925cde",
+  "type": "local",
+  "url": "https://github.com/addyosmani/agent-skills.git",
+  "validatedAt": "2026-09-25T08:30:38+05:30",
+  "validationStatus": "valid",
+  "version": "0.6.10"
+}
+

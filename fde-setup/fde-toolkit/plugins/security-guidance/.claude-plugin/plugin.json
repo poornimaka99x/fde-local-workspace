@@ -1,0 +1,11 @@
+{
+  "name": "security-guidance",
+  "version": "2.0.0",
+  "description": "FDE-adapted local pattern warnings for Claude-generated code, covering injection, XSS, SSRF, hardcoded secrets, unsafe deserialization, and other vulnerability classes without implicit installs or source-code egress.",
+  "author": {
+    "name": "David Dworken",
+    "email": "dworken@anthropic.com"
+  },
+  "homepage": "https://github.com/anthropics/claude-code/tree/main/plugins/security-guidance"
+}
+

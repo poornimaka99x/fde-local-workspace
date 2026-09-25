@@ -132,7 +132,9 @@ CONFIRM=(
   # one with `fde plugins update`, and replacing it silently would move a
   # supply-chain pin behind your back. `fde plugins verify` re-checks each tree.
   "fde-toolkit/plugins/code-simplifier/*"
+  "fde-toolkit/plugins/addy-agent-skills/*"
   "fde-toolkit/plugins/ponytail/*"
+  "fde-toolkit/plugins/security-guidance/*"
 )
 
 matches() {  # matches <relpath> <array-name>
@@ -305,7 +307,7 @@ if [[ "$MODE" == "install" ]]; then
     say "installing FDE plugins into profile: $p"
     if (( ! DRY )); then
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$SHARED/fde-toolkit" 2>/dev/null || true
-      for plugin in fde-core code-simplifier fde-user ponytail; do
+      for plugin in addy-agent-skills fde-core code-simplifier fde-user ponytail security-guidance; do
         CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" 2>/dev/null || \
           note "($plugin install needs an interactive session first — run 'cc-$p' and use /plugin)"
       done
@@ -324,7 +326,7 @@ else
       fi
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace update fde-toolkit \
         >/dev/null 2>&1 || note "($p marketplace refresh skipped — register fde-toolkit in that profile first)"
-      for plugin in fde-core code-simplifier fde-user ponytail; do
+      for plugin in addy-agent-skills fde-core code-simplifier fde-user ponytail security-guidance; do
         CLAUDE_CONFIG_DIR="$dir" claude plugin update "$plugin@fde-toolkit" \
           >/dev/null 2>&1 || true
       done

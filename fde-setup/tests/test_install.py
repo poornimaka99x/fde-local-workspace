@@ -4,6 +4,7 @@ Every test runs against a throwaway HOME with a PATH that deliberately has no
 claude, gemini or codex on it. Nothing here writes to the operator's real
 ~/.claude-shared or ~/.claude-profiles.
 """
+import json
 import os
 from pathlib import Path
 import shutil
@@ -91,7 +92,8 @@ class InstallScriptTest(unittest.TestCase):
     def test_a_fresh_install_registers_every_shipped_plugin(self):
         self.run_install("work", with_claude=True)
         calls = (self.home / "claude-calls.log").read_text()
-        for plugin in ("fde-core", "code-simplifier", "fde-user", "ponytail"):
+        for plugin in ("addy-agent-skills", "fde-core", "code-simplifier",
+                       "fde-user", "ponytail", "security-guidance"):
             self.assertIn(f"plugin install {plugin}@fde-toolkit", calls)
         installed_skills = (
             self.home / ".claude-shared" / "fde-toolkit" / "plugins"
@@ -113,8 +115,50 @@ class InstallScriptTest(unittest.TestCase):
         self.run_install("--update", "--yes", "work", with_claude=True)
         calls = (self.home / "claude-calls.log").read_text()
         self.assertIn("plugin marketplace update fde-toolkit", calls)
-        for plugin in ("fde-core", "code-simplifier", "fde-user", "ponytail"):
+        for plugin in ("addy-agent-skills", "fde-core", "code-simplifier",
+                       "fde-user", "ponytail", "security-guidance"):
             self.assertIn(f"plugin update {plugin}@fde-toolkit", calls)
+
+    def test_addy_agent_skills_is_a_non_executable_curated_subset(self):
+        plugin = ROOT / "fde-toolkit" / "plugins" / "addy-agent-skills"
+        installed = {
+            path.parent.name for path in (plugin / "skills").glob("*/SKILL.md")
+        }
+        self.assertEqual(installed, {
+            "api-and-interface-design",
+            "debugging-and-error-recovery",
+            "deprecation-and-migration",
+            "documentation-and-adrs",
+            "performance-optimization",
+            "security-and-hardening",
+            "source-driven-development",
+        })
+        self.assertFalse((plugin / "hooks").exists())
+        self.assertFalse((plugin / "commands").exists())
+        self.assertTrue((plugin / "references" / "performance-checklist.md").is_file())
+        self.assertTrue((plugin / "references" / "security-checklist.md").is_file())
+
+    def test_security_guidance_defaults_to_local_pattern_checks_only(self):
+        hooks_path = (
+            ROOT / "fde-toolkit" / "plugins" / "security-guidance"
+            / "hooks" / "hooks.json"
+        )
+        hooks = json.loads(hooks_path.read_text(encoding="utf-8"))["hooks"]
+        self.assertEqual(set(hooks), {"PostToolUse"})
+        entry = hooks["PostToolUse"][0]
+        self.assertEqual(entry["matcher"], "Edit|Write|MultiEdit|NotebookEdit")
+        command = entry["hooks"][0]["command"]
+        self.assertIn("ENABLE_CODE_SECURITY_REVIEW=0", command)
+        self.assertNotIn("ensure_agent_sdk.py", command)
+
+        hook_source = (
+            ROOT / "fde-toolkit" / "plugins" / "security-guidance"
+            / "hooks" / "security_reminder_hook.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'if hook_event_name == "PostToolUse" and ENABLE_CODE_SECURITY_REVIEW:',
+            hook_source,
+        )
 
 
 if __name__ == "__main__":

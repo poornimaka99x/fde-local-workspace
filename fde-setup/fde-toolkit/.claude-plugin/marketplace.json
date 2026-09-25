@@ -5,6 +5,11 @@
   },
   "plugins": [
     {
+      "name": "addy-agent-skills",
+      "source": "./plugins/addy-agent-skills",
+      "description": "FDE-curated development workflows for API design, debugging, migrations, ADRs, performance, security hardening, and official-source grounding."
+    },
+    {
       "name": "code-simplifier",
       "source": "./plugins/code-simplifier",
       "description": "Agent that simplifies and refines code for clarity, consistency, and maintainability while preserving functionality"
@@ -23,6 +28,11 @@
       "name": "ponytail",
       "source": "./plugins/ponytail",
       "description": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions."
+    },
+    {
+      "name": "security-guidance",
+      "source": "./plugins/security-guidance",
+      "description": "FDE-adapted local pattern warnings for security-sensitive code edits, without implicit dependency installation or source-code egress."
     }
   ]
 }

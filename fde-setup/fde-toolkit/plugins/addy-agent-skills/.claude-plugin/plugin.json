@@ -1,0 +1,13 @@
+{
+  "name": "addy-agent-skills",
+  "version": "0.6.10",
+  "description": "FDE-curated development workflows from Addy Osmani's Agent Skills: API contracts, debugging, migrations, ADRs, performance, security hardening, and official-source grounding.",
+  "author": {
+    "name": "Addy Osmani"
+  },
+  "homepage": "https://github.com/addyosmani/agent-skills",
+  "repository": "https://github.com/addyosmani/agent-skills",
+  "license": "MIT",
+  "skills": "./skills"
+}
+

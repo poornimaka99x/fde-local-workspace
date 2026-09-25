@@ -1,0 +1,125 @@
+{
+  "accepted": {
+    "executables": true,
+    "hooks": true
+  },
+  "commit": "e1bb7b065bc29117ab5923f8772fee16a4630a0d",
+  "commitDate": null,
+  "commitVerified": false,
+  "executables": [
+    "hooks/security_reminder_hook.py",
+    "hooks/sg-python.sh"
+  ],
+  "fileCount": 15,
+  "files": [
+    {
+      "bytes": 473,
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "20c8de908ae4290bab111661bd0eac6d70fbdb967f62685ab0a88041e0260149"
+    },
+    {
+      "bytes": 150,
+      "path": "LICENSE.md",
+      "sha256": "728158fd1037143fad6907e8fa34804177e598b7326519503fe83cafdef849e6"
+    },
+    {
+      "bytes": 7672,
+      "path": "README.md",
+      "sha256": "4cf5e3a44c36c8400b14e9436601667f6b22184ede3434a80341868f76e26bb2"
+    },
+    {
+      "bytes": 6832,
+      "path": "hooks/_base.py",
+      "sha256": "46b037d6d36405472c3193fb9e643719e413c0d9259d92c263cdbccafa23f2fd"
+    },
+    {
+      "bytes": 18669,
+      "path": "hooks/diffstate.py",
+      "sha256": "2acce7933c82301c3cf72b41a09f81790138546a5b53b949a25b4545127d779e"
+    },
+    {
+      "bytes": 9856,
+      "path": "hooks/ensure_agent_sdk.py",
+      "sha256": "e682d82026521106ec00267078fb4e2190b3a0a501362fc9f4a0753f2d7a1b56"
+    },
+    {
+      "bytes": 12240,
+      "path": "hooks/extensibility.py",
+      "sha256": "49dec35c1768d35ef13f7733dc3612c6591cbcedfb3d4bb1849679989e2e2435"
+    },
+    {
+      "bytes": 30039,
+      "path": "hooks/gitutil.py",
+      "sha256": "8a3fc8add69ec3ebbff51c82d73e16a60f322ef6ed95c88f9371b65b06d410c4"
+    },
+    {
+      "bytes": 527,
+      "path": "hooks/hooks.json",
+      "sha256": "dde01349e49a258c2cda682df1987bc62d5922e7101a1996ee2aeb6695bc70f7"
+    },
+    {
+      "bytes": 112010,
+      "path": "hooks/llm.py",
+      "sha256": "bf2f1e71ac04eea6364b545b69aa876168b928fc767146ba5d86988cfb213b34"
+    },
+    {
+      "bytes": 17541,
+      "path": "hooks/patterns.py",
+      "sha256": "7870f5cac17034e9bfff829a2bba283bbcb47b416c915d8c8a1ab7ec02c5b4aa"
+    },
+    {
+      "bytes": 24763,
+      "path": "hooks/review_api.py",
+      "sha256": "b5e5ee59787e174998adb70a53e0b06252449c6e96f2d52e735f8ad5cbe4e319"
+    },
+    {
+      "bytes": 103426,
+      "path": "hooks/security_reminder_hook.py",
+      "sha256": "85962b570e264057675e39930cfb07a5d93d2296b1f5a2f8afd9456557df3b5e"
+    },
+    {
+      "bytes": 5849,
+      "path": "hooks/session_state.py",
+      "sha256": "f74455e57109595eb6fc267babd8f1dd26172014561ec919bdfd38e7ad096380"
+    },
+    {
+      "bytes": 1814,
+      "path": "hooks/sg-python.sh",
+      "sha256": "5acbfc6a50dffa7422a813117fd1ae42e63f1571e768d0da991117b36dee96b9"
+    }
+  ],
+  "hooks": [
+    "PostToolUse"
+  ],
+  "importedPaths": [
+    ".claude-plugin/plugin.json",
+    "LICENSE.md",
+    "README.md",
+    "hooks/*.py",
+    "hooks/*.sh",
+    "hooks/hooks.json"
+  ],
+  "installFiles": [],
+  "installedAt": "2026-09-25T08:25:06+05:30",
+  "license": "proprietary",
+  "licenseFile": "LICENSE.md",
+  "localPath": "/private/tmp/fde-security-guidance.pkCW4w/claude-code/plugins/security-guidance",
+  "name": "security-guidance",
+  "ref": "main",
+  "reviewNote": "Reviewed and adapted 2026-09-25: only local PostToolUse pattern warnings are registered. SessionStart SDK installation and Stop/commit/push LLM review are disabled; PostToolUse bootstrap is gated off when code review is disabled.",
+  "runtimes": [
+    "bash",
+    "python",
+    "sh"
+  ],
+  "schemaVersion": 1,
+  "subdirectory": null,
+  "totalBytes": 351861,
+  "treeSha256": "1e8b2862e3c8fffca68d7345de667f937c628c13f84a946678270da74e8f9483",
+  "type": "local",
+  "url": "https://github.com/anthropics/claude-code.git",
+  "validatedAt": "2026-09-25T08:25:06+05:30",
+  "validationStatus": "valid",
+  "version": "2.0.0"
+}
+
