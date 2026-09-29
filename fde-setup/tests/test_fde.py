@@ -822,7 +822,7 @@ class TestAtlassian(FDETest):
         self.assertNotIn("atlassian", global_cfg)
         self.assertIn("context7", global_cfg)
 
-    def test_connector_wired_only_after_roles_and_to_eligible_reviewers(self):
+    def test_connector_wired_only_after_roles_and_to_eligible_evidence_roles(self):
         run_id = self.sb.start_full()
         r = subprocess.run([sys.executable, str(self.sb.shared / "bin" / "mcp-sync"),
                             "--run", run_id], capture_output=True, text=True,
@@ -837,7 +837,8 @@ class TestAtlassian(FDETest):
         self.assertEqual(cfg["mcpServers"]["atlassian"]["url"], self.ENDPOINT)
         self.assertEqual(cfg["mcpServers"]["figma"]["url"], "https://mcp.figma.com/mcp")
         others = sorted(p.name for p in mcp_dir.glob("claude-*.mcp.json"))
-        self.assertEqual(others, ["claude-alt.mcp.json", "claude-msc.mcp.json"])
+        self.assertEqual(others, ["claude-alt.mcp.json", "claude-msc.mcp.json",
+                                  "claude-work.mcp.json"])
 
     def test_routed_codex_review_gets_live_mcp_and_bounded_evidence(self):
         run_id = self.sb.start_full()
