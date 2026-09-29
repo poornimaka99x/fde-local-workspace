@@ -298,7 +298,7 @@
       "enabled": true,
       "transport": "http",
       "url": "https://mcp.atlassian.com/v2/mcp",
-      "targets": ["role:orchestrator", "role:review", "role:prReview"],
+      "targets": ["role:orchestrator", "role:research", "role:review", "role:prReview"],
       "stages": ["intake", "research", "planning", "review", "publication"],
       "profiles": ["client-delivery"],
       "auth": "oauth",
@@ -314,7 +314,7 @@
       "preferOver": ["asking the operator to paste an issue description", "guessing at a ticket's current state"],
       "doNotUseWhen": "Before plan approval, or for repository files — Rovo does not provide unrestricted Bitbucket repository operations; use local git or the Bitbucket REST connection.",
       "gateway": { "docker": "client-delivery" },
-      "note": "Jira and Confluence through Atlassian Rovo MCP v2. Deliberately not global: this reaches only the run's orchestrator and assigned reviewers, after roles are confirmed and only in an eligible stage and profile. Reads are allowed then; writes still need fde approve-publish. Bitbucket remains a separate REST or local-git connection."
+      "note": "Jira and Confluence through Atlassian Rovo MCP v2. Deliberately not global: this reaches only the run's orchestrator, researcher and assigned reviewers, after roles are confirmed and only in an eligible stage and profile. Reads are allowed then; writes still need fde approve-publish. Bitbucket remains a separate REST or local-git connection."
     },
 
     "figma": {

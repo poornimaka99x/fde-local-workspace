@@ -204,7 +204,7 @@ def phase1():
                     "run mcp-sync; the global .mcp.json must not grant permanent access")
             else:
                 ok("Atlassian MCP correctly held out of global config",
-                   "run-scoped to the selected orchestrator")
+                   "run-scoped to the assigned orchestrator, researcher and reviewers")
         elif atlassian and "claude" in targets:
             if generated_has_atlassian:
                 ok("generated Claude .mcp.json includes atlassian")

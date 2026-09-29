@@ -255,9 +255,9 @@ Each server declares who gets it. `["claude","gemini","codex"]` is global.
 `["role:orchestrator"]` is **not**: that server stays out of every global config
 and is written per run, for whichever identity holds the role, by
 `mcp-sync --run <run-id>` — which the combined approval flow calls for you.
-Atlassian is
-role-scoped for exactly this reason: there is no permanently privileged
-orchestrator account, because there is no permanent orchestrator.
+Atlassian is role-scoped for exactly this reason: it reaches the run's assigned
+orchestrator, researcher and reviewers without creating a permanently privileged
+account.
 
 Claude orchestrators and Claude/Codex specialist invocations load the generated
 run-scoped MCP configuration. For Claude two files travel together — `--mcp-config`

@@ -813,7 +813,8 @@ class TestAtlassian(FDETest):
     def test_no_permanently_privileged_orchestrator(self):
         src = json.loads((SRC_SHARED / "mcp/mcp-servers.json").read_text())
         self.assertEqual(src["servers"]["atlassian"]["targets"],
-                         ["role:orchestrator", "role:review", "role:prReview"])
+                         ["role:orchestrator", "role:research", "role:review",
+                          "role:prReview"])
         r = subprocess.run([sys.executable, str(self.sb.shared / "bin" / "mcp-sync")],
                            capture_output=True, text=True, env=self.sb.env())
         self.assertEqual(r.returncode, 0, r.stderr)

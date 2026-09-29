@@ -94,10 +94,10 @@ problem you can debug in minutes.
 
 **2.3 The MCP server.** The endpoint is
 `https://mcp.atlassian.com/v2/mcp` over HTTP. It is deliberately **not**
-in anyone's global config: it is role-scoped, so it reaches whichever identity
-you make orchestrator for a run, written by `mcp-sync --run <run-id>` when you
-approve the combined plan and roles. There is no permanently privileged account
-because there is no permanent orchestrator.
+in anyone's global config: it is role-scoped, so it reaches the identities
+assigned as orchestrator, researcher and reviewers for a run, written by
+`mcp-sync --run <run-id>` when you approve the combined plan and roles. There is
+no permanently privileged account.
 
 Rovo's OAuth token belongs to the MCP client, not to FDE, which has a consequence
 worth knowing before you rely on it: FDE cannot ask the server what tools it has,

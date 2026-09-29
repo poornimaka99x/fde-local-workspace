@@ -123,7 +123,9 @@ def audit(plugin_root: Path, shared_root: Path | None):
         mcp = parsed.get(str(shared_root / "mcp" / "mcp-servers.json"), {})
         atlassian = (mcp.get("servers") or {}).get("atlassian", {})
         if "role:orchestrator" not in atlassian.get("targets", []):
-            errors.append("Atlassian MCP is not restricted to the run orchestrator role")
+            errors.append("Atlassian MCP is not scoped to approved run roles")
+        if "role:research" not in atlassian.get("targets", []):
+            errors.append("Atlassian MCP is not available to the run researcher role")
         # The catalogue is the thing that decides what a run can reach, so an
         # invalid one is an error here rather than a surprise at sync time. The
         # audit borrows the controller's own validator: a second, laxer opinion

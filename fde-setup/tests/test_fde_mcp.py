@@ -344,6 +344,11 @@ class Activation(unittest.TestCase):
         self.assertIn("atlassian", chosen)
         self.assertIn("figma", chosen)
 
+    def test_researcher_receives_atlassian_during_research(self):
+        chosen, _rejected = self.effective(roles={"research"}, stages=["research"],
+                                           profile="client-delivery")
+        self.assertIn("atlassian", chosen)
+
     def test_orchestrator_gets_the_isolated_browser_in_every_profile_and_stage(self):
         server = self.catalog.get("playwright")
         self.assertIn("role:orchestrator", server["targets"])
