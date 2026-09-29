@@ -143,15 +143,22 @@ def load_snapshot(shared, *, live=True):
 def _classified(provider, discovered):
     model_id = discovered["id"].lower()
     if provider == "codex":
-        if "astra" in model_id or "sol" in model_id:
-            tier, weight = "premium", 14
-            strengths = ["architecture", "reconciliation", "security-review"]
+        if "astra" in model_id:
+            tier, weight = "premium", 50
+            strengths = ["architecture", "ambiguous-synthesis", "research", "planning",
+                         "implementation", "test-engineering", "review", "reconciliation",
+                         "security-review", "reliability-review", "presentation"]
+        elif "sol" in model_id:
+            tier, weight = "premium", 10
+            strengths = ["implementation", "test-engineering", "planning", "architecture",
+                         "research", "review", "reconciliation", "reliability-review"]
         elif "terra" in model_id:
             tier, weight = "premium", 12
             strengths = ["architecture", "ambiguous-synthesis", "implementation"]
         elif "luna" in model_id or "mini" in model_id:
-            tier, weight = "standard", 7
-            strengths = ["implementation", "research", "review"]
+            tier, weight = "standard", 1
+            strengths = ["classification", "extraction", "bounded-formatting",
+                         "implementation", "test-engineering", "research", "review"]
         else:
             tier, weight = "standard", 6
             strengths = ["implementation", "test-engineering", "independent-read"]

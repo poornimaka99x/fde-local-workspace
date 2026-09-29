@@ -464,6 +464,32 @@ class TestModelSelection(unittest.TestCase):
         self.assertEqual((top["tier"], top["effort"]), ("premium", "xhigh"))
         self.assertEqual(top["maxRetries"], 2)
 
+    def test_balanced_prefers_documented_task_fit_before_cost(self):
+        policy = json.loads(json.dumps(FAKE_POLICY))
+        policy["providers"]["anthropic"]["models"] = [
+            {"id": "cheap-general", "label": "Cheap General", "tier": "standard",
+             "efforts": ["medium"], "costWeight": 1, "contextTokens": None,
+             "strengths": ["research"], "limitations": []},
+            {"id": "coding-model", "label": "Coding Model", "tier": "standard",
+             "efforts": ["medium"], "costWeight": 3, "contextTokens": None,
+             "strengths": ["implementation", "test-engineering"], "limitations": []},
+        ]
+        policy = FDE.validate_routing_policy(policy)
+        agents = {"agents": {"worker": {"kind": "claude", "profile": "work"}}}
+
+        balanced = FDE.select_model(
+            policy, agents, agent_id="worker", band="standard", floor="standard",
+            strategy="balanced", limits=policy["limits"]["standard"],
+            purpose="implementation", capabilities=["implementation"])
+        cheapest = FDE.select_model(
+            policy, agents, agent_id="worker", band="standard", floor="standard",
+            strategy="cost_first", limits=policy["limits"]["standard"],
+            purpose="implementation", capabilities=["implementation"])
+
+        self.assertEqual(balanced["model"], "coding-model")
+        self.assertEqual(balanced["capabilityMatches"], ["implementation"])
+        self.assertEqual(cheapest["model"], "cheap-general")
+
 
 # -- 4. the route, end to end, through the controller ----------------------
 
@@ -787,7 +813,7 @@ class TestOverrides(RoutingTest):
 
     def test_raising_a_tier_needs_the_typed_approval(self):
         run_id = self.approved_run()
-        refused = self.sb.fde("routing", "override", run_id, "--task-id", "solutioning-1",
+        refused = self.sb.fde("routing", "override", run_id, "--task-id", "intake-1",
                               "--model", "big", "--effort", "high",
                               "--reason", "needs the stronger model", stdin="yes\n")
         self.assertEqual(refused.returncode, 8)
@@ -797,20 +823,20 @@ class TestOverrides(RoutingTest):
     def test_an_override_records_who_when_what_and_why_without_losing_history(self):
         run_id = self.approved_run()
         before = self.routing_doc(run_id)["decisionHash"]
-        first = self.sb.fde("routing", "override", run_id, "--task-id", "solutioning-1",
+        first = self.sb.fde("routing", "override", run_id, "--task-id", "intake-1",
                             "--model", "big", "--effort", "high",
                             "--reason", "an auth design needs the stronger model",
                             "--approve", "--json")
         self.assertEqual(first.returncode, 0, first.stderr)
-        second = self.sb.fde("routing", "override", run_id, "--task-id", "review-1",
-                             "--model", "big", "--effort", "high",
-                             "--reason", "the reviewer should match the producer",
+        second = self.sb.fde("routing", "override", run_id, "--task-id", "solutioning-1",
+                             "--model", "big", "--effort", "max",
+                             "--reason", "the architecture needs a deeper second pass",
                              "--approve", "--json")
         self.assertEqual(second.returncode, 0, second.stderr)
         doc = self.routing_doc(run_id)
-        self.assertEqual(len(doc["overrides"]), 2)
+        self.assertEqual(len(doc["overrides"]), 3)
         earliest = doc["overrides"][0]
-        self.assertEqual(earliest["target"], "task:solutioning-1")
+        self.assertEqual(earliest["target"], "task:intake-1")
         self.assertEqual(earliest["field"], "model")
         self.assertEqual(earliest["from"], "mid")
         self.assertEqual(earliest["to"], "big")
@@ -1839,7 +1865,7 @@ class TestAttempts(AttemptTest):
     def test_the_cost_ceiling_pauses_instead_of_continuing(self):
         tight = json.loads(json.dumps(FAKE_POLICY))
         for band in tight["limits"].values():
-            band["maxCostUnits"] = 25
+            band["maxCostUnits"] = 60
             band["maxRetries"] = 5
         self.install_policy(tight)
         run_id = self.approved(requirement=STANDARD_REQUEST,
@@ -2543,20 +2569,20 @@ class TestPanelPinnedChoices(RoutingTest):
 
     def test_a_pinned_model_keeps_its_own_tier_and_price(self):
         run_id = self.panel_run()
-        self.create(run_id, "claude_work:flow", "claude_msc:visual::big")
+        self.create(run_id, "claude_work:flow", "claude_msc:visual::mid")
         panel = self.panel(run_id)
         pinned = next(p for p in panel["participants"]
                       if p["participantId"] == "claude_msc")
-        self.assertEqual(pinned["model"], "big")
-        self.assertEqual(pinned["tier"], "premium",
+        self.assertEqual(pinned["model"], "mid")
+        self.assertEqual(pinned["tier"], "standard",
                          "the tier must be the pinned model's, not another model's")
-        big = next(m for m in FAKE_POLICY["providers"]["anthropic"]["models"]
-                   if m["id"] == "big")
-        self.assertIn(pinned["effort"], big["efforts"])
-        self.assertGreater(pinned["estimatedCostUnits"],
-                           next(p["estimatedCostUnits"] for p in panel["participants"]
-                                if p["participantId"] == "claude_work"))
-        self.assertIn("Big", pinned["routingReason"])
+        mid = next(m for m in FAKE_POLICY["providers"]["anthropic"]["models"]
+                   if m["id"] == "mid")
+        self.assertIn(pinned["effort"], mid["efforts"])
+        self.assertLess(pinned["estimatedCostUnits"],
+                        next(p["estimatedCostUnits"] for p in panel["participants"]
+                             if p["participantId"] == "claude_work"))
+        self.assertIn("Mid", pinned["routingReason"])
 
     def test_a_pinned_model_the_policy_does_not_offer_is_left_alone_and_unpriced(self):
         run_id = self.panel_run()

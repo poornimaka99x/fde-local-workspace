@@ -460,18 +460,23 @@ unchanged. The full shapes are in
 orchestrator's model and effort and propose the specialist matrix, instead of you
 picking them. You still choose the account. The choice is deterministic and
 explainable — no model is asked for a score — and it optimises in one order:
-meet the capability, safety and quality requirements first; then minimise
-*expected* cost, which is cost times the chance the attempt has to be repeated,
-so an underpowered attempt on hard work is correctly priced as the expensive
-option; then minimise latency and agent count.
+meet the safety and quality requirements first; match the task (coding,
+research, architecture, review, presentation, and so on) against model workload
+profiles curated from provider benchmarks; then minimise *expected* cost, which
+is cost times the chance the attempt has to be repeated, so an underpowered
+attempt on hard work is correctly priced as the expensive option; then minimise
+latency and agent count. `cost_first` intentionally puts expected cost ahead of
+workload fit while still enforcing the same hard quality floor.
 
 Nothing it decides authorises anything. `APPROVE PLAN <run-id>` approves the
 plan, the roles and the route together and freezes the exact route you saw;
 after that every invocation is checked against it. `fde routing preview`,
 `show`, `explain` and `override` are the rest of the surface, and
 `~/.claude-shared/config/routing-policy.json` holds the tiers, relative cost
-weights, quality floors and ceilings — yours to edit, and preserved across
-updates. Costs are relative cost units, never money.
+weights, benchmark-informed workload strengths, quality floors and ceilings —
+yours to edit, and preserved across updates. The shipped evidence notes are
+dated so a model refresh is reviewable. Costs are relative cost units, never
+money.
 
 Before each automatic proposal, FDE refreshes model availability from the
 installed Codex and Antigravity clients, removes models those clients no longer

@@ -3,7 +3,7 @@
   "_costUnits": "costWeight and effortCostMultiplier are RELATIVE weights, not money. There are no provider prices in this file and none may be added as bare numbers: if monetary pricing is ever configured it must carry a source, a currency and an effectiveAt date, and estimates stay labelled estimates until it does.",
   "_specialistCaps": "maxSpecialistsPerStage is the fan-out allowed on ONE stage: one method for standard work, two complementary ones for complex work, three (including an independent reviewer) for critical work. maxSpecialists bounds the whole run so a wide plan cannot accumulate an unbounded agent count.",
   "schemaVersion": 1,
-  "policyRevision": "2026-09-18.1",
+  "policyRevision": "2026-09-29.1",
   "strategies": [
     "balanced",
     "quality_first",
@@ -42,10 +42,11 @@
   "providers": {
     "anthropic": {
       "label": "Claude (Anthropic account)",
+      "_evidence": "Workload profiles and relative weights refreshed 2026-09-29 from https://www.anthropic.com/claude-opus-5-5 and https://www.anthropic.com/claude-sonnet-5-5. Family aliases are retained because Claude Code resolves them to the current available family model.",
       "models": [
         {
           "id": "haiku",
-          "label": "Claude Haiku",
+          "label": "Claude Haiku (latest alias)",
           "tier": "economy",
           "efforts": [
             "auto"
@@ -64,7 +65,7 @@
         },
         {
           "id": "sonnet",
-          "label": "Claude Sonnet",
+          "label": "Claude Sonnet (latest alias)",
           "tier": "standard",
           "efforts": [
             "auto",
@@ -73,14 +74,16 @@
             "high",
             "max"
           ],
-          "costWeight": 4,
+          "costWeight": 2,
           "contextTokens": null,
           "strengths": [
             "research",
             "planning",
             "implementation",
             "test-engineering",
-            "presentation"
+            "review",
+            "presentation",
+            "bounded-formatting"
           ],
           "limitations": [
             "thin on novel architecture and adversarial reconciliation"
@@ -88,7 +91,7 @@
         },
         {
           "id": "opus",
-          "label": "Claude Opus",
+          "label": "Claude Opus (latest alias)",
           "tier": "premium",
           "efforts": [
             "auto",
@@ -98,14 +101,20 @@
             "xhigh",
             "max"
           ],
-          "costWeight": 15,
+          "costWeight": 4,
           "contextTokens": null,
           "strengths": [
             "architecture",
             "ambiguous-synthesis",
+            "research",
+            "planning",
+            "implementation",
+            "test-engineering",
+            "review",
             "reconciliation",
             "security-review",
-            "reliability-review"
+            "reliability-review",
+            "presentation"
           ],
           "limitations": [
             "xhigh is Opus-specific; it is not a routine default"
@@ -115,10 +124,11 @@
     },
     "bedrock": {
       "label": "Claude Code on Bedrock",
+      "_evidence": "Uses the same current Claude family workload profiles as Anthropic routing; availability remains governed by the configured Bedrock account and region.",
       "models": [
         {
           "id": "haiku",
-          "label": "Claude Haiku (Bedrock)",
+          "label": "Claude Haiku (latest Bedrock alias)",
           "tier": "economy",
           "efforts": [
             "auto"
@@ -137,7 +147,7 @@
         },
         {
           "id": "sonnet",
-          "label": "Claude Sonnet (Bedrock)",
+          "label": "Claude Sonnet (latest Bedrock alias)",
           "tier": "standard",
           "efforts": [
             "auto",
@@ -146,13 +156,14 @@
             "high",
             "max"
           ],
-          "costWeight": 4,
+          "costWeight": 2,
           "contextTokens": null,
           "strengths": [
             "research",
             "planning",
             "implementation",
-            "test-engineering"
+            "test-engineering",
+            "review"
           ],
           "limitations": [
             "no native WebSearch on Bedrock; use the run-scoped isolated browser or pair with a second researcher"
@@ -160,7 +171,7 @@
         },
         {
           "id": "opus",
-          "label": "Claude Opus (Bedrock)",
+          "label": "Claude Opus (latest Bedrock alias)",
           "tier": "premium",
           "efforts": [
             "auto",
@@ -170,13 +181,19 @@
             "xhigh",
             "max"
           ],
-          "costWeight": 15,
+          "costWeight": 4,
           "contextTokens": null,
           "strengths": [
             "architecture",
             "ambiguous-synthesis",
+            "research",
+            "planning",
+            "implementation",
+            "test-engineering",
+            "review",
             "reconciliation",
-            "security-review"
+            "security-review",
+            "reliability-review"
           ],
           "limitations": [
             "no native WebSearch on Bedrock; run-scoped isolated browser available"
@@ -187,31 +204,11 @@
     "codex": {
       "label": "ChatGPT / Codex",
       "_note": "A different provider family, not a rank-for-rank equivalent of the Claude tiers. Tiers here say what this policy is willing to spend on which class of work; they do not assert parity between vendors.",
+      "_evidence": "Workload profiles and relative weights refreshed 2026-09-29 from https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra and https://developers.openai.com/api/docs/pricing. Live Codex discovery remains the availability boundary.",
       "models": [
         {
-          "id": "gpt-5.5",
-          "label": "GPT-5.5",
-          "tier": "standard",
-          "efforts": [
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ],
-          "costWeight": 5,
-          "contextTokens": null,
-          "strengths": [
-            "implementation",
-            "test-engineering",
-            "independent-read"
-          ],
-          "limitations": [
-            "no 'auto' effort"
-          ]
-        },
-        {
-          "id": "gpt-5.6-luna",
-          "label": "GPT-5.6-Luna",
+          "id": "gpt-6-luna",
+          "label": "GPT-6 Luna",
           "tier": "standard",
           "efforts": [
             "low",
@@ -220,20 +217,25 @@
             "xhigh",
             "max"
           ],
-          "costWeight": 7,
+          "costWeight": 1,
           "contextTokens": null,
           "strengths": [
+            "classification",
+            "extraction",
+            "bounded-formatting",
             "implementation",
+            "test-engineering",
             "research",
             "review"
           ],
           "limitations": [
+            "best for focused, repeatable and high-volume work; not the default for difficult architecture or security judgement",
             "no 'auto' effort"
           ]
         },
         {
-          "id": "gpt-5.6-terra",
-          "label": "GPT-5.6-Terra",
+          "id": "gpt-6-sol",
+          "label": "GPT-6 Sol",
           "tier": "premium",
           "efforts": [
             "low",
@@ -242,20 +244,25 @@
             "xhigh",
             "max"
           ],
-          "costWeight": 12,
+          "costWeight": 10,
           "contextTokens": null,
           "strengths": [
+            "implementation",
+            "test-engineering",
+            "planning",
             "architecture",
-            "ambiguous-synthesis",
-            "security-review"
+            "research",
+            "review",
+            "reconciliation",
+            "reliability-review"
           ],
           "limitations": [
             "no 'auto' effort"
           ]
         },
         {
-          "id": "gpt-5.6-sol",
-          "label": "GPT-5.6-Sol",
+          "id": "gpt-6-astra",
+          "label": "GPT-6 Astra",
           "tier": "premium",
           "efforts": [
             "low",
@@ -264,12 +271,20 @@
             "xhigh",
             "max"
           ],
-          "costWeight": 14,
+          "costWeight": 50,
           "contextTokens": null,
           "strengths": [
             "architecture",
+            "ambiguous-synthesis",
+            "research",
+            "planning",
+            "implementation",
+            "test-engineering",
+            "review",
             "reconciliation",
-            "security-review"
+            "security-review",
+            "reliability-review",
+            "presentation"
           ],
           "limitations": [
             "no 'auto' effort"

@@ -7970,7 +7970,7 @@ def routing_account_id(agents, agent_id):
     return None
 
 
-def model_candidates(policy, provider, *, band, floor, limits):
+def model_candidates(policy, provider, *, band, floor, limits, capabilities=None):
     """Every (model, effort) this provider offers, split into kept and refused.
 
     Filtering is the whole algorithm: capability and floor first, ceilings
@@ -7985,6 +7985,7 @@ def model_candidates(policy, provider, *, band, floor, limits):
     recommended = _tier_rank(policy, policy["bands"][band]["recommendedTier"])
     retry = policy["expectedRetry"]
 
+    requested = tuple(dict.fromkeys(capabilities or ()))
     accepted, rejected = [], []
     for model in models:
         tier = model["tier"]
@@ -8020,6 +8021,8 @@ def model_candidates(policy, provider, *, band, floor, limits):
             else:
                 probability = retry["tierAboveBand"]
                 note = f"above the tier this policy recommends for '{band}' work"
+            strengths = list(model.get("strengths") or [])
+            matches = [capability for capability in requested if capability in strengths]
             accepted.append({
                 "model": model["id"],
                 "label": model.get("label") or model["id"],
@@ -8029,7 +8032,11 @@ def model_candidates(policy, provider, *, band, floor, limits):
                 "retryProbability": probability,
                 "expectedCostUnits": round(cost * (1.0 + probability), 2),
                 "note": note,
-                "strengths": list(model.get("strengths") or []),
+                "strengths": strengths,
+                "requestedCapabilities": list(requested),
+                "capabilityMatches": matches,
+                "capabilityCoverage": (round(len(matches) / len(requested), 3)
+                                       if requested else 1.0),
                 "limitations": list(model.get("limitations") or []),
                 "contextTokens": model.get("contextTokens"),
             })
@@ -8039,9 +8046,11 @@ def model_candidates(policy, provider, *, band, floor, limits):
 def _strategy_pool(policy, accepted, strategy, band):
     """The choices a strategy is willing to look at, and how it orders them."""
     preferred = _effort_rank(policy, policy["bands"][band]["preferredEffort"])
+    recommended_tier = _tier_rank(policy, policy["bands"][band]["recommendedTier"])
 
     def cheapest(candidate):
         return (candidate["expectedCostUnits"],
+                -candidate["capabilityCoverage"],
                 _tier_rank(policy, candidate["tier"]),
                 _effort_rank(policy, candidate["effort"]),
                 candidate["model"])
@@ -8049,24 +8058,35 @@ def _strategy_pool(policy, accepted, strategy, band):
     if strategy == "quality_first":
         return sorted(accepted, key=lambda c: (
             -_tier_rank(policy, c["tier"]),
+            -c["capabilityCoverage"],
             -_effort_rank(policy, c["effort"]),
             c["expectedCostUnits"],
-            c["model"])), "highest tier and effort inside the approved ceiling"
+            c["model"])), "highest tier with the best documented workload fit and effort inside the approved ceiling"
     if strategy == "cost_first":
         return sorted(accepted, key=cheapest), (
             "lowest expected cost that still clears the quality floor")
-    # balanced: the cheapest choice that also carries the band's preferred
-    # effort, falling back to the cheapest qualifying choice when no model this
-    # account offers reaches that effort.
+    # Balanced first asks whether the model is a documented fit for this kind
+    # of work and whether it is at the capability tier the assessment calls
+    # for. Cost only breaks ties between equally suitable, appropriately sized
+    # candidates. This stops a cheap small coding model from winning a complex
+    # codebase migration merely because both profiles contain "implementation".
+    def balanced(candidate):
+        return (-candidate["capabilityCoverage"],
+                abs(_tier_rank(policy, candidate["tier"]) - recommended_tier),
+                candidate["expectedCostUnits"],
+                _effort_rank(policy, candidate["effort"]),
+                candidate["model"])
+
     at_or_above = [c for c in accepted
                    if _effort_rank(policy, c["effort"]) >= preferred]
     if at_or_above:
-        return sorted(at_or_above, key=cheapest), (
-            f"lowest expected cost at or above the effort this policy prefers for "
-            f"'{band}' work")
-    return sorted(accepted, key=cheapest), (
-        "lowest expected cost that clears the quality floor; no model this account "
-        "offers reaches the preferred effort")
+        return sorted(at_or_above, key=balanced), (
+            f"best documented workload fit at the tier recommended for '{band}' work, "
+            "then lowest expected cost, at or above the preferred effort")
+    return sorted(accepted, key=balanced), (
+        "best documented workload fit at the recommended tier, then lowest expected "
+        "cost, among choices that clear the quality floor; no model this account offers "
+        "reaches the preferred effort")
 
 
 def escalation_ceiling(policy, *, tier, effort, limits):
@@ -8100,7 +8120,8 @@ def escalation_ceiling(policy, *, tier, effort, limits):
     }
 
 
-def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, purpose):
+def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, purpose,
+                 capabilities=None):
     """One model-and-effort decision, with everything needed to argue about it."""
     kind = ((agents or {}).get("agents", {}).get(agent_id) or {}).get("kind") or "unknown"
     provider = routing_provider_for(agents, agent_id)
@@ -8126,7 +8147,8 @@ def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, pur
             "strategyRule": None,
         }
     accepted, rejected = model_candidates(
-        policy, provider, band=band, floor=floor, limits=limits)
+        policy, provider, band=band, floor=floor, limits=limits,
+        capabilities=capabilities)
     if not accepted:
         raise RoutingError(
             "routing-no-qualifying-model",
@@ -8139,6 +8161,15 @@ def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, pur
             exit_code=3)
     ordered, rule = _strategy_pool(policy, accepted, strategy, band)
     chosen = ordered[0]
+    fit = ""
+    if chosen["requestedCapabilities"]:
+        if chosen["capabilityMatches"]:
+            fit = ("; its policy profile matches "
+                   f"{', '.join(chosen['capabilityMatches'])}")
+        else:
+            fit = ("; its policy profile has no documented match for "
+                   f"{', '.join(chosen['requestedCapabilities'])}, so the quality floor "
+                   "and cost rule decide")
     return {
         "accountId": agent_id,
         "account": routing_account_id(agents, agent_id),
@@ -8153,14 +8184,19 @@ def select_model(policy, agents, *, agent_id, band, floor, strategy, limits, pur
         "retryProbability": chosen["retryProbability"],
         "expectedCostUnits": chosen["expectedCostUnits"],
         "reason": (f"{chosen['label']} at '{chosen['effort']}' effort is the "
-                   f"{rule}; it is {chosen['note']}"),
+                   f"{rule}; it is {chosen['note']}{fit}"),
+        "requestedCapabilities": chosen["requestedCapabilities"],
+        "capabilityMatches": chosen["capabilityMatches"],
+        "capabilityCoverage": chosen["capabilityCoverage"],
         "limitations": chosen["limitations"],
         "escalationCeiling": escalation_ceiling(
             policy, tier=chosen["tier"], effort=chosen["effort"], limits=limits),
         "strategyRule": rule,
         "alternatives": [
             {"model": c["model"], "effort": c["effort"], "tier": c["tier"],
-             "costUnits": c["costUnits"], "expectedCostUnits": c["expectedCostUnits"]}
+             "costUnits": c["costUnits"], "expectedCostUnits": c["expectedCostUnits"],
+             "capabilityMatches": c["capabilityMatches"],
+             "capabilityCoverage": c["capabilityCoverage"]}
             for c in ordered[1:1 + ROUTING_MAX_ALTERNATIVES]
         ],
         "rejected": rejected[:ROUTING_MAX_REJECTED],
@@ -8244,6 +8280,67 @@ ROUTING_STAGE_OBJECTIVE = {
     "publication": "publish exactly what was approved, and nothing else",
 }
 
+# These tags are deliberately the same vocabulary as each model's `strengths`
+# in routing-policy.json. The model profiles are curated from provider
+# benchmarks and release guidance; this mapping translates a concrete FDE task
+# into the capabilities those sources actually discuss. It stays categorical:
+# scores from different vendors and harnesses are not falsely treated as one
+# comparable number.
+ROUTING_STAGE_CAPABILITIES = {
+    "intake": ("classification",),
+    "research": ("research",),
+    "solutioning": ("architecture",),
+    "review": ("review",),
+    "reconciliation": ("reconciliation",),
+    "presentation": ("presentation",),
+    "planning": ("planning",),
+    "implementation": ("implementation",),
+    "verification": ("test-engineering",),
+    "deployment": ("reliability-review",),
+    "observability": ("reliability-review",),
+    "publication": ("bounded-formatting",),
+}
+
+ROUTING_ROLE_CAPABILITIES = {
+    "research": ("research",),
+    "solutioning": ("architecture",),
+    "review": ("review",),
+    "prReview": ("review",),
+    "standardsReview": ("review",),
+    "securityReview": ("security-review",),
+    "implementation": ("implementation",),
+    "testEngineering": ("test-engineering",),
+    "ciInvestigation": ("test-engineering",),
+    "releaseManagement": ("reliability-review",),
+    "observability": ("reliability-review",),
+    "presentation": ("presentation",),
+}
+
+ROUTING_RISK_CAPABILITIES = {
+    "security": "security-review",
+    "authentication": "security-review",
+    "payments": "security-review",
+    "privacy": "security-review",
+    "legalCompliance": "security-review",
+    "production": "reliability-review",
+    "destructive": "reliability-review",
+    "dataMigration": "reliability-review",
+    "irreversible": "reliability-review",
+    "deployment": "reliability-review",
+}
+
+
+def routing_capabilities(*, stages=(), role=None, risk_flags=()):
+    capabilities = []
+    for stage in stages:
+        capabilities.extend(ROUTING_STAGE_CAPABILITIES.get(stage, ()))
+    capabilities.extend(ROUTING_ROLE_CAPABILITIES.get(role, ()))
+    for flag in risk_flags:
+        capability = ROUTING_RISK_CAPABILITIES.get(flag)
+        if capability:
+            capabilities.append(capability)
+    return list(dict.fromkeys(capabilities))
+
 
 def _assignee_for(assignments, role):
     value = (assignments or {}).get(role)
@@ -8312,7 +8409,9 @@ def plan_routing_tasks(policy, agents, *, stages, assignments, orchestrator, ass
             decision = select_model(
                 policy, agents, agent_id=account, band=stage_band, floor=stage_floor,
                 strategy=strategy, limits=limits,
-                purpose=f"the {STAGE_LABEL[stage]} stage")
+                purpose=f"the {STAGE_LABEL[stage]} stage",
+                capabilities=routing_capabilities(
+                    stages=(stage,), role=role, risk_flags=flags))
             if not decision["routable"]:
                 unroutable.append({"taskId": task_id, "accountId": account,
                                    "reason": decision["reason"]})
@@ -8390,7 +8489,9 @@ def plan_routing_tasks(policy, agents, *, stages, assignments, orchestrator, ass
             decision = select_model(
                 policy, agents, agent_id=account, band=stage_band, floor=stage_floor,
                 strategy=strategy, limits=limits,
-                purpose=f"the {PROMPT_LABEL.get(role, role)} check in {STAGE_LABEL[stage]}")
+                purpose=f"the {PROMPT_LABEL.get(role, role)} check in {STAGE_LABEL[stage]}",
+                capabilities=routing_capabilities(
+                    stages=(stage,), role=role, risk_flags=flags))
             if not decision["routable"]:
                 unroutable.append({"taskId": task_id, "accountId": account,
                                    "reason": decision["reason"]})
@@ -8538,7 +8639,9 @@ def add_independent_review(policy, agents, *, tasks, stages, assignments, orches
                 decision = select_model(
                     policy, agents, agent_id=account, band="critical", floor=floor,
                     strategy=strategy, limits=policy["limits"]["critical"],
-                    purpose="the independent review this critical work needs")
+                    purpose="the independent review this critical work needs",
+                    capabilities=routing_capabilities(
+                        stages=(stage,), role=role, risk_flags=flags))
                 available, detail = agent_available(agents, account)
                 warnings = []
                 if not available:
@@ -8742,7 +8845,10 @@ def build_routing_decision(policy, agents, *, mode, strategy, orchestrator, requ
 
     orchestrator_decision = select_model(
         policy, agents, agent_id=orchestrator, band=effective_band, floor=floor,
-        strategy=strategy, limits=limits, purpose="orchestrating this run")
+        strategy=strategy, limits=limits, purpose="orchestrating this run",
+        capabilities=routing_capabilities(
+            stages=stages,
+            risk_flags=[entry["flag"] for entry in assessment["riskFlags"]]))
 
     tasks, warnings, not_scheduled, unroutable, discretionary = plan_routing_tasks(
         policy, agents, stages=stages, assignments=assignments,
@@ -10362,6 +10468,32 @@ def plan_next_attempt(run: Run, agents, doc, task, *, probe=False):
                 choice = candidate
                 break
         if choice is None:
+            # A user-approved retry refresh is meaningful even when benchmark-
+            # aware routing selected the top eligible model on the first try.
+            # Keep the exact frozen route and spend only the explicitly granted
+            # retry count; do not invent a tier above the approved ceiling.
+            if progress["retryRefreshes"]:
+                choice = {"model": last.get("model"), "effort": current_effort,
+                          "tier": current_tier,
+                          "costUnits": last.get("estimatedCostUnits"),
+                          "label": last.get("model")}
+                mode, reason = "retry", (
+                    "the user explicitly approved another bounded retry batch and this "
+                    "task is already at the top of its frozen escalation ladder")
+                return _within_budget(choice.get("costUnits"), {
+                    "attempt": progress["attempts"] + 1,
+                    "mode": mode,
+                    "model": choice["model"],
+                    "effort": choice["effort"],
+                    "tier": choice["tier"],
+                    "estimatedCostUnits": choice.get("costUnits"),
+                    "reason": reason,
+                    "classification": classification,
+                    "previous": {"model": last.get("model"),
+                                 "effort": last.get("effort"),
+                                 "tier": last.get("tier"),
+                                 "attempt": last.get("attempt")},
+                })
             _exhausted(limit="escalationCeiling",
                        allowed=f"{ceiling.get('tier')}/{ceiling.get('effort')}",
                        used=f"{current_tier}/{current_effort}")
