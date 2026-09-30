@@ -95,11 +95,11 @@ A profile is a named slice of the catalogue for a kind of work.
 
 | Profile | Servers | Docker profile |
 | --- | --- | --- |
-| `coding` | context7, openwiki, serena | `coding` |
-| `frontend-testing` | context7, openwiki, playwright, chrome-devtools | `frontend-testing` |
-| `client-delivery` | context7, openwiki, atlassian, figma | `client-delivery` |
-| `data` | context7, openwiki, dbhub | `data` |
-| `observability` | context7, openwiki, langfuse, aws, azure | `observability` |
+| `coding` | context7, projectatlas, openwiki, serena | `coding` |
+| `frontend-testing` | context7, projectatlas, openwiki, playwright, chrome-devtools | `frontend-testing` |
+| `client-delivery` | context7, projectatlas, openwiki, atlassian, figma | `client-delivery` |
+| `data` | context7, projectatlas, openwiki, dbhub | `data` |
+| `observability` | context7, projectatlas, openwiki, langfuse, aws, azure | `observability` |
 
 Selecting a profile narrows the effective set; it never widens it. Role, stage
 and readiness still all have to agree.
@@ -123,6 +123,24 @@ write `openwiki/`, Claims sidecars and managed repository instruction blocks.
 Initialize or update a wiki only as an explicitly approved implementation task;
 once a wiki exists, agents retrieve narrowly and verify consequential details
 against current source.
+
+### ProjectAtlas — install and initialize the pinned stable release
+```bash
+cargo install --git https://github.com/styler-ai/ProjectAtlas --tag v0.4.5 projectatlas-cli --locked
+cd /path/to/repository
+projectatlas init
+fde mcp verify projectatlas
+```
+ProjectAtlas is FDE's live repository-intelligence layer: ranked task startup,
+current summaries and relations, and compact exact source slices. The governed
+server is version-gated to `0.4.5`, binds the project-local database/config from
+the repository root, and sets `PROJECTATLAS_NO_TELEMETRY=1`. Ordinary runs expose
+navigation and diagnostics only. Initialization, scans, incremental refresh,
+symbol rebuilds, worktree registration, configuration, purpose curation and
+index resets remain behind implementation-write approval. Call
+`atlas_session_brief` once with compact output, follow the returned next call,
+and use OpenWiki only when the question needs durable explanation rather than
+live source routing.
 
 ### Serena — needs installing
 ```bash
@@ -226,7 +244,7 @@ says why.
 | Atlassian, Figma | OAuth 2.1 | the MCP client, per that provider's supported model. FDE stores nothing. |
 | Langfuse, DBHub | a key pair / a database password | an owner-only file under `~/.claude-shared/secrets/mcp/<server>/<field>`, injected into one child process |
 | AWS, Azure | the local CLI credential chain | your machine's existing `~/.aws` / `az login` session. FDE copies nothing. |
-| Context7, OpenWiki, Serena, Playwright, Chrome DevTools | none | — |
+| Context7, ProjectAtlas, OpenWiki, Serena, Playwright, Chrome DevTools | none | — |
 
 No credential appears in a tracked file, a generated README, an argument list, a
 log line, an event, browser metadata or an API response. Migration never reads or

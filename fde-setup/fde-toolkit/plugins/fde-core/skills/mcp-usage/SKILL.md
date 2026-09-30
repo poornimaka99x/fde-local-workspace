@@ -59,6 +59,22 @@ known file. Normal FDE runs intentionally withhold OpenWiki's generation tools:
 initializing or updating the wiki writes repository documentation and Claims
 metadata, so it belongs in an explicitly approved implementation task.
 
+### ProjectAtlas — live repository routing
+Use it before broad source reads for a non-trivial task in an initialized,
+unfamiliar repository. Call `atlas_session_brief` once with the task and
+`compact: true`, follow its returned next call without restarting discovery,
+then use `atlas_file_summary`, relations or search only as directed and finish
+with the smallest exact `atlas_slice`. Do not refresh merely because a session
+started. If ProjectAtlas reports a stale or missing index, initialization and
+refresh are repository writes and require an approved implementation task.
+Normal FDE sessions intentionally withhold those tools and disable telemetry.
+
+ProjectAtlas and OpenWiki serve different needs. Start with ProjectAtlas to
+locate and prove current code; use OpenWiki for a concrete architecture or
+workflow explanation; verify consequential wiki claims against ProjectAtlas or
+current source. Neither should be called for a small file whose path is already
+known.
+
 ### Playwright — browser workflows and evidence
 Use it for user flows, accessibility-tree interaction, responsive behaviour and
 end-to-end verification of a UI you are building. Prefer a repository-owned

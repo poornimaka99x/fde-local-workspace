@@ -356,6 +356,28 @@ modified code, requires exact behavior preservation, and reruns affected checks
 after refinement. The existing implementation write approval and workflow
 governance remain authoritative.
 
+### Evo autoresearch
+
+The official `evo-hq/evo` plugin is imported at `v0.8.0`, commit
+`ab5fbd6c8210ed900157c8907a431bafc74c4215`, under Apache-2.0. The FDE importer
+records the complete tree checksum and the explicit review of its six lifecycle
+hooks and six executable files. The CLI, skills and hook protocol must stay on
+the same version.
+
+Evo is offered only in `vertical-slice`; it is never enabled by the workflow.
+Opting in requires the plugin, official discover/optimize/report/ship/subagent
+skills, benchmark reviewer, ideator, verifier, commands and lifecycle hooks as a
+single experiment capability. The `fde:evo-experimentation` skill overlays the
+FDE rules: an explicit measurable objective, implementation-write approval,
+local worktrees, telemetry off, autonomous off by default, bounded resource-safe
+rounds, correctness gates and an independent rerun.
+
+Evo inherits the implementation identity plus the model and effort selected by
+FDE. Its internal orchestration is not permission to switch accounts or tiers.
+Remote sandboxes are separately cost-bearing/deployment-controlled, and Evo's
+ship action remains subject to reconciliation and SCM publication approval.
+Its hooks remain off in every non-implementation stage.
+
 ### Governance
 
 The template carries a `governance` block, and resolution and every run snapshot

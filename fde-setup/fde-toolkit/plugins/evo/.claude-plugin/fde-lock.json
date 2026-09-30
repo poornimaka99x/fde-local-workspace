@@ -1,0 +1,806 @@
+{
+  "accepted": {
+    "executables": true,
+    "hooks": true
+  },
+  "commit": "ab5fbd6c8210ed900157c8907a431bafc74c4215",
+  "commitDate": "2026-07-17T22:22:31+05:30",
+  "commitVerified": true,
+  "executables": [
+    "bin/evo",
+    "bin/evo-hook-drain",
+    "hooks/wait_hint.sh",
+    "npm/scripts/sync-from-source.sh",
+    "scripts/build-js-bundles.sh",
+    "scripts/bump-version.py"
+  ],
+  "fileCount": 151,
+  "files": [
+    {
+      "bytes": 150,
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "b3860e6046a53ca2f5faf4e6fa8a3551c33d41377574da5677829697987a1b44"
+    },
+    {
+      "bytes": 378,
+      "path": ".codex-plugin/plugin.json",
+      "sha256": "43f675d24aea5d4e844379c8f5c461aa2c26928d712b03881cf2c168a6624010"
+    },
+    {
+      "bytes": 906,
+      "path": ".kimi-plugin/plugin.json",
+      "sha256": "5518e9c704b16a19dc8a645511bca253eb022864658ce180e89cc32bba004bd5"
+    },
+    {
+      "bytes": 11306,
+      "path": "LICENSE",
+      "sha256": "0d5e25c06c0daaeed16a06088d691ad38d4d29472bca1bb9e6ea9cf583de5534"
+    },
+    {
+      "bytes": 89,
+      "path": "NOTICE",
+      "sha256": "f3d8d590b399441b8898471212b50728835431b7166f1db489e988e2f5c2ae1d"
+    },
+    {
+      "bytes": 231,
+      "path": "README.md",
+      "sha256": "257a9d253709963ef1c903ee88df6035f98e49a657efd66de6279d6b420f3d1c"
+    },
+    {
+      "bytes": 12154,
+      "path": "agents/benchmark-reviewer.md",
+      "sha256": "e202e1e26faf3d340835796fcceeeb7a66b5ce95e35f898c758f1bc0037d7be9"
+    },
+    {
+      "bytes": 11524,
+      "path": "agents/ideator.md",
+      "sha256": "cf2d072cb66195b3ac778da9fba771569df941628fb78d4279f33061818f1a77"
+    },
+    {
+      "bytes": 11505,
+      "path": "agents/verifier.md",
+      "sha256": "3978cba3e997f3a23ca1461e2d82ae025edba914ffe408e3de2aa90fe261635d"
+    },
+    {
+      "bytes": 1220,
+      "path": "bin/evo",
+      "sha256": "caa84cd0aab3e8225a654ec33552d9408db62dd8238714dce5dda385c1af2af2"
+    },
+    {
+      "bytes": 957,
+      "path": "bin/evo-hook-drain",
+      "sha256": "c2978b52f6b115b79f113099f175a2cf93ec8cf998b9689feb44701dbedab679"
+    },
+    {
+      "bytes": 158,
+      "path": "bin/evo-hook-drain-rs/Cargo.lock",
+      "sha256": "9e9b6e2c2c3e6e7d6c8e8175c80d4a82102c469c6a4bc5630fdaae4f5b037045"
+    },
+    {
+      "bytes": 509,
+      "path": "bin/evo-hook-drain-rs/Cargo.toml",
+      "sha256": "b5f267e0596ee83c7efd6ec99551618e75e1efe8ee76e579b9ac971447c43340"
+    },
+    {
+      "bytes": 32410,
+      "path": "bin/evo-hook-drain-rs/src/main.rs",
+      "sha256": "d6183bba01cf5b3309f378eb619693a9e647b6d6ce6738b075b32e7418447c64"
+    },
+    {
+      "bytes": 500,
+      "path": "commands/discover.md",
+      "sha256": "8a7179aa2557176d4d244b0ea6ea56627fb523e267e4316c71ec000d581f2320"
+    },
+    {
+      "bytes": 479,
+      "path": "commands/optimize.md",
+      "sha256": "852fe68fbd10610d7560c09e1ae92f1bf6cbf6f522cebfbd0839f696f027945e"
+    },
+    {
+      "bytes": 8723,
+      "path": "hooks/hooks.json",
+      "sha256": "2495b6d1f6b507a420fc364df302631d3335c027038f6dd8f23a1036ef25b28a"
+    },
+    {
+      "bytes": 3875,
+      "path": "hooks/wait_hint.sh",
+      "sha256": "6383cb8663b91be60cd391ac4a135e181025c8e010a2e0a7c08ea56cf46ff539"
+    },
+    {
+      "bytes": 1843,
+      "path": "npm/README.md",
+      "sha256": "cb510b4bba61b55d7f11c3dba4ac3edf7e1b42d47fd92b0c469635b3ef4d3c1e"
+    },
+    {
+      "bytes": 27242,
+      "path": "npm/extensions/evo/index.js",
+      "sha256": "b6ea428b0118efcd2c066d3bfea721e0dfced5f909c1becd752dc6b63f4786e7"
+    },
+    {
+      "bytes": 902,
+      "path": "npm/package.json",
+      "sha256": "c301640597d270318e14062a62f6ab2a591137abc3a5c2a7e9267f23643a22da"
+    },
+    {
+      "bytes": 1563,
+      "path": "npm/scripts/sync-from-source.sh",
+      "sha256": "b401a4a0647b2bdc65296926dd1fcb745e13e9ca538d8147a0930ae399de0167"
+    },
+    {
+      "bytes": 46707,
+      "path": "npm/skills/discover/SKILL.md",
+      "sha256": "c73131e1c4a2cd7fabc02c4f4bbaf0cf11b781d3f9dd1d03750e817f8decf80f"
+    },
+    {
+      "bytes": 11280,
+      "path": "npm/skills/discover/references/constructing-benchmark.md",
+      "sha256": "30cc951d8c9f81a1286b5c33ca03229b82515dc5d8d277e104c6c32585f39a9a"
+    },
+    {
+      "bytes": 5372,
+      "path": "npm/skills/discover/references/inline_instrumentation.js",
+      "sha256": "e1f2158353cbef59b4d683b2add47421be5e4d437ad049ce475151904b54c102"
+    },
+    {
+      "bytes": 6450,
+      "path": "npm/skills/discover/references/inline_instrumentation.py",
+      "sha256": "c0b649e1072df0a34b7fe042d1959e41d01536eeac382698a835dc1a6404d779"
+    },
+    {
+      "bytes": 4600,
+      "path": "npm/skills/discover/references/instrumentation-contract.md",
+      "sha256": "71d3d71b609783b61df1c1a86cf2fe89904f73c5f281a2a403b1d70e030514d3"
+    },
+    {
+      "bytes": 4307,
+      "path": "npm/skills/discover/references/proposing-dimensions.md",
+      "sha256": "2a8b21e7ae3134331adfb85dbd7680c1f90b1141233914f60d7f9e9d40de4046"
+    },
+    {
+      "bytes": 1783,
+      "path": "npm/skills/discover/references/sdk_node.js",
+      "sha256": "73a789fcc383d7b4f5c36138ae4993b5234608e03d06067cb89a25351e202007"
+    },
+    {
+      "bytes": 2559,
+      "path": "npm/skills/discover/references/sdk_python.py",
+      "sha256": "8e47bc1d299de587249f4b3b7f23c46d19566614a8b98e8f229e184342d400d0"
+    },
+    {
+      "bytes": 4889,
+      "path": "npm/skills/discover/references/sizing-the-round.md",
+      "sha256": "0c58b5f890a1020c490534c10e701aff339ed7998a1bd8d6416b762748254b58"
+    },
+    {
+      "bytes": 1462,
+      "path": "npm/skills/discover/scripts/validate_result.py",
+      "sha256": "5056cdd40f7cc47c04e8b61fb0c2dd8b75b297cad1be281b1ef718f883bc331c"
+    },
+    {
+      "bytes": 4046,
+      "path": "npm/skills/infra-setup/SKILL.md",
+      "sha256": "c1ffd4aefc1fb0ab7e23dae4e34af3feddff5de00451bc162e4419046500b75c"
+    },
+    {
+      "bytes": 3005,
+      "path": "npm/skills/infra-setup/references/provider-matrix.md",
+      "sha256": "b21bd7a73d5c8472b8e30e876fc7cf4af527d6c15e294f31e65c70e84bd1b0ce"
+    },
+    {
+      "bytes": 52102,
+      "path": "npm/skills/optimize/SKILL.md",
+      "sha256": "43b4876b822eaafbc5d58cddf6af63d7c63b6882874a60647ba8878dacce391e"
+    },
+    {
+      "bytes": 57907,
+      "path": "npm/skills/optimize/workflows/evo-optimize.js",
+      "sha256": "df9ee8923aaf701038146fac89b3df929ff1ad1bc25fb69e46d57af92804e739"
+    },
+    {
+      "bytes": 4033,
+      "path": "npm/skills/report/SKILL.md",
+      "sha256": "deff121e50ff251b896fbfbde8ebf0686ad9cb9b5279f6c8a0812489724771e2"
+    },
+    {
+      "bytes": 6712,
+      "path": "npm/skills/ship/SKILL.md",
+      "sha256": "6851a5bc7a3ba31ad735e53e23e0d84acfd7e0176a6bc88b01f932bbc8d5c9ff"
+    },
+    {
+      "bytes": 28485,
+      "path": "npm/skills/subagent/SKILL.md",
+      "sha256": "cc7b6a5266786f7ca17cfa30c817c77b078a0ce6cc6f28165e1a777269c6479e"
+    },
+    {
+      "bytes": 2092,
+      "path": "pyproject.toml",
+      "sha256": "1c01e8f3db1549f44ddb91e3cbf38e6af97d8d25f7f5bb0f9fe3e2793b9a19f0"
+    },
+    {
+      "bytes": 880,
+      "path": "scripts/build-js-bundles.sh",
+      "sha256": "a5147622707c1cc436213c8c5442b4354b6298f9dbc9abf708e4683a8b223caa"
+    },
+    {
+      "bytes": 10634,
+      "path": "scripts/bump-version.py",
+      "sha256": "f77515382b7032e29f51af4ad3bc81f7a909d807d2c2c1b929f5b3f061960df6"
+    },
+    {
+      "bytes": 46707,
+      "path": "skills/discover/SKILL.md",
+      "sha256": "c73131e1c4a2cd7fabc02c4f4bbaf0cf11b781d3f9dd1d03750e817f8decf80f"
+    },
+    {
+      "bytes": 11280,
+      "path": "skills/discover/references/constructing-benchmark.md",
+      "sha256": "30cc951d8c9f81a1286b5c33ca03229b82515dc5d8d277e104c6c32585f39a9a"
+    },
+    {
+      "bytes": 5372,
+      "path": "skills/discover/references/inline_instrumentation.js",
+      "sha256": "e1f2158353cbef59b4d683b2add47421be5e4d437ad049ce475151904b54c102"
+    },
+    {
+      "bytes": 6450,
+      "path": "skills/discover/references/inline_instrumentation.py",
+      "sha256": "c0b649e1072df0a34b7fe042d1959e41d01536eeac382698a835dc1a6404d779"
+    },
+    {
+      "bytes": 4600,
+      "path": "skills/discover/references/instrumentation-contract.md",
+      "sha256": "71d3d71b609783b61df1c1a86cf2fe89904f73c5f281a2a403b1d70e030514d3"
+    },
+    {
+      "bytes": 4307,
+      "path": "skills/discover/references/proposing-dimensions.md",
+      "sha256": "2a8b21e7ae3134331adfb85dbd7680c1f90b1141233914f60d7f9e9d40de4046"
+    },
+    {
+      "bytes": 1783,
+      "path": "skills/discover/references/sdk_node.js",
+      "sha256": "73a789fcc383d7b4f5c36138ae4993b5234608e03d06067cb89a25351e202007"
+    },
+    {
+      "bytes": 2559,
+      "path": "skills/discover/references/sdk_python.py",
+      "sha256": "8e47bc1d299de587249f4b3b7f23c46d19566614a8b98e8f229e184342d400d0"
+    },
+    {
+      "bytes": 4889,
+      "path": "skills/discover/references/sizing-the-round.md",
+      "sha256": "0c58b5f890a1020c490534c10e701aff339ed7998a1bd8d6416b762748254b58"
+    },
+    {
+      "bytes": 1462,
+      "path": "skills/discover/scripts/validate_result.py",
+      "sha256": "5056cdd40f7cc47c04e8b61fb0c2dd8b75b297cad1be281b1ef718f883bc331c"
+    },
+    {
+      "bytes": 18111,
+      "path": "skills/finetuning/SKILL.md",
+      "sha256": "ea19415079d8557af9089800b6089a4da901941c0fa29ce87756d1258fda4e1a"
+    },
+    {
+      "bytes": 1685,
+      "path": "skills/finetuning/references/diagnostics.md",
+      "sha256": "c181098d7484e841cc1ee62cfe36cc9b5d168c5901638bb14a7e3a8544139702"
+    },
+    {
+      "bytes": 3468,
+      "path": "skills/finetuning/references/false-progress.md",
+      "sha256": "ae0454df022c35cd7b4fa8953900480cebc94941626ce31bac3b7e9a07123e7b"
+    },
+    {
+      "bytes": 2909,
+      "path": "skills/finetuning/references/glue.md",
+      "sha256": "0d4dcd5bfaf8d0372ae593129ca3a72512e13899ecd8a25de6125d4c5c683746"
+    },
+    {
+      "bytes": 4472,
+      "path": "skills/finetuning/references/observability.md",
+      "sha256": "8403196dea7104cbb575443d78e96ec1f486a6fb038974b382635845a6c0d7d6"
+    },
+    {
+      "bytes": 996,
+      "path": "skills/finetuning/references/rl/art.md",
+      "sha256": "ecc3b65eacfdc6697b5bea44b927a9761185b1aea390fb33b1ffca2afa441fc1"
+    },
+    {
+      "bytes": 1088,
+      "path": "skills/finetuning/references/serving/vllm.md",
+      "sha256": "2edd1022a9df730fb62c807e13a28983c1dabc20bc8bb72250e019fcfacec096"
+    },
+    {
+      "bytes": 1229,
+      "path": "skills/finetuning/references/sft/tinker.md",
+      "sha256": "d209292343a0524b70ce6cae3faf76cd176bab154271bb5b9f613ad330ada174"
+    },
+    {
+      "bytes": 1996,
+      "path": "skills/finetuning/references/trace-schema.md",
+      "sha256": "d39bd6e2ac2fc90520061ea1783584bf8e8c7864e39795bad8fcc0959b33a4d7"
+    },
+    {
+      "bytes": 4046,
+      "path": "skills/infra-setup/SKILL.md",
+      "sha256": "c1ffd4aefc1fb0ab7e23dae4e34af3feddff5de00451bc162e4419046500b75c"
+    },
+    {
+      "bytes": 3005,
+      "path": "skills/infra-setup/references/provider-matrix.md",
+      "sha256": "b21bd7a73d5c8472b8e30e876fc7cf4af527d6c15e294f31e65c70e84bd1b0ce"
+    },
+    {
+      "bytes": 52102,
+      "path": "skills/optimize/SKILL.md",
+      "sha256": "43b4876b822eaafbc5d58cddf6af63d7c63b6882874a60647ba8878dacce391e"
+    },
+    {
+      "bytes": 57907,
+      "path": "skills/optimize/workflows/evo-optimize.js",
+      "sha256": "df9ee8923aaf701038146fac89b3df929ff1ad1bc25fb69e46d57af92804e739"
+    },
+    {
+      "bytes": 10395,
+      "path": "skills/references/agent-sdk-reference.md",
+      "sha256": "f74160f0ede685ca560d9c833c51d78bb6770cc9691ccc78c953f13055642d07"
+    },
+    {
+      "bytes": 24729,
+      "path": "skills/references/cli-quick-reference.md",
+      "sha256": "e6b89325e2d18cb60351efac38737e024e340e74a0b8577e48864da69c69bc9b"
+    },
+    {
+      "bytes": 4170,
+      "path": "skills/references/evo-wait.md",
+      "sha256": "2e4f7ef8841bf04781209228e6e1fea7607b3dd8acd3d1a92e81702022106be7"
+    },
+    {
+      "bytes": 4033,
+      "path": "skills/report/SKILL.md",
+      "sha256": "deff121e50ff251b896fbfbde8ebf0686ad9cb9b5279f6c8a0812489724771e2"
+    },
+    {
+      "bytes": 6712,
+      "path": "skills/ship/SKILL.md",
+      "sha256": "6851a5bc7a3ba31ad735e53e23e0d84acfd7e0176a6bc88b01f932bbc8d5c9ff"
+    },
+    {
+      "bytes": 28485,
+      "path": "skills/subagent/SKILL.md",
+      "sha256": "cc7b6a5266786f7ca17cfa30c817c77b078a0ce6cc6f28165e1a777269c6479e"
+    },
+    {
+      "bytes": 272,
+      "path": "src/evo/__init__.py",
+      "sha256": "f8b7410dc71631edc047ec40a637c1e9ecbc67a544c176f80520731ab9bb7dbf"
+    },
+    {
+      "bytes": 4511,
+      "path": "src/evo/backends/__init__.py",
+      "sha256": "0d146c0bc2eb71294c54257ae11e90cbcfcbd74abefcd38e784ff3ab3de75e2a"
+    },
+    {
+      "bytes": 11091,
+      "path": "src/evo/backends/gitdir.py",
+      "sha256": "8f58205705c0946bbc722cadb797caed2467b5dd1d24f032d54fb2ce3d2264ff"
+    },
+    {
+      "bytes": 13955,
+      "path": "src/evo/backends/pool.py",
+      "sha256": "3600f530745c5e6386128ca455245584ba6f61258c65f730d7d3c73754797392"
+    },
+    {
+      "bytes": 4644,
+      "path": "src/evo/backends/pool_state.py",
+      "sha256": "ef2ab3666575ff0c213e61c5ab16d970ba6551066baa0163fe639e93c429e376"
+    },
+    {
+      "bytes": 7108,
+      "path": "src/evo/backends/protocol.py",
+      "sha256": "885f03b76eb079f876af4e7464530c440e931683d356c437805c39a1e1e0448a"
+    },
+    {
+      "bytes": 23269,
+      "path": "src/evo/backends/remote.py",
+      "sha256": "d85b2373ead37c29baf82a1d7f541b603011df55730d5bdf29e9b23316998131"
+    },
+    {
+      "bytes": 9397,
+      "path": "src/evo/backends/remote_state.py",
+      "sha256": "ab34de7d71c525958233d6e5dc0e6b4198150f343ec02ef42b1a276873f55c52"
+    },
+    {
+      "bytes": 6459,
+      "path": "src/evo/backends/sandbox_providers/__init__.py",
+      "sha256": "2ebc55c6b9d7492f384096c49f8e2b9e75ccd04de4baeb3f1743e07314f7139a"
+    },
+    {
+      "bytes": 2727,
+      "path": "src/evo/backends/sandbox_providers/_common.py",
+      "sha256": "650562c758aaf447a8259f9806ea27e71827f7346844f1b7d75a89ddbd87ae09"
+    },
+    {
+      "bytes": 6845,
+      "path": "src/evo/backends/sandbox_providers/aws.py",
+      "sha256": "4794427d60f2dae1506ebe8299880c84e08f41ba77e68799f2ef93f2fe8f9e85"
+    },
+    {
+      "bytes": 18671,
+      "path": "src/evo/backends/sandbox_providers/azure.py",
+      "sha256": "b02c1db1d56b81c22d95a4efcdcbb09980e5df6d07ec228503374856cef2f2c2"
+    },
+    {
+      "bytes": 6137,
+      "path": "src/evo/backends/sandbox_providers/daytona.py",
+      "sha256": "a4ba6d65afb29efd5f9901dac746929739d6ad7cb2060fc63515cb32bc0fae42"
+    },
+    {
+      "bytes": 6085,
+      "path": "src/evo/backends/sandbox_providers/e2b.py",
+      "sha256": "e53aed6ac856885e15deb333f7963abf6ea37ebc585429e86acd265b12b10613"
+    },
+    {
+      "bytes": 3962,
+      "path": "src/evo/backends/sandbox_providers/manual.py",
+      "sha256": "b4e48a9dbff8f86ac4a0ca043182f8014129b4f20f518b36e9dda0e39cec138f"
+    },
+    {
+      "bytes": 8926,
+      "path": "src/evo/backends/sandbox_providers/modal.py",
+      "sha256": "89f0bf749724e456b83b1cc33e9fe527c4b72d45bd95638945ce0044e96b627b"
+    },
+    {
+      "bytes": 16699,
+      "path": "src/evo/backends/sandbox_providers/ssh.py",
+      "sha256": "d2521f78feeaf8ab0c29079d669526e30a3693e60ac6005b4ab341916772ddd7"
+    },
+    {
+      "bytes": 433,
+      "path": "src/evo/backends/state_keys.py",
+      "sha256": "bc6af7c129e300af1eb120d0ccc19e49b82a6d7fd522b83c8249e35e020cecfa"
+    },
+    {
+      "bytes": 6059,
+      "path": "src/evo/backends/worktree.py",
+      "sha256": "68ea669b156413c7dce6d33db5d8822f9840ce6a1c6b2eddd969cd1aeeafeee5"
+    },
+    {
+      "bytes": 296301,
+      "path": "src/evo/cli.py",
+      "sha256": "82aae628e78b942adefb7460c3e6ff220f8752caadc67949aa078201e6c03247"
+    },
+    {
+      "bytes": 47862,
+      "path": "src/evo/core.py",
+      "sha256": "2a2a8e201aec5542f566ae81c9d2319f38200cd26a8dd2a306464d081db2b1ed"
+    },
+    {
+      "bytes": 47538,
+      "path": "src/evo/dashboard.py",
+      "sha256": "c5da53482a9b61fb9e4e69a24eedf0d7ec9328bb80752fc1cdd401c2702d1e6e"
+    },
+    {
+      "bytes": 12931,
+      "path": "src/evo/dashboard_supervisor.py",
+      "sha256": "343a7505af918eedb5a1ae220141ae9996dfe6ef29c976b7e1f663d96c0c0ecb"
+    },
+    {
+      "bytes": 21344,
+      "path": "src/evo/dispatch.py",
+      "sha256": "bc1e1df2de26fefcc17ad366fb67a57562dbb1ebe5ef414e446ebe371249af4d"
+    },
+    {
+      "bytes": 20643,
+      "path": "src/evo/frontier_strategies.py",
+      "sha256": "2162e440a6c88c7d5c889e106dcf55127674c1aa24e087505ee5a6f86473d5d2"
+    },
+    {
+      "bytes": 7460,
+      "path": "src/evo/git_bundle.py",
+      "sha256": "72a7dade0830fb8c4fad1f270f84ea6367606b90745f161da8145b032e3fc68f"
+    },
+    {
+      "bytes": 10126,
+      "path": "src/evo/hermes_plugin/__init__.py",
+      "sha256": "b92493c0d0a903992b02224dc9bcb3e087f0675556229e8079f12c2588cd49ab"
+    },
+    {
+      "bytes": 8184,
+      "path": "src/evo/host_install/__init__.py",
+      "sha256": "3a494c46eda1284cfd0d3fe664856e4796031fa1a4b6a4f2cadd09a8cfa31f8e"
+    },
+    {
+      "bytes": 12434,
+      "path": "src/evo/host_install/_hook_drain.py",
+      "sha256": "eb85386992aa8dde6fb9209cfd3dfb435f301ef350de279102a8d6282bf10b7a"
+    },
+    {
+      "bytes": 13866,
+      "path": "src/evo/host_install/claude_code.py",
+      "sha256": "c586bea9ac913f3c69190bef21d9a753c0d8b2a5469f4d06160d657065331d4d"
+    },
+    {
+      "bytes": 2143,
+      "path": "src/evo/host_install/claude_science.py",
+      "sha256": "c442660c32eedf93c42073c59849cafbf75baa60a30f1a7f86657ee7fa6ab1b4"
+    },
+    {
+      "bytes": 37970,
+      "path": "src/evo/host_install/codex.py",
+      "sha256": "360a30eda4555e9575761c3645b2098d872db80f5a8eb809371c39b5a8ae3a72"
+    },
+    {
+      "bytes": 11344,
+      "path": "src/evo/host_install/cursor.py",
+      "sha256": "0f12abb1e14838167fbb92ac1846a6129d321bb10747ea3874e5e5dbb5a58804"
+    },
+    {
+      "bytes": 9898,
+      "path": "src/evo/host_install/hermes.py",
+      "sha256": "8de89b7489618b1877e9bdd7389c1a4f958ccc43d946600229d7e2fd8b532786"
+    },
+    {
+      "bytes": 12638,
+      "path": "src/evo/host_install/kimi.py",
+      "sha256": "2095f8cf73439d25b03904408e56dea5a7c582ddaf1c13ad232f69341474ae12"
+    },
+    {
+      "bytes": 9183,
+      "path": "src/evo/host_install/openclaw.py",
+      "sha256": "13b1068d5fa242b202620610ae8a86c5d06b28216d3551f58eac94a150bdab88"
+    },
+    {
+      "bytes": 5194,
+      "path": "src/evo/host_install/opencode.py",
+      "sha256": "2094babe2e4b267ff17c41de0b2424e0c377046016e448459324ff9fe8183faf"
+    },
+    {
+      "bytes": 10652,
+      "path": "src/evo/host_install/pi.py",
+      "sha256": "51f66eae89ac8cb7ecef72dec84cdd0286b69b1fc779ea43f280542e84b16d1f"
+    },
+    {
+      "bytes": 892,
+      "path": "src/evo/hosts/__init__.py",
+      "sha256": "67061ff081cc99f22ddae5d71a46d03af9d5ee5ecac8f72cd2f1495c6a200afa"
+    },
+    {
+      "bytes": 9954,
+      "path": "src/evo/hosts/claude_fork.py",
+      "sha256": "688066649900b521196cc24f227047cf11bb64a76e7189f9af33bc005e9f829f"
+    },
+    {
+      "bytes": 666,
+      "path": "src/evo/inject/__init__.py",
+      "sha256": "e22c430bba8869529dab2a4bc9a5ef38b84244935639f0bc55fa590162518e1b"
+    },
+    {
+      "bytes": 68955,
+      "path": "src/evo/inject/drain.py",
+      "sha256": "b038348e3aebac73d568ab218ccb118ef92d4870721ba29de49cda1f4ff8104a"
+    },
+    {
+      "bytes": 791,
+      "path": "src/evo/inject/marker.py",
+      "sha256": "ff6967c32d3ab1580b0b5b8866569ae3e3621e31abfe42fbd944604bf0c49011"
+    },
+    {
+      "bytes": 2781,
+      "path": "src/evo/inject/paths.py",
+      "sha256": "698c3abba1f906e11cd524360521959b669a0d3c0078a9a94c0fbdcd7ba12e35"
+    },
+    {
+      "bytes": 5099,
+      "path": "src/evo/inject/queue.py",
+      "sha256": "e140a749bee56a43356d87432e58a8d870e4805a015e7c3a6e1f60b5c25041da"
+    },
+    {
+      "bytes": 21272,
+      "path": "src/evo/inject/registry.py",
+      "sha256": "66ca2176cb576d464165b3ce418f4a3734f889930b9b39fae383d602ccf92cd6"
+    },
+    {
+      "bytes": 1281,
+      "path": "src/evo/locking.py",
+      "sha256": "09deac0d84707767fe4e23c859d41db0f0f430a409a1b67b1facfe07147a7a9e"
+    },
+    {
+      "bytes": 27259,
+      "path": "src/evo/openclaw_plugin/evo.bundle.js",
+      "sha256": "7ff6314496c9de4381d2a80e8711a566fa0ab38b1af0a0fe1d368573cddf7120"
+    },
+    {
+      "bytes": 13919,
+      "path": "src/evo/openclaw_plugin/factory.ts",
+      "sha256": "7ca96941cb43fdbc372ec3f81555f1c2fb6b39576126ec649c851bbacd6ad41e"
+    },
+    {
+      "bytes": 378,
+      "path": "src/evo/openclaw_plugin/index.ts",
+      "sha256": "be6c9e1c5d166bc559b4465682a007b922cf629d84ba1c2ce647acc069a56942"
+    },
+    {
+      "bytes": 631,
+      "path": "src/evo/openclaw_plugin/native/HOOK.md",
+      "sha256": "9b185933a684749977d9615495e7855df5f3ab98a7d4a187a8657da9b3ed3931"
+    },
+    {
+      "bytes": 27861,
+      "path": "src/evo/openclaw_plugin/native/index.js",
+      "sha256": "ce6daffb681a73d134eedfd3248f3ac191439f1adb0a36f6e208c1603576fb0d"
+    },
+    {
+      "bytes": 14138,
+      "path": "src/evo/openclaw_plugin/native/index.ts",
+      "sha256": "88cbfb68501e6342dace80aac3364f7c389302e2647ee85c7f4d7720e624230f"
+    },
+    {
+      "bytes": 612,
+      "path": "src/evo/openclaw_plugin/native/openclaw.plugin.json",
+      "sha256": "b0b2a2368aa2a692b03a75c2c74bca803f6aeb490a9af1ad91e9921eb0696326"
+    },
+    {
+      "bytes": 523,
+      "path": "src/evo/openclaw_plugin/pi-entry.ts",
+      "sha256": "42149610949afb2f3d9aa66a5d51add89992ae3470fcf0acacd7b463d867b5c4"
+    },
+    {
+      "bytes": 27242,
+      "path": "src/evo/openclaw_plugin/pi.bundle.js",
+      "sha256": "b6ea428b0118efcd2c066d3bfea721e0dfced5f909c1becd752dc6b63f4786e7"
+    },
+    {
+      "bytes": 39348,
+      "path": "src/evo/opencode_plugin/drain.ts",
+      "sha256": "9bb584771976fa622dc0f7bd2202e64cf64e2d82b354ecdf40945b295f4b3cac"
+    },
+    {
+      "bytes": 23993,
+      "path": "src/evo/opencode_plugin/evo.bundle.js",
+      "sha256": "a0d214b6bea86ce88291881b608ed2154f0b28e4777fce6838e63698f690cbe0"
+    },
+    {
+      "bytes": 11180,
+      "path": "src/evo/opencode_plugin/index.ts",
+      "sha256": "22e4037e8ddc33458c7a0e091b1d7eed0701df2c8a3054961d2511f4d856a56f"
+    },
+    {
+      "bytes": 881,
+      "path": "src/evo/providers.py",
+      "sha256": "ec7faaf9775fdeee6e437494c152ea38200e50d21d732e3a47b1b166951d61d7"
+    },
+    {
+      "bytes": 24612,
+      "path": "src/evo/report.py",
+      "sha256": "b9f2ba6bfde9d09584de97158896116b2be3abc39d97d2c74fe8897cf30a750d"
+    },
+    {
+      "bytes": 14189,
+      "path": "src/evo/sandbox_client.py",
+      "sha256": "462ce0a1bbd097ea80c3cc69a1b518eee86c25b767e87badc3dc45ec2f6e4740"
+    },
+    {
+      "bytes": 20419,
+      "path": "src/evo/scratchpad.py",
+      "sha256": "8f1c26b6aa6a4f1967ceb820878cee9e610180f7bd780602944101fcbdde7e91"
+    },
+    {
+      "bytes": 188214,
+      "path": "src/evo/static/app.js",
+      "sha256": "13b9c18551819198cfe2911aa1a5b67951cee322daa2077ac875094e7ff1ddf1"
+    },
+    {
+      "bytes": 339,
+      "path": "src/evo/static/favicon.svg",
+      "sha256": "48ab1da871f2d54b9136e747c7dba34d4ca1ba3c9d91cd9ba615d1853e7d7981"
+    },
+    {
+      "bytes": 38745,
+      "path": "src/evo/static/highlight-langs-extra.min.js",
+      "sha256": "355ff3a54daf768a4928b48a781a51088f31eb3f38496db89e1eb63ff6fe5cad"
+    },
+    {
+      "bytes": 121727,
+      "path": "src/evo/static/highlight.min.js",
+      "sha256": "837a6fa5b0c736b52bbde2b2b6190f305da3fc9ed41681db5321507057b5c846"
+    },
+    {
+      "bytes": 1315,
+      "path": "src/evo/static/hljs-theme.css",
+      "sha256": "9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019"
+    },
+    {
+      "bytes": 9844,
+      "path": "src/evo/static/index.html",
+      "sha256": "0b70d81a419dcc7b42e63aeefae6c7ad1c3ea1d8f6996b358174855ddfdc24b2"
+    },
+    {
+      "bytes": 3474,
+      "path": "src/evo/static/logos/aws.svg",
+      "sha256": "2a56115f402fd8de767fe7bdcea999a7efd67c61ef11011fc33435bddd2c03fd"
+    },
+    {
+      "bytes": 7385,
+      "path": "src/evo/static/logos/azure.svg",
+      "sha256": "8ea658a5b8dcc92adbf83ba60df4d7209b60ff1331d64b86c9d2dde96eb6bfc4"
+    },
+    {
+      "bytes": 856,
+      "path": "src/evo/static/logos/daytona.svg",
+      "sha256": "0ca1c52e0f9097e363fe6ae7c29881eabd1fcf525147f5fd5a1b49068b1bfba2"
+    },
+    {
+      "bytes": 20593,
+      "path": "src/evo/static/logos/e2b.png",
+      "sha256": "4a8eaa74cf983838d25274c3e4217f64e7f594c4a71f8c523d4cf1ee4b0f762b"
+    },
+    {
+      "bytes": 497,
+      "path": "src/evo/static/logos/modal.svg",
+      "sha256": "a55c5490f248e612e3d5095488093494f088e32c42b274ce7dd4f4dfc7cee993"
+    },
+    {
+      "bytes": 82833,
+      "path": "src/evo/static/style.css",
+      "sha256": "b04d0da26e68be7b8f3ed9c4bef2b7865151b7220cfa11200b963a790a1959bc"
+    },
+    {
+      "bytes": 13425,
+      "path": "src/evo/telemetry.py",
+      "sha256": "8e0212f6253204c2f7789ebab575dd54e928a9fe2beb42b0ec6b2f50badf56ee"
+    },
+    {
+      "bytes": 4535,
+      "path": "src/evo/user_defaults.py",
+      "sha256": "0ae463c631b9a249f3a3379255b71d249cf94b3af05ef690cecf4b50d27de458"
+    },
+    {
+      "bytes": 6325,
+      "path": "src/evo/version_check.py",
+      "sha256": "c36253b67a708b1f14ee78334c0b56cef182dd20e4e8e72377f093f6e6662390"
+    },
+    {
+      "bytes": 23983,
+      "path": "src/evo/workspace_executor.py",
+      "sha256": "10f352e1fe6dedde980579be9cb831744ec34a2db6a8e18bf8fc0cccc2505dc6"
+    },
+    {
+      "bytes": 502362,
+      "path": "uv.lock",
+      "sha256": "0df47d309178b99e83a1d3ada0b9a2edd4cf9c2b789da7b966529d874feb916c"
+    }
+  ],
+  "hooks": [
+    "PostToolUse",
+    "PreToolUse",
+    "SessionStart",
+    "Stop",
+    "SubagentStop",
+    "UserPromptSubmit"
+  ],
+  "importedPaths": null,
+  "installFiles": [
+    "npm/package.json"
+  ],
+  "installedAt": "2026-09-30T09:39:58+05:30",
+  "license": "Apache-2.0",
+  "licenseFile": "LICENSE",
+  "localPath": null,
+  "name": "evo",
+  "ref": "v0.8.0",
+  "reviewNote": "Pinned Apache-2.0 Evo v0.8.0. Reviewed lifecycle hooks and executable wrappers: hooks forward bounded JSON to the staged local evo-hook-drain binary and degrade to no-op when absent; shell executables wrap the pinned CLI or build distribution artifacts. FDE exposes Evo only as an explicit optional implementation capability; local worktrees, telemetry off, bounded rounds, correctness gates, and existing write/publication/deployment approvals remain mandatory.",
+  "runtimes": [
+    "node"
+  ],
+  "schemaVersion": 1,
+  "subdirectory": "plugins/evo",
+  "totalBytes": 2849165,
+  "treeSha256": "64757d511c80916e1b3b0ab0ec0f47cd49bfd13f802dbab4ef3461f6f592f8c2",
+  "type": "git",
+  "url": "https://github.com/evo-hq/evo",
+  "validatedAt": "2026-09-30T09:46:53+05:30",
+  "validationStatus": "valid",
+  "version": "0.8.0"
+}

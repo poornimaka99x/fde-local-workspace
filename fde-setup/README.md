@@ -301,7 +301,7 @@ with `fde mcp configure atlassian --set allowTools=…`.
 `frontend-testing`, `client-delivery`, `data`, `observability`. Selecting one
 narrows the effective set; it never widens it.
 
-Eleven servers ship in the catalogue: Context7, OpenWiki and Serena for code, Playwright and
+Twelve servers ship in the catalogue: Context7, ProjectAtlas, OpenWiki and Serena for code, Playwright and
 Chrome DevTools for the browser, Atlassian and Figma for delivery and design,
 DBHub, AWS, Azure and Langfuse for data, cloud and observability. Versions are
 pinned, nothing installs itself, and neither `npx` nor `uvx` runs because you
@@ -320,6 +320,24 @@ fde mcp verify openwiki
 Eligible FDE roles can then search and read an existing repository wiki without
 another model call. Generation remains a repository write: initialize or update
 the wiki only inside an approved implementation task.
+
+ProjectAtlas is pinned to the stable `0.4.5` release. It complements OpenWiki:
+ProjectAtlas locates current code and returns compact, exact source slices;
+OpenWiki preserves durable explanatory context. Install it explicitly, initialize
+each repository once under implementation-write approval, and launch FDE from
+that repository root:
+
+```bash
+cargo install --git https://github.com/styler-ai/ProjectAtlas --tag v0.4.5 projectatlas-cli --locked
+projectatlas init
+fde mcp verify projectatlas
+```
+
+Ordinary runs expose only ProjectAtlas navigation and diagnostics with telemetry
+disabled. Start a non-trivial repository task with one compact
+`atlas_session_brief`, follow its returned next call, and stop at the smallest
+exact `atlas_slice` that answers the question. Index refresh and maintenance stay
+behind the existing implementation-write approval.
 
 **Delegation.** Gemini cannot be exposed as an MCP server, so the bridge is
 headless invocation:
@@ -408,6 +426,30 @@ security, test, CI, release and SRE/observability specialists. The pinned
 Anthropic code-simplifier refines recently changed code after implementation is
 green. These are methods, not fixed account assignments: the user chooses the
 identity for every role at the start of each run.
+
+**Evo autoresearch** — the official Apache-2.0
+[Evo](https://github.com/evo-hq/evo) plugin is pinned at `v0.8.0` and imported
+through FDE's audited plugin path. It is off by default and offered only during
+vertical-slice implementation for work with a real benchmark, a declared metric
+and executable correctness gates. FDE constrains it to the selected
+implementation identity/model, local worktrees, telemetry off, bounded
+non-autonomous rounds and independent verification. Remote sandboxes remain a
+deployment/cost decision; merging or creating a PR remains an SCM publication
+decision.
+
+Install the matching CLI and host hooks explicitly for each Claude/Codex host
+that should run experiments:
+
+```bash
+uv tool install 'evo-hq-cli==0.8.0'
+evo install claude-code --version 0.8.0
+evo install codex --version 0.8.0 --no-trust-hooks
+evo doctor claude-code
+evo doctor codex
+```
+
+Review and approve Codex hooks before enabling the Evo capability. Ordinary FDE
+work does not load Evo's lifecycle hooks.
 
 **Controller** — `fde doctor | start | roles | status | brief | checkpoint |
 output-hygiene | learn | resume | invoke | approve-codex | approve-publish |

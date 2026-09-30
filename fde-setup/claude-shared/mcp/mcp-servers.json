@@ -9,31 +9,31 @@
     "coding": {
       "label": "Coding",
       "description": "Repository work: semantic navigation and version-accurate library documentation.",
-      "servers": ["context7", "openwiki", "serena"],
+      "servers": ["context7", "projectatlas", "openwiki", "serena"],
       "docker": "coding"
     },
     "frontend-testing": {
       "label": "Frontend testing",
       "description": "Browser workflows, accessibility evidence and front-end root-cause analysis.",
-      "servers": ["context7", "openwiki", "playwright", "chrome-devtools"],
+      "servers": ["context7", "projectatlas", "openwiki", "playwright", "chrome-devtools"],
       "docker": "frontend-testing"
     },
     "client-delivery": {
       "label": "Acme delivery",
       "description": "Requirements, delivery traceability and design context for client engagements.",
-      "servers": ["context7", "openwiki", "atlassian", "figma"],
+      "servers": ["context7", "projectatlas", "openwiki", "atlassian", "figma"],
       "docker": "client-delivery"
     },
     "data": {
       "label": "Data",
       "description": "Schema discovery and bounded read-only SQL against an explicitly selected database.",
-      "servers": ["context7", "openwiki", "dbhub"],
+      "servers": ["context7", "projectatlas", "openwiki", "dbhub"],
       "docker": "data"
     },
     "observability": {
       "label": "Observability",
       "description": "Traces, prompts, evaluations and cloud operational evidence.",
-      "servers": ["context7", "openwiki", "langfuse", "aws", "azure"],
+      "servers": ["context7", "projectatlas", "openwiki", "langfuse", "aws", "azure"],
       "docker": "observability"
     }
   },
@@ -113,6 +113,98 @@
       "doNotUseWhen": "The repository has no OpenWiki, the answer is in a small known source file, or the task asks to generate or update the wiki without an approved repository-write task.",
       "gateway": { "docker": "coding" },
       "note": "OpenWiki retrieval is local, read-only and model-free. FDE exposes only list/search/read tools during ordinary runs. Its generation lifecycle remains withheld because it writes repository documentation and metadata; use the pinned CLI only inside an approved implementation task."
+    },
+
+    "projectatlas": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "projectatlas",
+      "args": ["--require-version", "0.4.5", "--db", ".projectatlas/projectatlas.db", "--config", ".projectatlas/config.toml", "mcp"],
+      "env": { "PROJECTATLAS_NO_TELEMETRY": "1" },
+      "startupTimeoutSeconds": 60,
+      "targets": [
+        "role:orchestrator", "role:research", "role:solutioning",
+        "role:deliveryPlanning", "role:implementation", "role:review",
+        "role:prReview", "role:standardsReview", "role:securityReview",
+        "role:testEngineering", "role:ciInvestigation", "role:releaseManagement",
+        "role:observability"
+      ],
+      "stages": [
+        "research", "solutioning", "planning", "implementation", "review",
+        "verification", "presentation", "deployment", "observability"
+      ],
+      "profiles": ["coding", "frontend-testing", "client-delivery", "data", "observability"],
+      "requires": {
+        "executables": ["projectatlas"],
+        "setup": "cargo install --git https://github.com/styler-ai/ProjectAtlas --tag v0.4.5 projectatlas-cli --locked; then run projectatlas init once from each repository root inside an approved implementation task",
+        "docsUrl": "https://github.com/styler-ai/ProjectAtlas"
+      },
+      "package": {
+        "manager": "cargo",
+        "name": "projectatlas-cli",
+        "version": "0.4.5",
+        "install": "cargo install --git https://github.com/styler-ai/ProjectAtlas --tag v0.4.5 projectatlas-cli --locked",
+        "update": "change the pinned version and require-version in mcp-servers.json, install that tag, then: mcp-sync"
+      },
+      "auth": "none",
+      "classification": "repository-local",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^atlas_worktree_list$", "^atlas_root$", "^atlas_config$",
+        "^atlas_ignore_list$", "^atlas_overview$", "^atlas_folders$",
+        "^atlas_files$", "^atlas_next$", "^atlas_outline$",
+        "^atlas_file_summary$", "^atlas_search$", "^atlas_slice$",
+        "^atlas_symbols$", "^atlas_symbol_relations$", "^atlas_health$",
+        "^atlas_lint$", "^atlas_token_report$", "^atlas_parity_report$",
+        "^atlas_settings$", "^atlas_watch_status$", "^atlas_runtime_info$",
+        "^atlas_session_brief$", "^atlas_task_status$", "^atlas_purpose_queue$"
+      ],
+      "denyTools": [
+        "^atlas_set_project_path$", "^atlas_worktree_add$", "^atlas_worktree_remove$",
+        "^atlas_init$", "^atlas_map$", "^atlas_root_set$",
+        "^atlas_ignore_init_gitignore$", "^atlas_ignore_add$", "^atlas_ignore_remove$",
+        "^atlas_scan$", "^atlas_symbols_build$", "^atlas_health_resolve$",
+        "^atlas_watch_once$", "^atlas_strip_legacy_purpose$", "^atlas_reset_index$",
+        "^atlas_mcp_config$", "^atlas_task_cancel$", "^atlas_purpose_set$",
+        "^atlas_purpose_review$"
+      ],
+      "scopes": {
+        "read": [
+          "^atlas_worktree_list$", "^atlas_root$", "^atlas_config$",
+          "^atlas_ignore_list$", "^atlas_overview$", "^atlas_folders$",
+          "^atlas_files$", "^atlas_next$", "^atlas_outline$",
+          "^atlas_file_summary$", "^atlas_slice$", "^atlas_symbols$",
+          "^atlas_symbol_relations$", "^atlas_health$", "^atlas_lint$",
+          "^atlas_token_report$", "^atlas_parity_report$", "^atlas_settings$",
+          "^atlas_watch_status$", "^atlas_runtime_info$", "^atlas_session_brief$",
+          "^atlas_task_status$", "^atlas_purpose_queue$"
+        ],
+        "search": ["^atlas_search$"],
+        "create": [
+          "^atlas_worktree_add$", "^atlas_init$", "^atlas_map$",
+          "^atlas_ignore_init_gitignore$", "^atlas_mcp_config$", "^atlas_purpose_set$"
+        ],
+        "update": [
+          "^atlas_set_project_path$", "^atlas_root_set$", "^atlas_ignore_add$",
+          "^atlas_scan$", "^atlas_symbols_build$", "^atlas_health_resolve$",
+          "^atlas_watch_once$", "^atlas_reset_index$", "^atlas_purpose_review$"
+        ],
+        "delete": [
+          "^atlas_worktree_remove$", "^atlas_ignore_remove$",
+          "^atlas_strip_legacy_purpose$", "^atlas_task_cancel$"
+        ]
+      },
+      "mutationApproval": {
+        "gate": "implementation-write",
+        "note": "ProjectAtlas initialization, refresh, configuration, purpose curation and index maintenance write project-local state. Ordinary FDE sessions expose only navigation and diagnostics with telemetry disabled; perform setup or refresh only inside an approved implementation task."
+      },
+      "verify": { "method": "tools/list", "timeoutSeconds": 60 },
+      "useWhen": "A repository has an initialized .projectatlas index and a non-trivial task needs live, ranked code navigation, dependency or caller evidence, or a minimal exact source slice. Run FDE from that repository root, call atlas_session_brief once with compact output, and follow its returned next call.",
+      "preferOver": ["broad grep and whole-file reads in an unfamiliar repository", "guessing module boundaries or call relationships", "using durable wiki prose to locate current source"],
+      "doNotUseWhen": "The repository has not been initialized, the index is stale and refresh is not approved, or the answer is already in a small known file. Use OpenWiki instead when the need is durable explanatory architecture rather than live source routing.",
+      "gateway": { "docker": "coding" },
+      "note": "ProjectAtlas v0.4.5 is the pinned live repository-intelligence layer. FDE exposes its read-only navigation and diagnostic tools, disables telemetry, and withholds initialization, refresh, worktree, configuration, purpose and reset mutations."
     },
 
     "serena": {

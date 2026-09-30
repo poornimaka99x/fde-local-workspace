@@ -114,6 +114,14 @@ class DiscoveryTest(CapabilityTestCase):
         self.assertEqual(after["counts"]["skill"], before + 1)
         self.assertIn("skill:user:acme:deploy-check", {item["id"] for item in after["items"]})
 
+    def test_shared_skill_references_are_data_not_a_broken_skill(self):
+        catalog = json.loads(self.fde("capabilities", "--json").stdout)
+        ids = {item["id"] for item in catalog["items"]}
+        self.assertIn("skill:user:evo:discover", ids)
+        self.assertNotIn("skill:user:evo:references", ids)
+        self.assertNotIn("evo/skills/references: SKILL.md is missing",
+                         catalog["warnings"])
+
     def test_namespaces_keep_same_named_capabilities_apart(self):
         self.install_plugin("acme", skills=("crosscheck",), agents=())
         ids = {item["id"] for item in json.loads(self.fde("capabilities", "--json").stdout)["items"]}
@@ -172,6 +180,32 @@ class DefaultsTest(CapabilityTestCase):
                              f"{stage['name']} names capabilities that are not installed")
             self.assertEqual(document["inconsistent"], [],
                              f"{stage['name']} enables a capability whose plugin it leaves off")
+
+    def test_evo_is_complete_opt_in_and_only_offered_for_implementation(self):
+        template = json.loads(self.fde("workflow", "show", "forward-deployed-engineer",
+                                       "--json").stdout)["workflow"]
+        vertical = next(stage for stage in template["stages"]
+                        if stage["name"] == "vertical-slice")
+        offered = set(vertical["optional"])
+        expected = {
+            "plugin:user:evo", "skill:fde:evo-experimentation",
+            "skill:user:evo:discover", "skill:user:evo:optimize",
+            "skill:user:evo:report", "skill:user:evo:ship",
+            "skill:user:evo:subagent", "agent:user:evo:benchmark-reviewer",
+            "agent:user:evo:ideator", "agent:user:evo:verifier",
+            "hook:user:evo:PreToolUse", "hook:user:evo:PostToolUse",
+            "hook:user:evo:SessionStart", "hook:user:evo:Stop",
+            "hook:user:evo:SubagentStop", "hook:user:evo:UserPromptSubmit",
+        }
+        self.assertTrue(expected <= offered, expected - offered)
+        for stage in template["stages"]:
+            document, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                        "--stage", stage["name"])
+            self.assertEqual([cid for cid in document["enabled"] if "user:evo" in cid],
+                             [], stage["name"])
+            if stage["name"] != "vertical-slice":
+                self.assertEqual([cid for cid in stage.get("optional", [])
+                                  if "user:evo" in cid], [], stage["name"])
 
     def _template(self, name, stage):
         target = cap.workflows_root(self.shared) / f"{name}.json"

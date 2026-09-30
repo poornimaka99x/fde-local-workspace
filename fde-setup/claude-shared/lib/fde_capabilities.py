@@ -382,6 +382,12 @@ def _markdown_items(plugin_root, directory, kind, *, namespace, plugin, origin, 
             if not entry.is_dir():
                 continue
             target = entry / "SKILL.md"
+            # Agent Skills packages may keep references shared by several
+            # sibling skills in skills/references/. It is plugin data, not a
+            # malformed skill. Keep reporting every other missing SKILL.md so
+            # a misspelled or incomplete capability cannot silently vanish.
+            if entry.name == "references" and not target.exists():
+                continue
             default_name = entry.name
         else:
             if not entry.is_file() or entry.suffix not in (".md", ".toml"):

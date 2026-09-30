@@ -98,6 +98,7 @@
           "mcp:fde:atlassian",
           "mcp:fde:context7",
           "mcp:fde:figma",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:client-context",
@@ -150,6 +151,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -166,6 +171,7 @@
         "enable": [
           "mcp:fde:context7",
           "mcp:fde:figma",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "mcp:fde:serena",
@@ -223,6 +229,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -258,6 +268,7 @@
         "enable": [
           "mcp:fde:atlassian",
           "mcp:fde:context7",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "mcp:fde:serena",
@@ -312,6 +323,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -330,6 +345,7 @@
       "common": {
         "enable": [
           "mcp:fde:context7",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "mcp:fde:serena",
@@ -374,9 +390,27 @@
       "optional": [
         "agent:fde:design-system-steward",
         "agent:fde:security-reviewer",
+        "agent:user:evo:benchmark-reviewer",
+        "agent:user:evo:ideator",
+        "agent:user:evo:verifier",
+        "command:user:evo:discover",
+        "command:user:evo:optimize",
+        "hook:user:evo:PostToolUse",
+        "hook:user:evo:PreToolUse",
+        "hook:user:evo:SessionStart",
+        "hook:user:evo:Stop",
+        "hook:user:evo:SubagentStop",
+        "hook:user:evo:UserPromptSubmit",
         "mcp:fde:figma",
+        "plugin:user:evo",
         "skill:fde:design-system",
         "skill:fde:design-to-code",
+        "skill:fde:evo-experimentation",
+        "skill:user:evo:discover",
+        "skill:user:evo:optimize",
+        "skill:user:evo:report",
+        "skill:user:evo:ship",
+        "skill:user:evo:subagent",
         "skill:ponytail:ponytail-help"
       ],
       "mcpScopes": {
@@ -385,6 +419,10 @@
           "search"
         ],
         "mcp:fde:context7": [
+          "read",
+          "search"
+        ],
+        "mcp:fde:projectatlas": [
           "read",
           "search"
         ],
@@ -404,6 +442,7 @@
       "notes": {
         "codeSimplifier": "The pinned Anthropic code-simplifier runs after the implementation is green and only on recently changed code. It must preserve behavior, remain inside the approved implementation scope, and rerun affected verification after refinements.",
         "design": "design-to-code, design-system, design-system-steward and figma are offered when designs are in scope.",
+        "evo": "Evo v0.8.0 is an explicit opt-in for measurable optimization only. Its plugin, skills, subagents and lifecycle hooks stay off unless selected together for this implementation stage. FDE defaults it to local worktrees, telemetry off, bounded non-autonomous rounds, mandatory gates and independent verification; remote backends and shipping retain deployment/cost and SCM publication approvals.",
         "security": "security-reviewer is offered, and should be switched on, for security-sensitive changes.",
         "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate.",
         "ponytailPlugin": "plugin:ponytail is enabled here and in quality-review only. Everywhere else it stays off, which is what keeps its lifecycle hooks out of the stages it has no business in.",
@@ -421,6 +460,7 @@
         "enable": [
           "mcp:fde:chrome-devtools",
           "mcp:fde:context7",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "mcp:fde:serena",
@@ -510,6 +550,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -535,6 +579,7 @@
       "common": {
         "enable": [
           "mcp:fde:context7",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:handover",
@@ -579,6 +624,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -604,6 +653,7 @@
         "enable": [
           "mcp:fde:atlassian",
           "mcp:fde:langfuse",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:ci-diagnose",
@@ -658,6 +708,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -689,6 +743,7 @@
           "mcp:fde:chrome-devtools",
           "mcp:fde:dbhub",
           "mcp:fde:langfuse",
+          "mcp:fde:projectatlas",
           "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:ci-diagnose",
@@ -739,6 +794,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:projectatlas": [
+          "read",
+          "search"
+        ],
         "mcp:fde:openwiki": [
           "read",
           "search"
@@ -763,6 +822,14 @@
     }
   ],
   "_featureDev": "Anthropic's feature-dev plugin is deliberately not integrated. It is distributed under Anthropic's commercial terms with all rights reserved, and this toolkit is MIT. Its code-explorer, code-architect and code-reviewer roles are held by fde-core's repo-cartographer, solutioner and reviewer/test-engineer respectively.",
+  "evo": {
+    "plugin": "plugin:user:evo",
+    "version": "0.8.0",
+    "defaultMode": "off",
+    "_optIn": "Evo performs autonomous repository experiments and installs lifecycle hooks, so it is offered only in vertical-slice implementation and never enabled by default.",
+    "_authority": "Evo inherits the selected implementation identity, model and effort. It cannot widen provider access, choose a more expensive model tier, use a remote backend, merge, publish or deploy without the corresponding FDE decision and approval.",
+    "_safety": "Local worktree backend, EVO_TELEMETRY=0, autonomous off, subagents-only on, bounded budget, executable correctness gates and an independent rerun are the FDE defaults."
+  },
   "ponytail": {
     "plugin": "plugin:ponytail",
     "modes": [

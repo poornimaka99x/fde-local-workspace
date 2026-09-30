@@ -22,11 +22,14 @@ Work outside-in and cheaply:
    service, a generated directory that looks handwritten, two modules with
    similar names that do different things.
 
-If the run exposes OpenWiki and the repository already has one, use it only
-after the initial source scan to resolve a concrete architecture or cross-module
-uncertainty. Search narrowly, read the relevant sections, and verify important
-claims against current source. Do not preload the wiki or treat it as a
-substitute for manifests, entry points, CI and tests.
+If the run exposes ProjectAtlas and the repository has a fresh index, use one
+compact `atlas_session_brief` after reading the manifests, follow its exact next
+call, and use the smallest summaries, relations and slices needed to map the
+current source. Do not repeat discovery or request a refresh merely because a
+session started. If OpenWiki is also present, use it only to resolve a concrete
+architecture or cross-module uncertainty, then verify important claims through
+ProjectAtlas or current source. Neither replaces manifests, entry points, CI
+and tests.
 
 Return:
 

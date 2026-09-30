@@ -140,6 +140,47 @@ class Migration(unittest.TestCase):
         self.assertEqual(server["package"]["version"], "0.6.1")
         self.assertEqual(server["mutationApproval"]["gate"], "implementation-write")
 
+    def test_projectatlas_exposes_navigation_but_withholds_index_mutations(self):
+        catalog = mcp.Catalog.load(CATALOG)
+        server = catalog.get("projectatlas")
+        offered = [
+            "atlas_set_project_path", "atlas_worktree_list", "atlas_worktree_add",
+            "atlas_worktree_remove", "atlas_init", "atlas_map", "atlas_root",
+            "atlas_root_set", "atlas_config", "atlas_ignore_list",
+            "atlas_ignore_init_gitignore", "atlas_ignore_add", "atlas_ignore_remove",
+            "atlas_scan", "atlas_overview", "atlas_folders", "atlas_files",
+            "atlas_next", "atlas_outline", "atlas_file_summary", "atlas_search",
+            "atlas_slice", "atlas_symbols_build", "atlas_symbols",
+            "atlas_symbol_relations", "atlas_health", "atlas_health_resolve",
+            "atlas_lint", "atlas_token_report", "atlas_parity_report",
+            "atlas_settings", "atlas_watch_status", "atlas_watch_once",
+            "atlas_strip_legacy_purpose", "atlas_reset_index", "atlas_mcp_config",
+            "atlas_runtime_info", "atlas_session_brief", "atlas_task_status",
+            "atlas_task_cancel", "atlas_purpose_queue", "atlas_purpose_set",
+            "atlas_purpose_review",
+        ]
+        health = {"projectatlas": {
+            "initialize": 200, "authenticated": True, "outcome": "ok",
+            "tools": [{"name": name} for name in offered],
+        }}
+        allowed = mcp.enforceable_tools(
+            "projectatlas", server, {"values": {}, "tools": {}}, health)
+        self.assertIn("atlas_session_brief", allowed)
+        self.assertIn("atlas_symbol_relations", allowed)
+        self.assertIn("atlas_slice", allowed)
+        self.assertNotIn("atlas_init", allowed)
+        self.assertNotIn("atlas_watch_once", allowed)
+        self.assertNotIn("atlas_reset_index", allowed)
+        self.assertNotIn("atlas_purpose_set", allowed)
+        permissions = mcp.render_claude_permissions(
+            {"projectatlas": server}, health=health)["permissions"]
+        self.assertEqual(permissions["deny"], ["mcp__projectatlas"])
+        self.assertIn("mcp__projectatlas__atlas_session_brief", permissions["allow"])
+        self.assertNotIn("mcp__projectatlas__atlas_init", permissions["allow"])
+        self.assertEqual(server["package"]["version"], "0.4.5")
+        self.assertEqual(server["env"]["PROJECTATLAS_NO_TELEMETRY"], "1")
+        self.assertEqual(server["mutationApproval"]["gate"], "implementation-write")
+
     @unittest.skipUnless(FDE.is_file(), "the controller is not present in this tree")
     def test_the_library_and_the_controller_share_one_vocabulary(self):
         fde = load_fde()
@@ -601,7 +642,8 @@ class GatewayPlanning(unittest.TestCase):
     def test_a_profile_restricts_what_the_gateway_would_own(self):
         plan = mcp.gateway_plan(self.catalog, profile="data", available=True)
         self.assertEqual(sorted(plan["routedThroughGateway"]),
-                         ["context7", "dbhub", "openwiki", "playwright"])
+                         ["context7", "dbhub", "openwiki", "playwright",
+                          "projectatlas"])
 
 
 class SyncBehaviour(unittest.TestCase):

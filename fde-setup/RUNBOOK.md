@@ -90,6 +90,28 @@ documentation and Claims metadata. Create or refresh a wiki only inside an
 approved implementation task, then use retrieval just in time rather than
 loading the whole wiki into every agent context.
 
+### Optional — live repository navigation with ProjectAtlas
+
+ProjectAtlas complements OpenWiki rather than replacing it: use ProjectAtlas to
+route a task through the current code graph and retrieve exact source; use
+OpenWiki for durable architecture and workflow explanations. FDE pins the stable
+ProjectAtlas release and never installs or initializes it automatically:
+
+```bash
+cargo install --git https://github.com/styler-ai/ProjectAtlas --tag v0.4.5 projectatlas-cli --locked
+cd /path/to/engagement-repository
+projectatlas init             # repository write: use implementation approval
+fde mcp verify projectatlas
+```
+
+Run FDE from that exact repository root because the governed server binds
+`.projectatlas/projectatlas.db` and `.projectatlas/config.toml` relative to its
+working directory. Normal sessions set `PROJECTATLAS_NO_TELEMETRY=1` and expose
+only navigation and diagnostic tools. Start once with a compact
+`atlas_session_brief`, execute its returned next call, and prefer the smallest
+exact slice. Refresh a stale index with `projectatlas watch --once` only inside
+an approved implementation task.
+
 ---
 
 ## Phase 2 — Atlassian (30 min)
@@ -334,6 +356,35 @@ Track it with `fde status <run-id>`, advance it with `fde resume <run-id> --next
 
 **Start a second task and it asks for roles again.** It will not reuse these.
 Only you saying "same as the previous task" makes `--same-as <run-id>` valid.
+
+---
+
+## Phase 6a — Evo benchmark optimization (optional, explicit opt-in)
+
+Use Evo only for a measurable optimization problem after the implementation
+plan and repository-write scope are approved. The official plugin is pinned at
+`v0.8.0`, but its CLI and hooks are installed per host rather than silently:
+
+```bash
+uv tool install 'evo-hq-cli==0.8.0'
+evo install claude-code --version 0.8.0
+evo install codex --version 0.8.0 --no-trust-hooks
+evo doctor claude-code
+evo doctor codex
+```
+
+In Configuration → Capabilities, select the Evo plugin, its discover/optimize/
+report/ship skills, three specialist agents, lifecycle hooks and FDE's
+`evo-experimentation` guardrail only for the `vertical-slice` stage. Review
+Codex hooks before trusting them. Do not enable Evo globally.
+
+Before discovery, record the primary metric and direction, benchmark command,
+correctness gates, maximum experiment budget and selected FDE implementation
+model/effort. Use the local worktree backend, `EVO_TELEMETRY=0`, autonomous off,
+subagents-only on and one resource-safe round first. A remote backend requires
+deployment/cost approval. Independently rerun the winning benchmark and gates;
+shipping or opening a PR still requires review/reconciliation and SCM
+publication approval.
 
 ---
 

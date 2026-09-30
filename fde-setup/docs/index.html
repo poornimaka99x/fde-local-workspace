@@ -1140,6 +1140,10 @@ html{scroll-behavior:smooth}
           <h4>Git stays the way you touch code</h4>
           <p>Bitbucket and GitHub connections are for work items and pull requests. Local git remains the primary interface to repositories — the connector is not a substitute for it.</p>
         </div>
+        <div class="panel">
+          <h4>Evo is opt-in experimentation</h4>
+          <p>The pinned Evo plugin is offered only during implementation when a benchmark, metric and correctness gates exist. It defaults to local worktrees, telemetry off and bounded non-autonomous rounds. Remote sandboxes and shipping retain their cost, deployment and publication approvals.</p>
+        </div>
       </div>
     </div>
 
@@ -1192,7 +1196,7 @@ html{scroll-behavior:smooth}
 
       <div>
         <div class="console">
-          <div class="c-chrome"><span class="c-path">Configuration / MCP servers</span><span class="c-pill">11 in catalogue</span></div>
+          <div class="c-chrome"><span class="c-path">Configuration / MCP servers</span><span class="c-pill">12 in catalogue</span></div>
           <div class="c-body">
             <div class="c-sub">Being listed here is not access. A server is in the <b style="color:var(--c-ink)">catalogue</b> when FLOW knows how to run it, <b style="color:var(--c-ink)">configured</b> when you have supplied what it needs, <b style="color:var(--c-ink)">ready</b> when it is also installed and verified, and <b style="color:var(--c-ink)">active</b> only inside a run whose approved roles and stages call for it.</div>
             <div class="c-card stack-sm">
@@ -1265,7 +1269,7 @@ html{scroll-behavior:smooth}
           <tr><td><b>Sub-agents</b></td><td>20</td><td>Focused methods such as research, solutioning, implementation, testing, security review and release management. They are tasks, not identities.</td><td>Add an agent definition inside a reviewed plugin; its model and declared tools become visible in the catalogue.</td></tr>
           <tr><td><b>Plugins</b></td><td>2</td><td>Versionable bundles of skills, sub-agents, commands, hooks, utilities and optional MCP definitions.</td><td>Use <b>Import local plugin</b> with a directory containing <code>.claude-plugin/plugin.json</code>, or use the governed <code>fde plugins add</code> path.</td></tr>
           <tr><td><b>Commands</b></td><td>8</td><td>Named operator or agent entry points: FLOW's <code>route</code> and <code>standards</code>, plus the reviewed Ponytail commands.</td><td>Package the command definition in a plugin. Controller lifecycle commands remain in the separate <code>fde</code> CLI.</td></tr>
-          <tr><td><b>MCP servers</b></td><td>11</td><td>Governed connections to code intelligence, repository memory, browsers, tenant systems, data and cloud control planes.</td><td>Add a validated catalogue entry, configure it, store secrets separately, verify its real tools, then enable it.</td></tr>
+          <tr><td><b>MCP servers</b></td><td>12</td><td>Governed connections to code intelligence, repository memory, browsers, tenant systems, data and cloud control planes.</td><td>Add a validated catalogue entry, configure it, store secrets separately, verify its real tools, then enable it.</td></tr>
           <tr><td><b>Built-in tools</b></td><td>9</td><td><code>Read</code>, <code>Grep</code>, <code>Glob</code>, <code>Bash</code>, <code>Task</code>, <code>WebFetch</code>, <code>WebSearch</code>, <code>Write</code> and <code>Edit</code>.</td><td>Skills and agents request a subset. Switching one off becomes an explicit deny rule in new Claude processes.</td></tr>
           <tr><td><b>Hooks &amp; utilities</b></td><td>4 + 4</td><td>Lifecycle checks and local helper programs for session context, account identity, audits and context budgets.</td><td>Ship them in a plugin and review executable or hook behaviour before activation.</td></tr>
           <tr><td><b>Workflow</b></td><td>1</td><td>The Forward Deployed Engineer stage template, which selects capability bundles for primary and reviewer roles.</td><td>Add a versioned workflow definition; missing dependencies are reported as degraded, never invented.</td></tr>
@@ -1301,7 +1305,7 @@ html{scroll-behavior:smooth}
             <tr><td><b>Coding</b></td><td><code>context7</code>, <code>serena</code></td><td>Version-specific public documentation and governed repository symbol navigation.</td></tr>
             <tr><td><b>Frontend testing</b></td><td><code>context7</code>, <code>playwright</code>, <code>chrome-devtools</code></td><td>Browser testing, page inspection, console, network and performance diagnosis.</td></tr>
             <tr><td><b>Client delivery</b></td><td><code>context7</code>, <code>atlassian</code>, <code>figma</code></td><td>Jira and Confluence context plus design inspection and approved canvas publication.</td></tr>
-            <tr><td><b>Data</b></td><td><code>context7</code>, <code>dbhub</code></td><td>Documentation plus read-only database investigation.</td></tr>
+            <tr><td><b>Data</b></td><td><code>context7</code>, <code>projectatlas</code>, <code>openwiki</code>, <code>dbhub</code></td><td>Documentation, live repository context, durable repository memory, and read-only database investigation.</td></tr>
             <tr><td><b>Observability</b></td><td><code>context7</code>, <code>langfuse</code>, <code>aws</code>, <code>azure</code></td><td>Tracing, operational diagnosis and governed cloud inspection.</td></tr>
           </tbody>
         </table>
@@ -2296,8 +2300,8 @@ confluence create ENG <span class="st">"ADR 004: Token exchange"</span> \
 
     <div class="grid-3">
       <div class="panel">
-        <h4>Eleven servers, pinned</h4>
-        <p>Context7, OpenWiki and Serena for code and grounded repository memory, Playwright and Chrome DevTools for the browser, Atlassian and Figma for delivery and design, DBHub, AWS, Azure and Langfuse for data, cloud and observability.</p>
+        <h4>Twelve servers, pinned</h4>
+        <p>Context7, ProjectAtlas, OpenWiki and Serena for live code intelligence and grounded repository memory, Playwright and Chrome DevTools for the browser, Atlassian and Figma for delivery and design, DBHub, AWS, Azure and Langfuse for data, cloud and observability.</p>
       </div>
       <div class="panel">
         <h4>Profiles narrow, never widen</h4>
