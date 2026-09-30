@@ -95,11 +95,11 @@ A profile is a named slice of the catalogue for a kind of work.
 
 | Profile | Servers | Docker profile |
 | --- | --- | --- |
-| `coding` | context7, serena | `coding` |
-| `frontend-testing` | context7, playwright, chrome-devtools | `frontend-testing` |
-| `client-delivery` | context7, atlassian, figma | `client-delivery` |
-| `data` | context7, dbhub | `data` |
-| `observability` | context7, langfuse, aws, azure | `observability` |
+| `coding` | context7, openwiki, serena | `coding` |
+| `frontend-testing` | context7, openwiki, playwright, chrome-devtools | `frontend-testing` |
+| `client-delivery` | context7, openwiki, atlassian, figma | `client-delivery` |
+| `data` | context7, openwiki, dbhub | `data` |
+| `observability` | context7, openwiki, langfuse, aws, azure | `observability` |
 
 Selecting a profile narrows the effective set; it never widens it. Role, stage
 and readiness still all have to agree.
@@ -110,6 +110,19 @@ and readiness still all have to agree.
 Hosted, read-only, no tenant data, global to all three CLIs. Use it for
 version-specific framework, dependency, SDK and API documentation. Do not call it
 for anything about this repository.
+
+### OpenWiki — install the pinned CLI
+```bash
+npm install -g openwiki@0.6.1
+fde mcp verify openwiki
+```
+OpenWiki requires Node.js 22.22.0 or newer. FDE exposes its local, model-free
+workspace/list/search/read tools to eligible run roles across every profile. The
+six generation lifecycle tools are denied during ordinary runs because they
+write `openwiki/`, Claims sidecars and managed repository instruction blocks.
+Initialize or update a wiki only as an explicitly approved implementation task;
+once a wiki exists, agents retrieve narrowly and verify consequential details
+against current source.
 
 ### Serena — needs installing
 ```bash
@@ -213,7 +226,7 @@ says why.
 | Atlassian, Figma | OAuth 2.1 | the MCP client, per that provider's supported model. FDE stores nothing. |
 | Langfuse, DBHub | a key pair / a database password | an owner-only file under `~/.claude-shared/secrets/mcp/<server>/<field>`, injected into one child process |
 | AWS, Azure | the local CLI credential chain | your machine's existing `~/.aws` / `az login` session. FDE copies nothing. |
-| Context7, Serena, Playwright, Chrome DevTools | none | — |
+| Context7, OpenWiki, Serena, Playwright, Chrome DevTools | none | — |
 
 No credential appears in a tracked file, a generated README, an argument list, a
 log line, an event, browser metadata or an API response. Migration never reads or

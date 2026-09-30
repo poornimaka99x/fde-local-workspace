@@ -73,6 +73,25 @@ region. It prints no credentials.
 
 ---
 
+### Optional — grounded repository memory with OpenWiki
+
+OpenWiki is useful when an engagement repository already has a generated wiki
+and agents need a narrow, grounded answer about architecture or cross-module
+behaviour. Install the pinned version explicitly; FDE never installs it for you:
+
+```bash
+npm install -g openwiki@0.6.1   # Node.js 22.22.0 or newer
+fde mcp verify openwiki
+```
+
+Normal FDE runs expose only OpenWiki's local list, search and read tools. Its
+generation lifecycle is deliberately withheld because it writes repository
+documentation and Claims metadata. Create or refresh a wiki only inside an
+approved implementation task, then use retrieval just in time rather than
+loading the whole wiki into every agent context.
+
+---
+
 ## Phase 2 — Atlassian (30 min)
 
 This is the highest-value connection: it is where your PO lives.

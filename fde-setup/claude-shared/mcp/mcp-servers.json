@@ -9,31 +9,31 @@
     "coding": {
       "label": "Coding",
       "description": "Repository work: semantic navigation and version-accurate library documentation.",
-      "servers": ["context7", "serena"],
+      "servers": ["context7", "openwiki", "serena"],
       "docker": "coding"
     },
     "frontend-testing": {
       "label": "Frontend testing",
       "description": "Browser workflows, accessibility evidence and front-end root-cause analysis.",
-      "servers": ["context7", "playwright", "chrome-devtools"],
+      "servers": ["context7", "openwiki", "playwright", "chrome-devtools"],
       "docker": "frontend-testing"
     },
     "client-delivery": {
       "label": "Acme delivery",
       "description": "Requirements, delivery traceability and design context for client engagements.",
-      "servers": ["context7", "atlassian", "figma"],
+      "servers": ["context7", "openwiki", "atlassian", "figma"],
       "docker": "client-delivery"
     },
     "data": {
       "label": "Data",
       "description": "Schema discovery and bounded read-only SQL against an explicitly selected database.",
-      "servers": ["context7", "dbhub"],
+      "servers": ["context7", "openwiki", "dbhub"],
       "docker": "data"
     },
     "observability": {
       "label": "Observability",
       "description": "Traces, prompts, evaluations and cloud operational evidence.",
-      "servers": ["context7", "langfuse", "aws", "azure"],
+      "servers": ["context7", "openwiki", "langfuse", "aws", "azure"],
       "docker": "observability"
     }
   },
@@ -55,6 +55,64 @@
       "doNotUseWhen": "The question is about this repository, its conventions or its own code — read the repository instead.",
       "gateway": { "docker": "coding" },
       "note": "Up-to-date library and framework docs. Read-only, no tenant data, safe for every identity. When it is active it is the source for version-sensitive API facts; recalled documentation is not."
+    },
+
+    "openwiki": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "openwiki",
+      "args": ["mcp", "--host", "fde"],
+      "startupTimeoutSeconds": 60,
+      "targets": [
+        "role:orchestrator", "role:research", "role:solutioning",
+        "role:deliveryPlanning", "role:implementation", "role:review",
+        "role:prReview", "role:standardsReview", "role:securityReview",
+        "role:testEngineering", "role:ciInvestigation", "role:releaseManagement",
+        "role:observability"
+      ],
+      "stages": [
+        "research", "solutioning", "planning", "implementation", "review",
+        "verification", "presentation", "deployment", "observability"
+      ],
+      "profiles": ["coding", "frontend-testing", "client-delivery", "data", "observability"],
+      "requires": {
+        "executables": ["openwiki"],
+        "setup": "npm install -g openwiki@0.6.1 (requires Node.js 22.22.0 or newer)",
+        "docsUrl": "https://github.com/langchain-ai/openwiki"
+      },
+      "package": { "manager": "npm", "name": "openwiki", "version": "0.6.1", "install": "npm install -g openwiki@0.6.1", "update": "change the pinned version in mcp-servers.json, install that version, then: mcp-sync" },
+      "auth": "none",
+      "classification": "repository-local",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^openwiki_list_workspaces$", "^openwiki_list_wikis$",
+        "^openwiki_search$", "^openwiki_read$"
+      ],
+      "denyTools": [
+        "^openwiki_begin$", "^openwiki_submit_plan$", "^openwiki_next_page$",
+        "^openwiki_inspect_page_claims$", "^openwiki_submit_page$",
+        "^openwiki_finish$"
+      ],
+      "scopes": {
+        "read": [
+          "^openwiki_list_workspaces$", "^openwiki_list_wikis$", "^openwiki_read$",
+          "^openwiki_inspect_page_claims$", "^openwiki_next_page$"
+        ],
+        "search": ["^openwiki_search$"],
+        "create": ["^openwiki_begin$", "^openwiki_submit_plan$", "^openwiki_submit_page$"],
+        "update": ["^openwiki_finish$"]
+      },
+      "mutationApproval": {
+        "gate": "implementation-write",
+        "note": "OpenWiki generation writes Markdown, Claims sidecars and managed setup blocks inside the repository. Normal FDE runs expose retrieval only; initialize or update a wiki only as an explicitly approved implementation task."
+      },
+      "verify": { "method": "tools/list", "timeoutSeconds": 60 },
+      "useWhen": "A repository already has an OpenWiki and a concrete architecture, dependency, workflow or testing question would benefit from its grounded cross-file context. Search narrowly, read only the relevant sections, then verify consequential details against current source.",
+      "preferOver": ["reconstructing an unfamiliar subsystem from scratch", "loading an entire generated wiki into context", "relying on stale architecture recall"],
+      "doNotUseWhen": "The repository has no OpenWiki, the answer is in a small known source file, or the task asks to generate or update the wiki without an approved repository-write task.",
+      "gateway": { "docker": "coding" },
+      "note": "OpenWiki retrieval is local, read-only and model-free. FDE exposes only list/search/read tools during ordinary runs. Its generation lifecycle remains withheld because it writes repository documentation and metadata; use the pinned CLI only inside an approved implementation task."
     },
 
     "serena": {

@@ -301,13 +301,25 @@ with `fde mcp configure atlassian --set allowTools=…`.
 `frontend-testing`, `client-delivery`, `data`, `observability`. Selecting one
 narrows the effective set; it never widens it.
 
-Ten servers ship in the catalogue: Context7 and Serena for code, Playwright and
+Eleven servers ship in the catalogue: Context7, OpenWiki and Serena for code, Playwright and
 Chrome DevTools for the browser, Atlassian and Figma for delivery and design,
 DBHub, AWS, Azure and Langfuse for data, cloud and observability. Versions are
 pinned, nothing installs itself, and neither `npx` nor `uvx` runs because you
 opened a page. `docs/MCP-GOVERNANCE.md` is the full reference: per-server setup,
 credentials, read/write boundaries, the Docker-optional gateway, and
 troubleshooting.
+
+OpenWiki is pinned to `0.6.1` and requires Node.js 22.22.0 or newer. Install and
+verify it explicitly:
+
+```bash
+npm install -g openwiki@0.6.1
+fde mcp verify openwiki
+```
+
+Eligible FDE roles can then search and read an existing repository wiki without
+another model call. Generation remains a repository write: initialize or update
+the wiki only inside an approved implementation task.
 
 **Delegation.** Gemini cannot be exposed as an MCP server, so the bridge is
 headless invocation:

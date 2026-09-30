@@ -112,6 +112,34 @@ class Migration(unittest.TestCase):
         self.assertEqual(catalog.problems, [])
         self.assertEqual(catalog.doc["schemaVersion"], mcp.SCHEMA_VERSION)
 
+    def test_openwiki_exposes_retrieval_but_withholds_generation(self):
+        catalog = mcp.Catalog.load(CATALOG)
+        server = catalog.get("openwiki")
+        offered = [
+            "openwiki_list_workspaces", "openwiki_list_wikis",
+            "openwiki_search", "openwiki_read", "openwiki_begin",
+            "openwiki_submit_plan", "openwiki_next_page",
+            "openwiki_inspect_page_claims", "openwiki_submit_page",
+            "openwiki_finish",
+        ]
+        health = {"openwiki": {
+            "initialize": 200, "authenticated": True, "outcome": "ok",
+            "tools": [{"name": name} for name in offered],
+        }}
+        allowed = mcp.enforceable_tools(
+            "openwiki", server, {"values": {}, "tools": {}}, health)
+        self.assertEqual(allowed, [
+            "openwiki_list_wikis", "openwiki_list_workspaces",
+            "openwiki_read", "openwiki_search",
+        ])
+        permissions = mcp.render_claude_permissions(
+            {"openwiki": server}, health=health)["permissions"]
+        self.assertEqual(permissions["deny"], ["mcp__openwiki"])
+        self.assertNotIn("mcp__openwiki__openwiki_begin", permissions["allow"])
+        self.assertIn("mcp__openwiki__openwiki_search", permissions["allow"])
+        self.assertEqual(server["package"]["version"], "0.6.1")
+        self.assertEqual(server["mutationApproval"]["gate"], "implementation-write")
+
     @unittest.skipUnless(FDE.is_file(), "the controller is not present in this tree")
     def test_the_library_and_the_controller_share_one_vocabulary(self):
         fde = load_fde()
@@ -573,7 +601,7 @@ class GatewayPlanning(unittest.TestCase):
     def test_a_profile_restricts_what_the_gateway_would_own(self):
         plan = mcp.gateway_plan(self.catalog, profile="data", available=True)
         self.assertEqual(sorted(plan["routedThroughGateway"]),
-                         ["context7", "dbhub", "playwright"])
+                         ["context7", "dbhub", "openwiki", "playwright"])
 
 
 class SyncBehaviour(unittest.TestCase):

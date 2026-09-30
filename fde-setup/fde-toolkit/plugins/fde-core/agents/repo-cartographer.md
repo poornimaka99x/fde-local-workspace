@@ -22,6 +22,12 @@ Work outside-in and cheaply:
    service, a generated directory that looks handwritten, two modules with
    similar names that do different things.
 
+If the run exposes OpenWiki and the repository already has one, use it only
+after the initial source scan to resolve a concrete architecture or cross-module
+uncertainty. Search narrowly, read the relevant sections, and verify important
+claims against current source. Do not preload the wiki or treat it as a
+substitute for manifests, entry points, CI and tests.
+
 Return:
 
 - **Stack**: languages, frameworks, versions
