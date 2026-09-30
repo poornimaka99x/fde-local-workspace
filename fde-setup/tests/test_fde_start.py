@@ -256,5 +256,139 @@ class FdeStartTest(unittest.TestCase):
         self.assertNotIn("ARG=--resume", log)
 
 
+    def _approved_design_run(self, env):
+        created = subprocess.run(
+            [str(FDE), "start", "design a prototype", "--orchestrator", "work",
+             "--shape", "design-panel", "--json"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        subprocess.run([
+            str(FDE), "roles", run_id,
+            "--set", "productManagement=none", "--set", "solutioning=work",
+            "--set", "uiUxDesign=work", "--set", "designSystem=none",
+            "--set", "review=work", "--set", "prReview=none",
+            "--set", "standardsReview=none", "--set", "securityReview=none",
+            "--set", "presentation=work", "--set", "microsoftContext=none",
+        ], text=True, capture_output=True, env=env, check=True)
+        return run_id
+
+    def _env(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+        })
+        return env
+
+    def _limit_stub(self, message, is_error=True):
+        # Claude exits 0 and leaves the limit notice as the last transcript turn.
+        self.stub.write_text(textwrap.dedent(r"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            sid=""
+            while [[ $# -gt 0 ]]; do
+              [[ "$1" == "--session-id" || "$1" == "--resume" ]] && sid="$2"
+              shift
+            done
+            dir="$CLAUDE_CONFIG_DIR/projects/-proj"
+            mkdir -p "$dir"
+            if [[ "$CLAUDE_CONFIG_DIR" == */work ]]; then
+              printf '%s\n' "$FDE_TEST_RECORD" >> "$dir/$sid.jsonl"
+            else
+              printf 'RAN_AS=%s SID=%s\n' "$CLAUDE_CONFIG_DIR" "$sid" >> "$FDE_TEST_LOG"
+            fi
+        """).lstrip("\n"))
+        self.stub.chmod(0o755)
+        record = {"type": "assistant", "isApiErrorMessage": is_error,
+                  "message": {"content": [{"type": "text", "text": message}]}}
+        return json.dumps(record)
+
+    def test_orchestrator_usage_limit_offers_switch_when_not_interactive(self):
+        env = self._env()
+        run_id = self._approved_design_run(env)
+        (self.profiles / "alt").mkdir()
+        (self.profiles / "alt" / ".credentials.json").write_text("{}")
+        # Sign-in state comes from `claude auth status`; a PATH stub that
+        # exits 0 stands in for "signed in" without touching a real login.
+        authbin = self.root / "authbin"
+        authbin.mkdir()
+        (authbin / "claude").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (authbin / "claude").chmod(0o755)
+        env["PATH"] = f"{authbin}:{env['PATH']}"
+        env["FDE_TEST_RECORD"] = self._limit_stub(
+            "You've hit your session limit · resets 9pm")
+        result = subprocess.run(["bash", str(LAUNCHER), "--resume", run_id],
+                                text=True, capture_output=True, env=env)
+        self.assertEqual(result.returncode, 75,
+                         msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+        self.assertIn("reached its usage limit", result.stdout)
+        self.assertIn(f"fde orchestrator {run_id} <account> --reassign", result.stdout)
+
+    def test_long_answer_that_mentions_limits_is_not_a_limit_event(self):
+        env = self._env()
+        run_id = self._approved_design_run(env)
+        env["FDE_TEST_RECORD"] = self._limit_stub(
+            "Here is the design. " * 40 + "Note the rate limit on the API.",
+            is_error=False)
+        result = subprocess.run(["bash", str(LAUNCHER), "--resume", run_id],
+                                text=True, capture_output=True, env=env)
+        self.assertEqual(result.returncode, 0,
+                         msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+        self.assertNotIn("usage limit", result.stdout)
+
+
+    def test_orchestrator_usage_limit_switch_moves_the_conversation(self):
+        import pty, select, time
+        env = self._env()
+        run_id = self._approved_design_run(env)
+        (self.profiles / "alt").mkdir()
+        (self.profiles / "alt" / ".credentials.json").write_text("{}")
+        authbin = self.root / "authbin"
+        authbin.mkdir()
+        (authbin / "claude").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (authbin / "claude").chmod(0o755)
+        env["PATH"] = f"{authbin}:{env['PATH']}"
+        env["FDE_TEST_RECORD"] = self._limit_stub("You've hit your session limit")
+        master, slave = pty.openpty()
+        proc = subprocess.Popen(["bash", str(LAUNCHER), "--resume", run_id],
+                                stdin=slave, stdout=slave, stderr=slave, env=env)
+        os.close(slave)
+        out, sent = b"", False
+        deadline = time.time() + 60
+        while proc.poll() is None:
+            if time.time() > deadline:
+                proc.kill()
+                self.fail("fde-start did not finish:\n" + out.decode(errors="replace"))
+            if select.select([master], [], [], 1)[0]:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError:
+                    break
+                out += chunk
+                if not sent and b"choice:" in out:
+                    os.write(master, b"1\n")
+                    sent = True
+        proc.wait(timeout=30)
+        text = out.decode(errors="replace")
+        self.assertEqual(proc.returncode, 0, msg=text)
+        self.assertIn("Orchestrator is now claude_", text)
+        roles = json.loads((self.shared / "runs" / run_id / "roles.json").read_text())
+        self.assertNotEqual(roles["assignments"]["orchestrator"], "claude_work")
+        sid = (self.shared / "runs" / run_id / "orchestrator-session-id").read_text().strip()
+        log = self.log.read_text()
+        self.assertIn(f"SID={sid}", log)  # resumed the same session as the new account
+        self.assertNotIn("RAN_AS=" + str(self.profiles / "work"), log)
+        copied = list((self.profiles).glob(f"*/projects/*/{sid}.jsonl"))
+        self.assertGreaterEqual(len(copied), 2)  # old and new profile both hold it
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -354,6 +354,13 @@ design. That is the pipeline working, not failing.
 
 Track it with `fde status <run-id>`, advance it with `fde resume <run-id> --next`.
 
+**If the orchestrator hits its usage limit**, `fde-start` notices when the Claude
+session ends on a limit message and offers the other signed-in Claude accounts.
+Pick one and it reassigns the orchestrator, carries the conversation across and
+resumes it; pick `w` to wait and later run `fde-start --resume <run-id>`. It never
+switches on its own, and with no terminal it exits with status 75 and prints the
+command instead.
+
 **Start a second task and it asks for roles again.** It will not reuse these.
 Only you saying "same as the previous task" makes `--same-as <run-id>` valid.
 
