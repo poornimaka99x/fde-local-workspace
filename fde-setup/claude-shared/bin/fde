@@ -6659,6 +6659,7 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
             env["FDE_GEMINI_WORKSPACE"] = str(run.dir)
             env["FDE_GEMINI_PROJECT_DIR"] = str(pathlib.Path.cwd().resolve())
             env["ANTIGRAVITY_APP_DATA_DIR"] = str(gemini_settings.parent)
+            env["FDE_GEMINI_SETTINGS"] = str(gemini_settings)
         return ([_bin("ask-gemini"), "--task-file", str(task)]
                 + context_options + options), env
     if kind == "copilot-studio":

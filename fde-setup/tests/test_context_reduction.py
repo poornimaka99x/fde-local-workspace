@@ -254,6 +254,69 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
             self.assertIn(f"--add-dir {project}", result.stdout)
             self.assertIn("--mode plan --sandbox", result.stdout)
 
+    def _fake_agy_home(self, root):
+        """An agy that behaves like 1.2.14: settings and sign-in both come from
+        $HOME, and ANTIGRAVITY_APP_DATA_DIR is ignored."""
+        real = root / "realhome"
+        cli = real / ".gemini" / "antigravity-cli"
+        cli.mkdir(parents=True)
+        (cli / "settings.json").write_text('{"who":"global"}')
+        (cli / "token").write_text("signed-in")
+        (real / "keyring").mkdir()
+        (real / "keyring" / "login").write_text("k")
+        stub = root / "agy"
+        stub.write_text(
+            '#!/usr/bin/env bash\n'
+            'cli="$HOME/.gemini/antigravity-cli"\n'
+            '[[ -f "$cli/token" && -f "$HOME/keyring/login" ]] || { echo "not signed in" >&2; exit 1; }\n'
+            'if [[ "${1:-}" == "models" ]]; then echo m1; exit 0; fi\n'
+            'printf "SETTINGS=%s\\n" "$(cat "$cli/settings.json")"\n')
+        stub.chmod(0o755)
+        return real, stub
+
+    def test_governed_gemini_reads_run_settings_and_keeps_sign_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real, _ = self._fake_agy_home(root)
+            workspace = root / "run"
+            (workspace / ".agents").mkdir(parents=True)
+            (workspace / ".agents/mcp_config.json").write_text('{"mcpServers":{}}')
+            appdata = workspace / "mcp" / "gemini-app-data"
+            appdata.mkdir(parents=True)
+            (appdata / "settings.json").write_text('{"who":"run-scoped"}')
+            result = sh(SHARED / "bin" / "ask-gemini", "research this",
+                        env={"HOME": str(real), "PATH": f"{root}:{os.environ['PATH']}",
+                             "FDE_RUN_ID": "run-123", "FDE_ROUTED_INVOCATION": "1",
+                             "FDE_GEMINI_WORKSPACE": str(workspace),
+                             "FDE_GEMINI_SETTINGS": str(appdata / "settings.json")},
+                        expected=0)
+            self.assertIn('SETTINGS={"who":"run-scoped"}', result.stdout)
+            # The real settings are untouched and the temporary home is gone.
+            self.assertEqual(
+                (real / ".gemini/antigravity-cli/settings.json").read_text(),
+                '{"who":"global"}')
+            self.assertEqual([p.name for p in appdata.iterdir()], ["settings.json"])
+
+    def test_governed_gemini_refuses_when_the_sign_in_does_not_survive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real, _ = self._fake_agy_home(root)
+            (real / "keyring" / "login").unlink()
+            workspace = root / "run"
+            (workspace / ".agents").mkdir(parents=True)
+            (workspace / ".agents/mcp_config.json").write_text('{"mcpServers":{}}')
+            appdata = workspace / "mcp" / "gemini-app-data"
+            appdata.mkdir(parents=True)
+            (appdata / "settings.json").write_text('{"who":"run-scoped"}')
+            result = sh(SHARED / "bin" / "ask-gemini", "research this",
+                        env={"HOME": str(real), "PATH": f"{root}:{os.environ['PATH']}",
+                             "FDE_RUN_ID": "run-123", "FDE_ROUTED_INVOCATION": "1",
+                             "FDE_GEMINI_WORKSPACE": str(workspace),
+                             "FDE_GEMINI_SETTINGS": str(appdata / "settings.json")})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not signed in under the run-scoped home", result.stderr)
+            self.assertNotIn("SETTINGS=", result.stdout)
+
     def test_write_mode_prompt_is_not_wrapped(self):
         # The approval is hash-bound to the task file: what Codex is told in
         # write mode must be exactly what the user approved.

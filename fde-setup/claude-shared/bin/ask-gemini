@@ -138,9 +138,16 @@ fi
 
 # A governed run may provide a workspace-local MCP configuration. Antigravity
 # discovers it only from the active workspace, so enter that run directory and
-# add the caller's project back as read context. The controller also points
-# ANTIGRAVITY_APP_DATA_DIR at isolated, exact web/MCP permission rules; no
+# add the caller's project back as read context. The controller also hands over
+# isolated, exact web/MCP permission rules (FDE_GEMINI_SETTINGS); no
 # machine-global setting is edited.
+#
+# agy 1.2.14 ignores ANTIGRAVITY_APP_DATA_DIR and always reads
+# ~/.gemini/antigravity-cli/settings.json, and the only per-run override that
+# works is HOME — which on its own drops the sign-in. So agy runs under a shadow
+# HOME: a symlink farm of the real one (keyring, keychain, config, everything)
+# in which exactly one file differs, the run's settings.json. The rules load,
+# the sign-in survives, and the real settings file is never touched.
 workspace_options=()
 if [[ -n "${FDE_GEMINI_WORKSPACE:-}" ]]; then
   [[ "$FDE_GEMINI_WORKSPACE" == /* && -d "$FDE_GEMINI_WORKSPACE" ]] ||
@@ -155,9 +162,61 @@ if [[ -n "${FDE_GEMINI_WORKSPACE:-}" ]]; then
   cd "$FDE_GEMINI_WORKSPACE" || die "cannot enter the governed Gemini workspace"
 fi
 
+# Build the shadow HOME. Every top-level entry of the real HOME is linked in,
+# except .gemini, which is a real directory of links whose antigravity-cli
+# subdirectory swaps in only the run's settings.json. Each call gets its own
+# (parallel researchers must not share one) and removes it on exit; it holds only
+# symlinks plus that one file, so removing it cannot reach the real files.
+shadow_home() {  # shadow_home <settings-file> <target-dir>
+  local settings="$1" target="$2" real="${FDE_REAL_HOME:-$HOME}" e name
+  [[ "$target" == */gemini-app-data/home.* ]] || return 1
+  mkdir -p "$target/.gemini/antigravity-cli" || return 1
+  for e in "$real"/* "$real"/.[!.]* "$real"/..?*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    name="${e##*/}"; [[ "$name" == ".gemini" ]] && continue
+    ln -s "$e" "$target/$name" || return 1
+  done
+  for e in "$real/.gemini"/* "$real/.gemini"/.[!.]*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    name="${e##*/}"; [[ "$name" == "antigravity-cli" ]] && continue
+    ln -s "$e" "$target/.gemini/$name" || return 1
+  done
+  for e in "$real/.gemini/antigravity-cli"/* "$real/.gemini/antigravity-cli"/.[!.]*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    name="${e##*/}"; [[ "$name" == "settings.json" ]] && continue
+    ln -s "$e" "$target/.gemini/antigravity-cli/$name" || return 1
+  done
+  cp "$settings" "$target/.gemini/antigravity-cli/settings.json" &&
+    chmod 600 "$target/.gemini/antigravity-cli/settings.json"
+}
+
+agy_env=()
+settings_file="${FDE_GEMINI_SETTINGS:-}"
+[[ -z "$settings_file" && -n "${ANTIGRAVITY_APP_DATA_DIR:-}" ]] &&
+  settings_file="$ANTIGRAVITY_APP_DATA_DIR/settings.json"
+if [[ -n "${FDE_GEMINI_WORKSPACE:-}" && -n "$settings_file" ]]; then
+  [[ "$settings_file" == /* && -f "$settings_file" && ! -L "$settings_file" ]] ||
+    die "the run's Gemini permission rules are missing: $settings_file"
+  home_dir="$(mktemp -d "$(dirname "$settings_file")/home.XXXXXX")" ||
+    die "could not create the run-scoped Antigravity home"
+  trap 'rm -rf "$home_dir"' EXIT
+  shadow_home "$settings_file" "$home_dir" ||
+    die "could not build the run-scoped Antigravity home at $home_dir"
+  agy_env=(env "HOME=$home_dir" "FDE_REAL_HOME=${FDE_REAL_HOME:-$HOME}")
+  # Prove the run's rules are the ones agy will read, and that the sign-in
+  # survived the HOME change, before any prompt is spent. Without this a run
+  # would either fail late or, worse, run under the wrong permissions.
+  cmp -s "$settings_file" "$home_dir/.gemini/antigravity-cli/settings.json" ||
+    die "the run-scoped settings did not land in the Antigravity home"
+  "${agy_env[@]}" "$AGY" models >/dev/null 2>&1 ||
+    die "Antigravity is not signed in under the run-scoped home.
+       Sign-in state is read through HOME; check it with: ask-gemini --check
+       (run by hand, outside a run), or sign in again: fde accounts login <account-id>"
+fi
+
 # The prompt is the value of -p and always the last argument, so a question that
 # begins with a dash is text and can never become a flag.
-"$AGY" ${workspace_options[@]+"${workspace_options[@]}"} \
+${agy_env[@]+"${agy_env[@]}"} "$AGY" ${workspace_options[@]+"${workspace_options[@]}"} \
   ${options[@]+"${options[@]}"} --mode plan --sandbox --output-format text -p "$prompt"
 rc=$?
 # 0 ok | non-zero: no response, or an error. agy reports the reason itself.
