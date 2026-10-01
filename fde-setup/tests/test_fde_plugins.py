@@ -126,15 +126,31 @@ class ImportRefusalTest(PluginTestCase):
         self.assertIn("plugin:user:acme", ids)
         self.assertIn("skill:user:acme:alpha", ids)
 
-    def test_fde_subagents_inherit_the_orchestrator_tool_surface(self):
+    def test_fde_subagent_tools_match_their_permission_contract(self):
+        """Every fde-core agent inherits the orchestrator's tools unless
+        agents/permissions.json declares it restricted, with a reason and the
+        exact allowlist its front matter carries. An undeclared allowlist would
+        silently cut an agent off from run-scoped MCP and tools; an undeclared
+        inheritance would hide a reviewer that is meant to be read-only."""
         agents = self.plugins / "fde-core" / "agents"
-        restricted = []
+        contract = json.loads((agents / "permissions.json").read_text(encoding="utf-8"))["agents"]
+        names = {path.stem for path in agents.glob("*.md")}
+        self.assertEqual(names, set(contract), "every agent needs exactly one permission entry")
         for path in sorted(agents.glob("*.md")):
             metadata = cap.frontmatter(path.read_text(encoding="utf-8"))
-            if metadata.get("tools") or metadata.get("allowed-tools"):
-                restricted.append(path.name)
-        self.assertEqual(restricted, [],
-                         "FDE agents must omit tool allowlists so runtime inheritance works")
+            declared = metadata.get("tools") or metadata.get("allowed-tools")
+            tools = sorted(t.strip() for t in (declared or "").split(",") if t.strip())
+            entry = contract[path.stem]
+            with self.subTest(agent=path.stem):
+                self.assertTrue(str(entry.get("reason") or "").strip(), "a mode needs a reason")
+                if entry["mode"] == "inherit":
+                    self.assertEqual(tools, [], "an inheriting agent must omit a tool allowlist")
+                else:
+                    self.assertEqual(entry["mode"], "restricted")
+                    self.assertEqual(tools, sorted(entry["tools"]),
+                                     "front matter and permissions.json disagree")
+                    self.assertFalse({"Bash", "Write", "Edit"} & set(tools),
+                                     "a restricted reviewer must not be able to change the repository")
 
     def test_an_import_records_a_checksum_and_its_provenance(self):
         source = self.candidate("acme")

@@ -1048,7 +1048,13 @@ class TestBackwardsCompatibility(RoutingTest):
                           "--stage", "research", "--dry-run")
         self.assertEqual(dry.returncode, 0, dry.stderr)
         payload = json.loads(dry.stdout)
-        self.assertEqual(payload["argv"][:2], ["claude", "-p"])
+        argv = payload["argv"]
+        # Run-scoped MCP options may precede -p; what a legacy run must never get
+        # is a routed model or effort it did not approve.
+        self.assertEqual(argv[0], "claude")
+        self.assertIn("-p", argv)
+        self.assertNotIn("--model", argv)
+        self.assertNotIn("--effort", argv)
         self.assertEqual(payload["route"]["source"], "manual")
         status = json.loads(self.sb.fde("status", run_id, "--json").stdout)
         self.assertIsNone(status["routing"])

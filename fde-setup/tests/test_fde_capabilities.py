@@ -173,17 +173,26 @@ class DefaultsTest(CapabilityTestCase):
         self.assertEqual((self.shared / "config/routing-policy.json").read_bytes(), before)
 
     def test_overlapping_connectors_are_opt_in_and_overrides_still_work(self):
-        document, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "vertical-slice")
+        # Selection, not activity: `enabled` in the document lists only what is
+        # selected AND available, and a test sandbox has no connector installed
+        # or verified. What this test owns is the stage's default selection and
+        # that an operator override changes it.
+        def selected(stage):
+            _document, entries = self.resolved("--workflow", "forward-deployed-engineer",
+                                               "--stage", stage)
+            return {cid for cid, entry in entries.items() if entry["state"] == "enabled"}
+
         optional = {"mcp:fde:serena", "mcp:fde:projectatlas", "mcp:fde:openwiki"}
-        self.assertFalse(optional & set(document["enabled"]))
-        self.assertIn("mcp:fde:playwright", document["enabled"])
+        chosen = selected("vertical-slice")
+        self.assertFalse(optional & chosen)
+        self.assertIn("mcp:fde:playwright", chosen)
         self.fde("config", "set", "mcp:fde:projectatlas", "enabled",
                  "--scope", "stage:forward-deployed-engineer/vertical-slice")
-        document, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "vertical-slice")
-        self.assertIn("mcp:fde:projectatlas", document["enabled"])
-        self.assertNotIn("mcp:fde:serena", document["enabled"])
-        operations, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "operations")
-        self.assertFalse({"mcp:fde:aws", "mcp:fde:azure", "mcp:fde:dbhub", "mcp:fde:langfuse"} & set(operations["enabled"]))
+        chosen = selected("vertical-slice")
+        self.assertIn("mcp:fde:projectatlas", chosen)
+        self.assertNotIn("mcp:fde:serena", chosen)
+        self.assertFalse({"mcp:fde:aws", "mcp:fde:azure", "mcp:fde:dbhub", "mcp:fde:langfuse"}
+                         & selected("operations"))
 
     def test_every_stage_has_a_usable_default_bundle_with_no_configuration(self):
         self.assertFalse(cap.config_file(self.shared).exists(),
