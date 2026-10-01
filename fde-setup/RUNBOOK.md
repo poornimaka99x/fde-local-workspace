@@ -73,6 +73,29 @@ region. It prints no credentials.
 
 ---
 
+### Optional — OmniRoute as a session-limit fallback
+
+OmniRoute is never assigned in a plan. When a Claude session or usage limit is
+hit, FDE offers it, and uses it only after you type `USE OMNIROUTE <run-id>`,
+for that limit hit only. It sends the run's conversation and code to the
+providers in your combo, so build that combo from providers approved for client
+work. `auto` and `auto/*` are refused because they can reach keyless free providers.
+
+```bash
+npm install -g omniroute && omniroute          # dashboard: create a combo and an API key
+fde accounts add --provider claude-omniroute --name gateway --combo fde-fallback
+pbpaste | fde accounts set-secret omniroute_gateway
+fde accounts verify omniroute_gateway          # gateway, key, combo and fde-core
+```
+
+- **Orchestrator:** `fde-start` lists OmniRoute next to your other signed-in
+  Claude accounts. If you resume a run that is still on OmniRoute, it asks again
+  and offers the way back to a Claude account.
+- **Implementation:** your own Claude accounts still fail over automatically.
+  When none is left, `fde invoke` stops with exit code 75, and the orchestrator
+  asks you. Your typed phrase is piped to `--use-omniroute`. The approved route
+  stays frozen, and the combo chooses the model.
+
 ### Optional — grounded repository memory with OpenWiki
 
 OpenWiki is useful when an engagement repository already has a generated wiki

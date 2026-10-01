@@ -121,6 +121,25 @@ fi
 
 prompt="$(compose_prompt "$prompt" ${context_files[@]+"${context_files[@]}"})"
 
+# A governed invocation is captured from stdout and filed by the controller.
+# Tasks sometimes phrase their deliverable as "write <run artifact>", which can
+# make Antigravity choose a shell or file-write tool. Those tools require an
+# interactive approval and are intentionally unavailable to this read-only
+# lane, so headless mode otherwise soft-denies them and returns no answer. Make
+# the transport contract explicit after the task: return the requested document
+# as the response; the controller, not the model, owns filing it.
+if [[ -n "${FDE_GEMINI_WORKSPACE:-}" ]]; then
+  prompt="$prompt
+
+# FDE response contract
+
+Return the complete requested deliverable in your final response on stdout.
+Do not write or edit files and do not run shell commands. The FDE controller
+will file your response. Any context files named above are already embedded in
+this prompt; do not use tools to reopen them. Use read-only web tools for public
+research and cite the sources you read."
+fi
+
 # Model and effort are validated and passed as separate argv elements, never
 # interpolated into a string, so a value cannot carry an option with it. Empty
 # leaves agy's own default alone.
@@ -170,7 +189,7 @@ fi
 shadow_home() {  # shadow_home <settings-file> <target-dir>
   local settings="$1" target="$2" real="${FDE_REAL_HOME:-$HOME}" e name
   [[ "$target" == */gemini-app-data/home.* ]] || return 1
-  mkdir -p "$target/.gemini/antigravity-cli" || return 1
+  mkdir -p "$target/.gemini/antigravity-cli/brain" || return 1
   for e in "$real"/* "$real"/.[!.]* "$real"/..?*; do
     [[ -e "$e" || -L "$e" ]] || continue
     name="${e##*/}"; [[ "$name" == ".gemini" ]] && continue
@@ -183,7 +202,8 @@ shadow_home() {  # shadow_home <settings-file> <target-dir>
   done
   for e in "$real/.gemini/antigravity-cli"/* "$real/.gemini/antigravity-cli"/.[!.]*; do
     [[ -e "$e" || -L "$e" ]] || continue
-    name="${e##*/}"; [[ "$name" == "settings.json" ]] && continue
+    name="${e##*/}"
+    [[ "$name" == "settings.json" || "$name" == "brain" ]] && continue
     ln -s "$e" "$target/.gemini/antigravity-cli/$name" || return 1
   done
   cp "$settings" "$target/.gemini/antigravity-cli/settings.json" &&
@@ -199,14 +219,41 @@ if [[ -n "${FDE_GEMINI_WORKSPACE:-}" && -n "$settings_file" ]]; then
     die "the run's Gemini permission rules are missing: $settings_file"
   home_dir="$(mktemp -d "$(dirname "$settings_file")/home.XXXXXX")" ||
     die "could not create the run-scoped Antigravity home"
-  trap 'rm -rf "$home_dir"' EXIT
+  scratch_dir="$(mktemp -d "$(dirname "$settings_file")/tmp.XXXXXX")" ||
+    die "could not create the run-scoped Antigravity scratch directory"
+  trap 'rm -rf "$home_dir" "$scratch_dir"' EXIT
   shadow_home "$settings_file" "$home_dir" ||
     die "could not build the run-scoped Antigravity home at $home_dir"
-  agy_env=(env "HOME=$home_dir" "FDE_REAL_HOME=${FDE_REAL_HOME:-$HOME}")
+  # Antigravity may request read_file while it initializes a workspace, even
+  # for a web-only prompt. Headless mode cannot approve that request. Grant
+  # recursive reads only to the two deliberate workspace roots and this call's
+  # isolated scratch/cache directories; never use read_file(*), which would
+  # expose the rest of the machine (including credential directories).
+  python3 - "$home_dir/.gemini/antigravity-cli/settings.json" \
+    "$FDE_GEMINI_WORKSPACE" "${FDE_GEMINI_PROJECT_DIR:-}" "$scratch_dir" \
+    "$home_dir/.gemini/antigravity-cli/brain" <<'PY' ||
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+document = json.loads(path.read_text(encoding="utf-8"))
+permissions = document.setdefault("permissions", {})
+allow = permissions.setdefault("allow", [])
+for root in sys.argv[2:]:
+    if root:
+        rule = f"read_file({root})"
+        if rule not in allow:
+            allow.append(rule)
+path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+PY
+    die "could not scope Antigravity file reads to the governed workspaces"
+  agy_env=(env "HOME=$home_dir" "TMPDIR=$scratch_dir"
+    "FDE_REAL_HOME=${FDE_REAL_HOME:-$HOME}")
   # Prove the run's rules are the ones agy will read, and that the sign-in
   # survived the HOME change, before any prompt is spent. Without this a run
   # would either fail late or, worse, run under the wrong permissions.
-  cmp -s "$settings_file" "$home_dir/.gemini/antigravity-cli/settings.json" ||
+  [[ -s "$home_dir/.gemini/antigravity-cli/settings.json" ]] ||
     die "the run-scoped settings did not land in the Antigravity home"
   "${agy_env[@]}" "$AGY" models >/dev/null 2>&1 ||
     die "Antigravity is not signed in under the run-scoped home.
@@ -216,9 +263,33 @@ fi
 
 # The prompt is the value of -p and always the last argument, so a question that
 # begins with a dash is text and can never become a flag.
+stdout_file="$(mktemp "${TMPDIR:-/tmp}/ask-gemini.stdout.XXXXXX")" ||
+  die "could not create a temporary output file"
+stderr_file="$(mktemp "${TMPDIR:-/tmp}/ask-gemini.stderr.XXXXXX")" || {
+  rm -f "$stdout_file"
+  die "could not create a temporary error file"
+}
+cleanup() {
+  rm -f "$stdout_file" "$stderr_file"
+  [[ -z "${home_dir:-}" ]] || rm -rf "$home_dir"
+  [[ -z "${scratch_dir:-}" ]] || rm -rf "$scratch_dir"
+}
+trap cleanup EXIT
+
 ${agy_env[@]+"${agy_env[@]}"} "$AGY" ${workspace_options[@]+"${workspace_options[@]}"} \
-  ${options[@]+"${options[@]}"} --mode plan --sandbox --output-format text -p "$prompt"
+  ${options[@]+"${options[@]}"} --mode plan --sandbox --output-format text -p "$prompt" \
+  >"$stdout_file" 2>"$stderr_file"
 rc=$?
+cat "$stdout_file"
+cat "$stderr_file" >&2
+# Antigravity documents permission denials in headless mode as a soft failure:
+# it can exit 0 with only a stderr notice and no answer. That is not a
+# successful research result, so surface it as a failure to the controller and
+# its retry/escalation policy.
+if [[ $rc -eq 0 && ! -s "$stdout_file" ]]; then
+  echo "ask-gemini: Antigravity returned no answer; treating the headless soft denial as a failure" >&2
+  rc=1
+fi
 # 0 ok | non-zero: no response, or an error. agy reports the reason itself.
 [[ $rc -ne 0 ]] && echo "(agy exited $rc — run 'ask-gemini --check' if this looks like a sign-in problem)" >&2
 exit $rc

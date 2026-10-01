@@ -83,6 +83,11 @@ The controller, not memory, runs the pipeline: `fde start`, `fde roles`,
 outside this machine — Jira, Confluence, SharePoint, Bitbucket, email, Teams —
 needs its own publication approval, every time.
 
+OmniRoute is a session-limit fallback only, never a planned role. When
+`fde invoke` reports a Claude limit and offers OmniRoute, stop and ask the user.
+Pipe `USE OMNIROUTE <run-id>` into `--use-omniroute` only after the user has typed
+exactly that phrase in this conversation for this limit hit; never type it yourself.
+
 Use `/crosscheck` for a decision that is expensive to reverse. Do not
 cross-check routine work — it is slow and the daily quota is finite. Their
 output is evidence, not authority: verify a claim about the codebase in the

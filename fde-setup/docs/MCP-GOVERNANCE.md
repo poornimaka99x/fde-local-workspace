@@ -164,7 +164,9 @@ file upload and installation tools are denied.
 ```bash
 fde mcp verify chrome-devtools
 ```
-Pinned to `chrome-devtools-mcp@1.9.0`, run `--slim --headless --isolated`. It
+Pinned to `chrome-devtools-mcp@1.10.1`, run `--headless --isolated` with
+`--no-usage-statistics --no-performance-crux --redact-network-headers`, so no
+usage data or trace URLs go to Google and auth headers are redacted. It
 never attaches to your normal signed-in Chrome. Attaching to a running browser is
 an explicit setting with a warning attached, and clearing it is your job.
 
@@ -379,7 +381,8 @@ DevTools 1.9.0 reports 29 and 19 survive; every interaction tool
 (`click`, `fill`, `fill_form`, `hover`, `drag`, `press_key`, `type_text`,
 `handle_dialog`), plus `evaluate_script` and `upload_file`, is denied — which is
 what makes "Playwright drives, DevTools diagnoses" a rule rather than a
-suggestion.
+suggestion. 1.10 adds `get_css_styles`; it and the heap-snapshot analysis
+tools are read-only and allowed, so a snapshot taken can also be inspected.
 
 **One deviation from the original brief, on the evidence.** Chrome DevTools was
 specified to run `--slim` by default. Verified against 1.9.0, `--slim` exposes

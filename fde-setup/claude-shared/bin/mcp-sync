@@ -334,6 +334,22 @@ def sync_run(catalog, user_doc, health, run_id, dry, report, profile=None):
             bindings.setdefault(aid, {})[name] = server
     announce_skips(per_identity_reasons, "run", report)
 
+    # Gemini needs a run-scoped settings file even when this run has no live
+    # MCP connector. Web reads default to an interactive approval in
+    # Antigravity; headless mode cannot answer it and soft-denies the tool while
+    # still exiting zero. Keeping an empty binding here causes the normal
+    # Gemini renderer below to write both an empty workspace MCP config and the
+    # isolated read_url permission policy.
+    assigned = {
+        aid
+        for value in assignments.values()
+        for aid in (value if isinstance(value, list) else [value])
+        if aid
+    }
+    for aid in assigned:
+        if (agents.get(aid) or {}).get("kind") == "gemini":
+            bindings.setdefault(aid, {})
+
     written, effective = [], {}
     for aid, selected in bindings.items():
         a = agents.get(aid, {})

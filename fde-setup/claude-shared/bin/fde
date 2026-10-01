@@ -961,11 +961,10 @@ def account_env(agents, aid: str, templates=None) -> dict:
     # editing settings.json (or relying on whatever AWS_PROFILE happens to be
     # present in the console process).
     for field in tpl.get("fields") or []:
-        env_name = field.get("env")
-        if env_name:
-            value = _effective_account_fields(tpl, agent).get(field["name"])
-            if value is not None:
-                env[str(env_name)] = str(value)
+        value = _effective_account_fields(tpl, agent).get(field["name"])
+        if value is not None:
+            for env_name in _field_env_names(field):
+                env[env_name] = str(value)
     if not account_isolated(tpl, agent):
         # A shipped entry on a provider that never had per-account credentials
         # keeps the environment it had before this command existed: none. Its
@@ -984,6 +983,40 @@ def account_env(agents, aid: str, templates=None) -> dict:
     if cred.get("env") == "CLAUDE_CONFIG_DIR":
         env["CLAUDE_PROFILE"] = account
     return env
+
+
+def _field_env_names(field) -> list:
+    """The environment variables one provider field feeds: none, one, or a list.
+
+    A list exists for OmniRoute, where one approved combo must back every model
+    alias Claude Code can ask for, so no alias falls through to a provider the
+    operator did not approve."""
+    names = field.get("env")
+    if not names:
+        return []
+    return [str(n) for n in (names if isinstance(names, list) else [names])]
+
+
+def account_fallback_only(agents, aid) -> bool:
+    """Whether this identity may be used only as an approved session-limit fallback.
+
+    Such an account is never offered for a plan or role. It is reached only
+    through the limit paths, each of which asks the operator first."""
+    agent = (agents.get("agents") or {}).get(aid) or {}
+    tpl = (load_provider_templates().get("providers") or {}).get(account_provider(agent)) or {}
+    return bool(tpl.get("fallbackOnly"))
+
+
+def fallback_accounts(agents):
+    """Signed-in, available fallback-only Claude identities, in registry order."""
+    found = []
+    for aid, agent in (agents.get("agents") or {}).items():
+        if agent.get("kind") != "claude" or not account_fallback_only(agents, aid):
+            continue
+        available, _detail = agent_available(agents, aid)
+        if available:
+            found.append(aid)
+    return found
 
 
 def account_secret_path(templates, agent: dict, aid: str):
@@ -1185,6 +1218,7 @@ def account_record(templates, agents, aid: str) -> dict:
         "declared": account_declared(agent),
         "isolated": account_isolated(tpl, agent),
         "fields": _effective_account_fields(tpl, agent),
+        "fallbackOnly": bool(tpl.get("fallbackOnly")),
         "note": agent.get("note"),
         "surface": agent.get("surface"),
         "forbidden": list(agent.get("forbidden") or []),
@@ -1644,14 +1678,16 @@ def cmd_accounts_update(args):
         # Keep direct `cc-<profile>` use consistent with FDE launches. Preserve
         # every unrelated Claude setting and update only provider fields that
         # explicitly map to environment variables in the template.
-        if (tpl.get("env") or {}).get("CLAUDE_CODE_USE_BEDROCK") == "1":
+        if ((tpl.get("env") or {}).get("CLAUDE_CODE_USE_BEDROCK") == "1"
+                or tpl.get("fallbackOnly")):
             settings_dir = make_private_dir(account_credential_dir(templates, agent, aid))
             settings_path = settings_dir / "settings.json"
             settings = read_json(settings_path, {}) or {}
             settings_env = settings.setdefault("env", {})
             for field in declared:
-                if field.get("env") and field["name"] in fields:
-                    settings_env[field["env"]] = fields[field["name"]]
+                if field["name"] in fields:
+                    for env_name in _field_env_names(field):
+                        settings_env[env_name] = fields[field["name"]]
             write_json(settings_path, settings)
             os.chmod(settings_path, 0o600)
     record = account_record(templates, load_agents(), aid)
@@ -5185,12 +5221,18 @@ def _start(args):
     return 0, run
 
 
-def _set_orchestrator(run, token, shape=None):
+def _set_orchestrator(run, token, shape=None, limit_fallback=False):
     agents = load_agents()
     aid = resolve_agent(agents, token)
     if not aid:
         die("give an identity to orchestrate this run", 2)
     a = agents["agents"][aid]
+    if limit_fallback and not run.orchestrator():
+        die("a limit fallback replaces an existing orchestrator; this run has none", 6)
+    if account_fallback_only(agents, aid) and not limit_fallback:
+        die(f"{agent_label(agents, aid)} is a session-limit fallback. It is offered "
+            "by fde-start when a Claude limit is hit, and used only after you "
+            "approve it there.", 6)
     if "orchestration" not in a.get("capabilities", []):
         die(f"{agent_label(agents, aid)} cannot orchestrate — it has no 'orchestration' "
             f"capability.\n       Candidates: "
@@ -5208,6 +5250,14 @@ def _set_orchestrator(run, token, shape=None):
     doc["orchestratorChosenAt"] = iso()
     write_json(run.roles_path, doc)
     run.event("orchestrator.chosen", agent=aid)
+    if limit_fallback:
+        # The approved route stays frozen: the gateway combo decides the model,
+        # and re-proposing a route for a fallback would ask to re-approve a plan
+        # the operator already approved.
+        run.event("orchestrator.limit_fallback", agent=aid,
+                  approvedBy="operator at fde-start")
+        print(f"orchestrator  {agent_label(agents, aid)} (approved limit fallback)")
+        return 0
     if run.state == "awaiting_orchestrator":
         run.set_state("awaiting_plan", f"orchestrator: {aid}")
 
@@ -5248,7 +5298,8 @@ def cmd_orchestrator(args):
         die(f"run {run.id} is already orchestrated by "
             f"{agent_label(load_agents(), run.orchestrator())}. "
             "Pass --reassign to change it.", 5)
-    return _set_orchestrator(run, args.identity, shape=args.shape)
+    return _set_orchestrator(run, args.identity, shape=args.shape,
+                             limit_fallback=bool(getattr(args, "limit_fallback", False)))
 
 
 def cmd_request(args):
@@ -5696,6 +5747,9 @@ def cmd_roles(args):
         for aid in ids:
             need = cap_of.get(role)
             caps = agents["agents"][aid].get("capabilities", [])
+            if account_fallback_only(agents, aid):
+                die(f"{agent_label(agents, aid)} is a session-limit fallback and is "
+                    "never assigned a role in a plan. Choose a Claude account.", 2)
             if need and need not in caps:
                 die(f"{agent_label(agents, aid)} cannot hold the '{role}' role — "
                     f"it has no '{need}' capability. Choose another identity.", 2)
@@ -6729,6 +6783,92 @@ def _record_automatic_session_limit(run, route, artifact):
     append_jsonl(routing_attempts_path(run), record)
 
 
+OMNIROUTE_EXIT = 75  # EX_TEMPFAIL: the work is intact and waits on a decision
+
+
+def _omniroute_phrase(run):
+    return f"USE OMNIROUTE {run.id}"
+
+
+def _omniroute_ready(agents, fallback_id):
+    """(ok, detail) from omniroute-check run with the fallback account's env."""
+    env = dict(os.environ, **account_env(agents, fallback_id))
+    try:
+        proc = subprocess.run([_bin("omniroute-check")], env=env, capture_output=True,
+                              text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"omniroute-check could not run: {exc}"
+    return proc.returncode == 0, (proc.stdout or proc.stderr).strip()[:300]
+
+
+def _omniroute_disclosure(agents, fallback_id):
+    agent = agents["agents"][fallback_id]
+    tpl = (load_provider_templates().get("providers") or {}).get(account_provider(agent)) or {}
+    return (f"  {agent_label(agents, fallback_id)}: {agent.get('baseUrl')} combo "
+            f"'{agent.get('combo')}'\n  {tpl.get('fallbackNote', '')}")
+
+
+def _omniroute_offer(run, agents, args, limited_id, stage):
+    """Tell the caller how OmniRoute could continue, or ask directly on a TTY.
+
+    Returns the approved fallback id, or None when the decision is left with the
+    operator. Nothing here selects OmniRoute on its own: every path needs the
+    operator to type the phrase for this run."""
+    candidates = fallback_accounts(agents)
+    if not candidates:
+        return None
+    fallback_id = candidates[0]
+    phrase = _omniroute_phrase(run)
+    print(f"\nClaude account {limited_id} reached its session limit and no other "
+          "Claude account can continue.", file=sys.stderr)
+    print("OmniRoute can continue this task:\n" + _omniroute_disclosure(agents, fallback_id),
+          file=sys.stderr)
+    run.event("omniroute.offered", exhaustedAccount=limited_id, fallback=fallback_id,
+              stage=stage)
+    if sys.stdin.isatty() and sys.stderr.isatty():
+        print(f"Type exactly '{phrase}' to continue on OmniRoute, or press Enter to stop.",
+              file=sys.stderr)
+        if input("> ").strip() == phrase:
+            return fallback_id
+        run.event("omniroute.declined", fallback=fallback_id, stage=stage)
+        return None
+    rerun = [f"fde invoke {run.id} {args.agent_id}",
+             args.task_file or f"--task-file {args.task_file_option}"]
+    if args.stage:
+        rerun.append(f"--stage {args.stage}")
+    if getattr(args, "task_id", None):
+        rerun.append(f"--task-id {args.task_id}")
+    print("Ask the user whether to use OmniRoute for this limit hit. Do not answer "
+          "for them and never type the phrase yourself. Only if the user replies "
+          f"with exactly '{phrase}', continue with:\n"
+          f"  echo '{phrase}' | {' '.join(rerun)} --use-omniroute", file=sys.stderr)
+    return None
+
+
+def _omniroute_approve(run, agents, stage, approved_id=None):
+    """Confirm the phrase (unless already typed at the prompt) and readiness."""
+    candidates = fallback_accounts(agents)
+    if not candidates:
+        die("no signed-in OmniRoute account is registered.\n"
+            "       Add one: fde accounts add --provider claude-omniroute --name gateway "
+            "--combo <combo>", 4)
+    fallback_id = approved_id or candidates[0]
+    if approved_id is None:
+        phrase = _omniroute_phrase(run)
+        print("Continue on OmniRoute for this limit hit:\n"
+              + _omniroute_disclosure(agents, fallback_id), file=sys.stderr)
+        print(f"Type exactly: {phrase}", file=sys.stderr)
+        typed = (input("> ") if sys.stdin.isatty() else sys.stdin.readline()).strip()
+        if typed != phrase:
+            die("confirmation did not match; OmniRoute was not used", 8)
+    ok, detail = _omniroute_ready(agents, fallback_id)
+    if not ok:
+        die(f"OmniRoute is not ready: {detail}", 5)
+    run.event("omniroute.approved", fallback=fallback_id, stage=stage,
+              approvedBy="operator phrase", scope="this limit hit")
+    return fallback_id
+
+
 @routing_command
 def cmd_invoke(args):
     agents = load_agents()
@@ -6830,6 +6970,13 @@ def cmd_invoke(args):
                           "route": resolved_route}))
         return 0
 
+    use_omniroute = bool(getattr(args, "use_omniroute", False))
+    if use_omniroute:
+        if a.get("kind") != "claude":
+            die("--use-omniroute continues a Claude identity that hit its limit", 2)
+        if args.write:
+            die("--use-omniroute does not combine with --write", 2)
+
     # Implementation can outlive one Claude profile's session allowance. Keep
     # the approved task, model, effort, retry and cost bounds, but move a
     # session-limited attempt to the next locally available Claude profile with
@@ -6842,6 +6989,31 @@ def cmd_invoke(args):
     continuation_from = None
     tried = {agent_id}
     provider = routing_provider_for(agents, agent_id)
+
+    def _switch_to_omniroute(fallback_id, from_id):
+        """Re-target this invocation at the approved OmniRoute account.
+
+        The approved route stays as it was: the combo decides the model, so no
+        Claude model id is passed and no routed attempt is spent."""
+        nonlocal current_id, current_roles, current_route, current_resolved_route
+        nonlocal continuation_from, argv, extra_env
+        current_id = fallback_id
+        tried.add(fallback_id)
+        current_roles = ["(approved OmniRoute limit fallback)"]
+        current_route = None
+        current_resolved_route = {**{k: None for k in resolved_route},
+                                  "taskId": (route or {}).get("taskId"),
+                                  "accountId": fallback_id,
+                                  "source": "approved-omniroute-fallback"}
+        continuation_from = from_id
+        argv, extra_env = build_invocation(
+            agents, run, fallback_id, stage, task, False, route=None,
+            context_files=context_files, continuation_from=from_id)
+        if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
+            die("refusing to run: the OmniRoute invocation contains a sandbox-bypass flag", 8)
+
+    if use_omniroute:
+        _switch_to_omniroute(_omniroute_approve(run, agents, stage), agent_id)
 
     while True:
         run.event("invoke.start", agent=current_id, stage=stage, roles=current_roles,
@@ -6915,9 +7087,25 @@ def cmd_invoke(args):
             sys.stderr.write(proc.stderr)
         print(f"\n[filed {out}]", file=sys.stderr)
 
-        limited = (stage == "implementation"
-                   and agents["agents"][current_id].get("kind") == "claude"
-                   and _claude_session_limited(proc))
+        claude_limited = (agents["agents"][current_id].get("kind") == "claude"
+                          and _claude_session_limited(proc))
+        limited = stage == "implementation" and claude_limited
+
+        def _offer_or_stop():
+            if provider == "omniroute" or current_id in fallback_accounts(agents):
+                return proc.returncode
+            approved = _omniroute_offer(run, agents, args, current_id, stage)
+            if not approved:
+                return OMNIROUTE_EXIT if fallback_accounts(agents) else proc.returncode
+            _switch_to_omniroute(_omniroute_approve(run, agents, stage, approved),
+                                 current_id)
+            return None
+
+        if claude_limited and not limited:
+            outcome = _offer_or_stop()
+            if outcome is not None:
+                return outcome
+            continue
         if not limited:
             return proc.returncode
 
@@ -6931,7 +7119,10 @@ def cmd_invoke(args):
             run.event("implementation.account_failover_unavailable",
                       exhaustedAccount=current_id, stage=stage,
                       reason="no other available Claude account has implementation capability")
-            return proc.returncode
+            outcome = _offer_or_stop()
+            if outcome is not None:
+                return outcome
+            continue
         next_id = candidates[0]
 
         next_route = current_route
@@ -6952,7 +7143,10 @@ def cmd_invoke(args):
                 print(f"\nAutomatic account failover stopped: {exc.message}", file=sys.stderr)
                 if exc.hint:
                     print(f"{exc.hint}", file=sys.stderr)
-                return proc.returncode
+                outcome = _offer_or_stop()
+                if outcome is not None:
+                    return outcome
+                continue
             next_plan = dict(next_plan)
             next_plan["reason"] = (
                 f"{next_plan.get('reason')}; Claude account {current_id} reached its "
@@ -7948,6 +8142,8 @@ def routing_provider_for(agents, agent_id):
     agent = (agents or {}).get("agents", {}).get(agent_id) or {}
     kind = agent.get("kind")
     if kind == "claude":
+        if account_provider(agent) == "claude-omniroute":
+            return "omniroute"
         return "bedrock" if agent.get("profile") == "bedrock" else "anthropic"
     if kind == "codex":
         return "codex"
@@ -14018,6 +14214,10 @@ def main(argv=None):
                    help="provider field awsProfile (see: fde accounts providers)")
     a.add_argument("--aws-region", dest="awsRegion", metavar="VALUE",
                    help="provider field awsRegion (see: fde accounts providers)")
+    a.add_argument("--base-url", dest="baseUrl", metavar="URL",
+                   help="provider field baseUrl: the OmniRoute gateway root")
+    a.add_argument("--combo", dest="combo", metavar="NAME",
+                   help="provider field combo: the approved OmniRoute combo ('auto' is refused)")
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_accounts_add)
 
@@ -14025,6 +14225,8 @@ def main(argv=None):
     a.add_argument("account_id")
     a.add_argument("--aws-profile", dest="awsProfile", metavar="VALUE")
     a.add_argument("--aws-region", dest="awsRegion", metavar="VALUE")
+    a.add_argument("--base-url", dest="baseUrl", metavar="URL")
+    a.add_argument("--combo", dest="combo", metavar="NAME")
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_accounts_update)
 
@@ -14137,6 +14339,8 @@ def main(argv=None):
     s.add_argument("identity", nargs="?")
     s.add_argument("--shape")
     s.add_argument("--reassign", action="store_true")
+    s.add_argument("--limit-fallback", dest="limit_fallback", action="store_true",
+                   help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_orchestrator)
 
     s = sub.add_parser("request", help="state what you want done, in your own words")
@@ -14268,6 +14472,9 @@ def main(argv=None):
     s.add_argument("--context-file", action="append", default=[], metavar="RUN-FILE",
                    help="bounded evidence inside the run to pass to Codex or Gemini; repeatable")
     s.add_argument("--write", action="store_true", help="Codex only, and only with a live approval")
+    s.add_argument("--use-omniroute", dest="use_omniroute", action="store_true",
+                   help="continue a limit-hit Claude task on the OmniRoute fallback; "
+                        "reads the operator's 'USE OMNIROUTE <run-id>' on stdin")
     s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_invoke)
 

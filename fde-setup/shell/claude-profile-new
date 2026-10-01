@@ -6,16 +6,27 @@ set -euo pipefail
 name="${1:-}"
 if [[ -z "$name" ]]; then
   echo "usage: claude-profile-new <name> [--bedrock --aws-profile NAME --aws-region REGION]" >&2
+  echo "       claude-profile-new <name> --omniroute --combo NAME [--base-url URL]" >&2
   exit 1
 fi
 shift
 
 bedrock=false
+omniroute=false
+base_url="http://localhost:20128"
+combo=""
 aws_profile="${FDE_BEDROCK_AWS_PROFILE:-bedrock-dev}"
 aws_region="${FDE_BEDROCK_AWS_REGION:-eu-west-1}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bedrock) bedrock=true; shift ;;
+    --omniroute) omniroute=true; shift ;;
+    --base-url)
+      [[ $# -ge 2 ]] || { echo "--base-url needs a value" >&2; exit 2; }
+      base_url="${2%/}"; shift 2 ;;
+    --combo)
+      [[ $# -ge 2 ]] || { echo "--combo needs a value" >&2; exit 2; }
+      combo="$2"; shift 2 ;;
     --aws-profile)
       [[ $# -ge 2 ]] || { echo "--aws-profile needs a value" >&2; exit 2; }
       aws_profile="$2"; shift 2 ;;
@@ -50,6 +61,53 @@ deny='"Read(./.env)",
       "Read(./**/secrets/**)",
       "Read(~/.aws/credentials)",
       "Read(~/.ssh/**)"'
+
+if [[ "$omniroute" == true ]]; then
+  # A session-limit fallback through a local OmniRoute gateway. Every model alias
+  # resolves to the one approved combo, and the key is read from a 0600 file by
+  # apiKeyHelper, so it never sits in the environment or a process list.
+  [[ "$combo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ && ! "$combo" =~ ^auto$ ]] || {
+    echo "--omniroute needs --combo <name> (a named combo; 'auto' is refused)" >&2; exit 2; }
+  [[ "$base_url" =~ ^(http://(localhost|127\.0\.0\.1)(:[0-9]{2,5})?|https://[A-Za-z0-9.-]+(:[0-9]{2,5})?)$ ]] || {
+    echo "--base-url must be http://localhost[:port] or an https URL, without /v1" >&2; exit 2; }
+  chmod 700 "$dir"
+  if [[ ! -f "$dir/settings.json" ]]; then
+    cat > "$dir/settings.json" <<JSON
+{
+  "includeCoAuthoredBy": false,
+  "apiKeyHelper": "cat '$dir/omniroute-api-key'",
+  "env": {
+    "ANTHROPIC_BASE_URL": "$base_url",
+    "ANTHROPIC_MODEL": "$combo",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "$combo",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "$combo",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$combo",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "$combo"
+  },
+  "permissions": {
+    "deny": [
+      $deny,
+      "Read(/$dir/omniroute-api-key)"
+    ]
+  }
+}
+JSON
+    chmod 600 "$dir/settings.json"
+  fi
+  # The FDE plugins, as install.sh adds them to every other profile: a run
+  # resumed here must still have /engage.
+  if command -v claude >/dev/null 2>&1; then
+    CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$SHARED/fde-toolkit" >/dev/null 2>&1 || true
+    for plugin in addy-agent-skills fde-core code-simplifier fde-user ponytail security-guidance; do
+      CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" >/dev/null 2>&1 || \
+        echo "($plugin not installed — run: CLAUDE_CONFIG_DIR=$dir claude plugin install $plugin@fde-toolkit)"
+    done
+  fi
+  echo "omniroute profile '$name' ready at $dir"
+  echo "next: store the key with  pbpaste | fde accounts set-secret omniroute_$name"
+  echo "      then check it with  fde accounts verify omniroute_$name"
+  exit 0
+fi
 
 if [[ ! -f "$dir/settings.json" ]]; then
   if [[ "$bedrock" == true ]]; then

@@ -179,6 +179,96 @@
       "legacyIsolation": true,
       "interactiveSession": true
     },
+    "claude-omniroute": {
+      "label": "Claude Code via OmniRoute",
+      "kind": "claude",
+      "idPrefix": "omniroute",
+      "loginMode": "secret",
+      "fallbackOnly": true,
+      "fallbackNote": "OmniRoute sends this run's conversation, code and tool output to whichever providers the combo routes to, outside your Claude accounts. It is never assigned in a plan: it is offered only when a Claude session or usage limit is hit, and used only after you approve it for that limit hit.",
+      "summary": "Claude Code pointed at a local OmniRoute gateway, pinned to one named combo. A session-limit fallback only, used after explicit approval.",
+      "credential": {
+        "env": "CLAUDE_CONFIG_DIR",
+        "dirTemplate": "${CLAUDE_PROFILES_DIR:~/.claude-profiles}/{account}",
+        "mode": "0700",
+        "secretFile": "omniroute-api-key",
+        "secretFileMode": "0600",
+        "source": "OmniRoute documents ANTHROPIC_BASE_URL (gateway root, no /v1) plus a bearer API key for Claude Code: docs/guides/CLAUDE-CODE-CONFIGURATION.md in diegosouzapw/OmniRoute.",
+        "handling": "The key is written once from stdin to a 0600 file in the profile. Claude Code reads it through the profile's apiKeyHelper; omniroute-check sends it only as a request header. It is never echoed, logged or placed in argv or the environment."
+      },
+      "secret": {
+        "label": "OmniRoute API key",
+        "minLength": 8,
+        "instruction": "OmniRoute dashboard > Endpoints > create an API key. Paste it; it is stored on this machine only."
+      },
+      "provision": {
+        "argv": [
+          "claude-profile-new",
+          "{account}",
+          "--omniroute",
+          "--base-url",
+          "{baseUrl}",
+          "--combo",
+          "{combo}"
+        ],
+        "note": "Creates the profile, writes settings.json with the gateway, the pinned combo and an apiKeyHelper that reads the stored key, and installs the FDE plugins."
+      },
+      "fields": [
+        {
+          "name": "baseUrl",
+          "label": "OmniRoute URL",
+          "required": true,
+          "default": "http://localhost:20128",
+          "pattern": "^(http://(localhost|127\\.0\\.0\\.1)(:[0-9]{2,5})?|https://[A-Za-z0-9.-]+(:[0-9]{2,5})?)$",
+          "env": "ANTHROPIC_BASE_URL"
+        },
+        {
+          "name": "combo",
+          "label": "OmniRoute combo",
+          "required": true,
+          "pattern": "^(?!auto(/|$))[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "env": [
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL"
+          ]
+        }
+      ],
+      "verify": {
+        "mode": "argv",
+        "argv": [
+          "omniroute-check"
+        ],
+        "requires": "omniroute-check",
+        "note": "Checks the key file, that the gateway answers with it, that the combo exists and that fde-core is installed. Lists models only; no prompt is sent."
+      },
+      "note": "Every model alias in this profile resolves to the one approved combo, so subagents and background calls cannot reach a provider outside it. Plain http is accepted for localhost only.",
+      "capabilities": [
+        "orchestration",
+        "product-management",
+        "research",
+        "solutioning",
+        "ui-ux-design",
+        "design-system",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "delivery-planning",
+        "presentation",
+        "implementation",
+        "test-engineering",
+        "ci-investigation",
+        "release-management",
+        "observability"
+      ],
+      "cli": "claude",
+      "requiresDir": true,
+      "legacyIsolation": true,
+      "interactiveSession": true
+    },
     "codex": {
       "label": "ChatGPT / Codex",
       "kind": "codex",

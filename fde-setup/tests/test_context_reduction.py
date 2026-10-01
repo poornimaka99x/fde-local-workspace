@@ -262,6 +262,8 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
         cli.mkdir(parents=True)
         (cli / "settings.json").write_text('{"who":"global"}')
         (cli / "token").write_text("signed-in")
+        (cli / "brain").mkdir()
+        (cli / "brain" / "prior-run.txt").write_text("must stay outside the run")
         (real / "keyring").mkdir()
         (real / "keyring" / "login").write_text("k")
         stub = root / "agy"
@@ -270,7 +272,8 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
             'cli="$HOME/.gemini/antigravity-cli"\n'
             '[[ -f "$cli/token" && -f "$HOME/keyring/login" ]] || { echo "not signed in" >&2; exit 1; }\n'
             'if [[ "${1:-}" == "models" ]]; then echo m1; exit 0; fi\n'
-            'printf "SETTINGS=%s\\n" "$(cat "$cli/settings.json")"\n')
+            'printf "SETTINGS=%s\\n" "$(cat "$cli/settings.json")"\n'
+            '[[ -L "$cli/brain" ]] && echo BRAIN_IS_LINK || echo BRAIN_IS_ISOLATED\n')
         stub.chmod(0o755)
         return real, stub
 
@@ -290,12 +293,50 @@ class SidecarPrefixIsCacheable(unittest.TestCase):
                              "FDE_GEMINI_WORKSPACE": str(workspace),
                              "FDE_GEMINI_SETTINGS": str(appdata / "settings.json")},
                         expected=0)
-            self.assertIn('SETTINGS={"who":"run-scoped"}', result.stdout)
+            self.assertIn('"who": "run-scoped"', result.stdout)
+            self.assertIn(f'read_file({workspace})', result.stdout)
+            self.assertIn("BRAIN_IS_ISOLATED", result.stdout)
             # The real settings are untouched and the temporary home is gone.
             self.assertEqual(
                 (real / ".gemini/antigravity-cli/settings.json").read_text(),
                 '{"who":"global"}')
             self.assertEqual([p.name for p in appdata.iterdir()], ["settings.json"])
+
+    def test_governed_gemini_returns_the_deliverable_instead_of_writing_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "run"
+            (workspace / ".agents").mkdir(parents=True)
+            (workspace / ".agents/mcp_config.json").write_text('{"mcpServers":{}}')
+            stub = root / "agy"
+            stub.write_text(
+                '#!/usr/bin/env bash\n'
+                'while [[ $# -gt 0 ]]; do\n'
+                '  [[ "$1" == "-p" ]] && { printf "%s" "$2"; exit 0; }\n'
+                '  shift\n'
+                'done\n')
+            stub.chmod(0o755)
+            result = sh(SHARED / "bin" / "ask-gemini",
+                        "Write markdown to artifacts/research/brief.md",
+                        env={"PATH": f"{root}:{os.environ['PATH']}",
+                             "FDE_RUN_ID": "run-123", "FDE_ROUTED_INVOCATION": "1",
+                             "FDE_GEMINI_WORKSPACE": str(workspace)}, expected=0)
+            self.assertIn("Return the complete requested deliverable", result.stdout)
+            self.assertIn("Do not write or edit files and do not run shell commands",
+                          result.stdout)
+
+    def test_gemini_empty_success_is_reported_as_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "agy"
+            stub.write_text(
+                '#!/usr/bin/env bash\n'
+                'echo "jetski: no output produced — permission auto-denied" >&2\n'
+                'exit 0\n')
+            stub.chmod(0o755)
+            result = sh(SHARED / "bin" / "ask-gemini", "research this",
+                        env={"PATH": f"{tmp}:{os.environ['PATH']}"})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("returned no answer", result.stderr)
 
     def test_governed_gemini_refuses_when_the_sign_in_does_not_survive(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -370,7 +370,7 @@
       "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@1.9.0", "--headless", "--isolated"],
+      "args": ["-y", "chrome-devtools-mcp@1.10.1", "--headless", "--isolated", "--no-usage-statistics", "--no-performance-crux", "--redact-network-headers"],
       "optionalArgs": [
         { "field": "slim", "equals": "true", "args": ["--slim"] },
         { "field": "channel", "args": ["--channel", "{{config.channel}}"] },
@@ -387,7 +387,7 @@
         "setup": "Node.js provides npx. The pinned package is fetched on first use, never when a page is opened.",
         "docsUrl": "https://github.com/ChromeDevTools/chrome-devtools-mcp"
       },
-      "package": { "manager": "npm", "name": "chrome-devtools-mcp", "version": "1.9.0", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "package": { "manager": "npm", "name": "chrome-devtools-mcp", "version": "1.10.1", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
       "userConfig": [
         { "name": "slim", "label": "Slim mode (three basic tools only)", "required": false, "type": "select", "defaultValue": "false", "options": [{ "value": "false", "label": "off — the diagnostic tools" }, { "value": "true", "label": "on — evaluate, navigate, screenshot only" }], "help": "Verified against 1.9.0: --slim exposes only evaluate, navigate and screenshot, so the console, network and performance tools this server exists for are absent. FDE therefore runs it non-slim by default and controls scope with a verified tool allowlist instead, which is a stricter limit than --slim, not a looser one." },
         { "name": "channel", "label": "Chrome channel", "required": false, "type": "select", "options": [{ "value": "", "label": "default" }, { "value": "stable", "label": "stable" }, { "value": "beta", "label": "beta" }, { "value": "dev", "label": "dev" }, { "value": "canary", "label": "canary" }] },
@@ -405,7 +405,11 @@
         "^list_network_requests$", "^get_network_request$",
         "^performance_start_trace$", "^performance_stop_trace$",
         "^performance_analyze_insight$", "^lighthouse_audit$",
-        "^take_heapsnapshot$", "^resize_page$", "^emulate$"
+        "^take_heapsnapshot$", "^resize_page$", "^emulate$",
+        "^get_heapsnapshot_summary$", "^get_heapsnapshot_details$", "^get_heapsnapshot_class_nodes$",
+        "^get_heapsnapshot_object_details$", "^get_heapsnapshot_dominators$", "^get_heapsnapshot_retainers$",
+        "^get_heapsnapshot_retaining_paths$", "^get_heapsnapshot_edges$", "^get_heapsnapshot_duplicate_strings$",
+        "^compare_heapsnapshots$", "^close_heapsnapshot$", "^get_css_styles$"
       ],
       "denyTools": [
         "^evaluate_script$", "^upload_file$", "^fill$", "^fill_form$", "^click$",
@@ -417,7 +421,11 @@
           "^list_pages$", "^take_snapshot$", "^take_screenshot$", "^wait_for$",
           "^list_console_messages$", "^get_console_message$", "^list_network_requests$",
           "^get_network_request$", "^performance_", "^lighthouse_audit$",
-          "^take_heapsnapshot$"
+          "^take_heapsnapshot$",
+          "^get_heapsnapshot_summary$", "^get_heapsnapshot_details$", "^get_heapsnapshot_class_nodes$",
+          "^get_heapsnapshot_object_details$", "^get_heapsnapshot_dominators$", "^get_heapsnapshot_retainers$",
+          "^get_heapsnapshot_retaining_paths$", "^get_heapsnapshot_edges$", "^get_heapsnapshot_duplicate_strings$",
+          "^compare_heapsnapshots$", "^close_heapsnapshot$", "^get_css_styles$"
         ],
         "create": [
           "^new_page$"

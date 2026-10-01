@@ -803,6 +803,16 @@ class SyncBehaviour(unittest.TestCase):
         effective = json.loads((run_dir / "mcp/effective.json").read_text())
         self.assertEqual(effective["servers"]["atlassian"]["identities"], ["gemini"])
 
+    def test_gemini_gets_web_permissions_without_an_mcp_binding(self):
+        run_dir = self.make_run("run-gemini-web", {"research": ["gemini"]},
+                                ["research"], profile="coding")
+        self.sync("--run", "run-gemini-web")
+        config = json.loads((run_dir / ".agents/mcp_config.json").read_text())
+        self.assertEqual(config, {"mcpServers": {}})
+        permissions = json.loads(
+            (run_dir / "mcp/gemini-app-data/settings.json").read_text())
+        self.assertIn("read_url(*)", permissions["permissions"]["allow"])
+
     def test_an_unconfigured_connector_is_refused_with_its_reason(self):
         run_dir = self.make_run("run-c", {"observability": "claude_work"},
                                 ["observability"])

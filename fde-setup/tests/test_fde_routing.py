@@ -1938,6 +1938,93 @@ class TestAttempts(AttemptTest):
 
 # -- 12. usage telemetry ---------------------------------------------------
 
+class TestOmniRouteFallback(AttemptTest):
+    """OmniRoute continues a limit-hit Claude task only after the operator's phrase."""
+
+    LIMITED_CLAUDE = (
+        "#!/usr/bin/env bash\n"
+        "case \"$CLAUDE_CONFIG_DIR\" in\n"
+        "  */gw) echo \"continued on $ANTHROPIC_MODEL via $ANTHROPIC_BASE_URL\"; exit 0 ;;\n"
+        "  *) echo \"You've hit your session limit; resets at 4pm\" >&2; exit 1 ;;\n"
+        "esac\n")
+
+    def setUp(self):
+        super().setUp()
+        stub = self.sb.bindir / "claude"
+        stub.write_text(self.LIMITED_CLAUDE)
+        stub.chmod(0o755)
+        check = self.sb.shared / "bin" / "omniroute-check"
+        check.write_text("#!/usr/bin/env bash\necho 'omniroute: ready'\n")
+        check.chmod(0o755)
+        added = self.sb.fde("accounts", "add", "--provider", "claude-omniroute",
+                            "--name", "gw", "--combo", "fde-fallback", "--json")
+        self.assertEqual(added.returncode, 0, added.stderr)
+        record = json.loads(added.stdout)["account"]
+        self.fallback = record["id"]
+        key = pathlib.Path(record["credentialDir"]) / "omniroute-api-key"
+        key.write_text("oma_test_key")
+        key.chmod(0o600)
+
+    def limited_run(self):
+        return self.approved(requirement=STANDARD_REQUEST, stages=("implementation",),
+                             roles={"implementation": "claude_msc"})
+
+    def invoke(self, run_id, *extra, stdin=""):
+        return self.sb.fde("invoke", run_id, "claude_msc", "tasks/s.md",
+                           "--stage", "implementation", "--task-id", "implementation-1",
+                           *extra, stdin=stdin)
+
+    def events(self, run_id):
+        path = self.sb.shared / "runs" / run_id / "events.jsonl"
+        return [json.loads(l)["event"] for l in path.read_text().splitlines() if l]
+
+    def test_auto_and_presets_are_refused_as_combos(self):
+        refused = self.sb.fde("accounts", "add", "--provider", "claude-omniroute",
+                              "--name", "other", "--combo", "auto", "--json")
+        self.assertNotEqual(refused.returncode, 0)
+
+    def test_every_model_alias_is_pinned_to_the_combo(self):
+        launch = json.loads(self.sb.fde("accounts", "launch", self.fallback,
+                                        "--json").stdout)["launch"]
+        env = launch["env"]
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://localhost:20128")
+        for name in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                     "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                     "CLAUDE_CODE_SUBAGENT_MODEL"):
+            self.assertEqual(env[name], "fde-fallback")
+        self.assertNotIn("oma_test_key", json.dumps(launch))
+
+    def test_limit_offers_omniroute_and_waits_for_the_operator(self):
+        run_id = self.limited_run()
+        result = self.invoke(run_id)
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertIn(f"USE OMNIROUTE {run_id}", result.stderr)
+        self.assertIn("never type the phrase yourself", result.stderr)
+        self.assertNotIn("continued on", result.stdout)
+        self.assertIn("omniroute.offered", self.events(run_id))
+        self.assertNotIn("omniroute.approved", self.events(run_id))
+
+    def test_wrong_phrase_uses_nothing(self):
+        run_id = self.limited_run()
+        result = self.invoke(run_id, "--use-omniroute", stdin="yes\n")
+        self.assertEqual(result.returncode, 8, result.stderr)
+        self.assertNotIn("continued on", result.stdout)
+
+    def test_approved_phrase_continues_on_the_combo_without_a_claude_model(self):
+        run_id = self.limited_run()
+        result = self.invoke(run_id, "--use-omniroute",
+                             stdin=f"USE OMNIROUTE {run_id}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("continued on fde-fallback via http://localhost:20128", result.stdout)
+        self.assertIn("omniroute.approved", self.events(run_id))
+
+    def test_fallback_is_never_assigned_a_role_or_orchestration(self):
+        run_id = self.limited_run()
+        refused = self.sb.fde("orchestrator", run_id, self.fallback, "--reassign")
+        self.assertEqual(refused.returncode, 6)
+        self.assertIn("session-limit fallback", refused.stderr)
+
+
 class TestUsageTelemetry(AttemptTest):
     def test_duration_is_reported_and_tokens_are_unavailable(self):
         run_id = self.approved()

@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Confirm an OmniRoute fallback account is usable. Prints no secret.
+
+Reads everything from the account environment that `fde accounts launch`
+produces, so it needs no arguments:
+
+  CLAUDE_CONFIG_DIR     the account's profile; holds omniroute-api-key (0600)
+  ANTHROPIC_BASE_URL    the gateway root, no /v1 suffix
+  ANTHROPIC_MODEL       the approved combo the session is pinned to
+
+Checks, in order: the key file exists and is private, the gateway answers
+GET /v1/models with that key, the configured combo is in the catalogue, and the
+profile has the fde-core plugin (without it a resumed run cannot /engage).
+Exit 0 only when all pass. The key travels in a request header only, never in
+argv or output.
+"""
+import json
+import os
+import pathlib
+import stat
+import sys
+import urllib.error
+import urllib.request
+
+KEY_FILE = "omniroute-api-key"
+
+
+def fail(message, code=1):
+    print(f"omniroute: {message}")
+    sys.exit(code)
+
+
+def main():
+    profile = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip().rstrip("/")
+    combo = os.environ.get("ANTHROPIC_MODEL", "").strip()
+    if not (profile and base and combo):
+        fail("CLAUDE_CONFIG_DIR, ANTHROPIC_BASE_URL and ANTHROPIC_MODEL must come "
+             "from the account (run through: fde accounts verify <id>)", 2)
+    if combo == "auto" or combo.startswith("auto/"):
+        fail(f"combo '{combo}' is an OmniRoute preset that can reach keyless "
+             "third-party providers; configure a named combo instead", 3)
+    key_path = pathlib.Path(profile) / KEY_FILE
+    if not key_path.is_file():
+        fail(f"no API key stored; next: fde accounts set-secret <id>", 4)
+    if key_path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        fail(f"{key_path} is readable by other users; chmod 600 it", 4)
+    key = key_path.read_text(encoding="utf-8").strip()
+
+    # The gateway is normally on localhost: never send that through a proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(
+        f"{base}/v1/models",
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+    del key
+    try:
+        with opener.open(request, timeout=8) as response:
+            catalogue = json.load(response)
+    except urllib.error.HTTPError as exc:
+        fail(f"gateway at {base} refused the key (HTTP {exc.code})", 5)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        fail(f"gateway at {base} is not answering ({getattr(exc, 'reason', exc)}); "
+             "start it with: omniroute", 5)
+
+    ids = {str(m.get("id")) for m in (catalogue.get("data") or []) if isinstance(m, dict)}
+    if not ({combo, f"combo/{combo}", f"claude/combo/{combo}"} & ids):
+        fail(f"combo '{combo}' is not in the gateway catalogue; create it in the "
+             "OmniRoute dashboard with only the providers approved for client work", 6)
+
+    settings = {}
+    try:
+        settings = json.loads((pathlib.Path(profile) / "settings.json").read_text())
+    except (OSError, ValueError):
+        pass
+    plugins = settings.get("enabledPlugins") or {}
+    if not any(name.startswith("fde-core@") and on for name, on in plugins.items()):
+        fail("the profile does not have the fde-core plugin enabled; run: "
+             f"CLAUDE_CONFIG_DIR={profile} claude plugin install fde-core@fde-toolkit", 7)
+
+    print(f"omniroute: ready — {base}, combo '{combo}'")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
