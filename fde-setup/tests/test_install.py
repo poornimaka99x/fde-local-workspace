@@ -63,6 +63,18 @@ class InstallScriptTest(unittest.TestCase):
         self.assertIn("fine for an update", result.stdout)
         self.assertIn("bin/fde", result.stdout)
 
+    def test_changed_workflow_and_evaluation_policy_are_preserved_without_confirmation(self):
+        shared = self.home / ".claude-shared"
+        files = ["config/workflows/forward-deployed-engineer.json", "config/evaluation-suite.json"]
+        for relative in files:
+            path = shared / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"operatorOwned": true}\n')
+        result = self.run_install("--update")
+        for relative in files:
+            self.assertEqual((shared / relative).read_text(), '{"operatorOwned": true}\n')
+            self.assertIn(relative + " differs from the shipped version", result.stdout)
+
     def test_a_fresh_install_still_insists_on_it_and_says_what_to_do(self):
         result = self.run_install("--dry-run", expected=1)
         self.assertIn("Install Claude Code first", result.stderr)

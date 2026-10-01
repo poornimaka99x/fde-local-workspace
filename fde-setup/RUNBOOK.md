@@ -81,36 +81,27 @@ for that limit hit only. It sends the run's conversation and code to the
 providers in your combo, so build that combo from providers approved for client
 work. `auto` and `auto/*` are refused because they can reach keyless free providers.
 
-Recommended instance settings (`~/.omniroute/.env`):
+Setup, once, on this machine (`omniroute-fde` ships with FDE):
 
 ```bash
-OMNIROUTE_SERVER_HOST=127.0.0.1  HOST=127.0.0.1  API_HOST=127.0.0.1   # loopback only
-REQUIRE_API_KEY=true              # without it, a wrong key is treated as anonymous
-JWT_SECRET=$(openssl rand -base64 48)
-API_KEY_SECRET=$(openssl rand -hex 32)
-STORAGE_ENCRYPTION_KEY=$(openssl rand -hex 32)   # back this up
-INITIAL_PASSWORD=$(openssl rand -base64 16)
-CALL_LOG_RETENTION_DAYS=1         # call logs hold request detail; keep them short-lived
+npm install -g omniroute
+omniroute-fde env        # writes a hardened ~/.omniroute/.env: loopback-only binding,
+                         # REQUIRE_API_KEY=true, generated secrets, encryption at rest,
+                         # 1-day call-log retention; never rotates an existing secret
+omniroute serve --daemon
+omniroute-fde providers  # the commands to connect Anthropic API, Bedrock (eu-west-1)
+                         # and optionally Azure OpenAI, keys read from stdin
+omniroute-fde combo --model anthropic/<id> --model bedrock/<id> --model azure-openai/<id>
+omniroute-fde account --name gateway
+pbpaste | fde accounts set-secret omniroute_gateway   # an OmniRoute API key from the dashboard
+fde accounts verify omniroute_gateway
 ```
 
-The `fde-fallback` combo uses the **Priority** strategy, with no `cc/`, Codex,
-ChatGPT-web, free or keyless providers in it:
-
-1. Claude through the Anthropic API (paid per token, separate from your
-   subscription limit), or Claude on Bedrock in `eu-west-1`
-2. The other of those two
-3. A GPT model on your Azure OpenAI resource, as a last resort
-
-In the dashboard, also switch off compression, the semantic cache, the
-zero-latency optimizations, and stealth or TLS spoofing. Every FDE request also
-sends `x-omniroute-compression: off`.
-
-```bash
-npm install -g omniroute && omniroute          # dashboard: create a combo and an API key
-fde accounts add --provider claude-omniroute --name gateway --combo fde-fallback
-pbpaste | fde accounts set-secret omniroute_gateway
-fde accounts verify omniroute_gateway          # gateway, key, combo and fde-core
-```
+The combo is `fde-fallback` with the **Priority** strategy. `omniroute-fde`
+accepts only `anthropic`, `bedrock` and `azure*` targets, and refuses
+subscription-OAuth, free, keyless and `auto` targets. In the dashboard, switch
+off compression, the semantic cache, the zero-latency optimizations and stealth
+or TLS spoofing. Every FDE request also sends `x-omniroute-compression: off`.
 
 - **Orchestrator:** `fde-start` lists OmniRoute next to your other signed-in
   Claude accounts. If you resume a run that is still on OmniRoute, it asks again

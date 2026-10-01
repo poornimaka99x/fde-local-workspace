@@ -163,6 +163,28 @@ class DefaultsTest(CapabilityTestCase):
         template = next(entry for entry in workflows if entry["name"] == "forward-deployed-engineer")
         self.assertEqual(len(template["stages"]), 9)
 
+    def test_provenance_honors_role_only_and_does_not_write(self):
+        before = (self.shared / "config/routing-policy.json").read_bytes()
+        result = self.fde("config", "provenance", "--source-root", str(SHARED_SRC),
+                          "--role", "reviewer", "--json")
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["effective"]["role"], "reviewer")
+        self.assertFalse(payload["valuesIncluded"])
+        self.assertEqual((self.shared / "config/routing-policy.json").read_bytes(), before)
+
+    def test_overlapping_connectors_are_opt_in_and_overrides_still_work(self):
+        document, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "vertical-slice")
+        optional = {"mcp:fde:serena", "mcp:fde:projectatlas", "mcp:fde:openwiki"}
+        self.assertFalse(optional & set(document["enabled"]))
+        self.assertIn("mcp:fde:playwright", document["enabled"])
+        self.fde("config", "set", "mcp:fde:projectatlas", "enabled",
+                 "--scope", "stage:forward-deployed-engineer/vertical-slice")
+        document, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "vertical-slice")
+        self.assertIn("mcp:fde:projectatlas", document["enabled"])
+        self.assertNotIn("mcp:fde:serena", document["enabled"])
+        operations, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "operations")
+        self.assertFalse({"mcp:fde:aws", "mcp:fde:azure", "mcp:fde:dbhub", "mcp:fde:langfuse"} & set(operations["enabled"]))
+
     def test_every_stage_has_a_usable_default_bundle_with_no_configuration(self):
         self.assertFalse(cap.config_file(self.shared).exists(),
                          "the fixture must start with no operator configuration")

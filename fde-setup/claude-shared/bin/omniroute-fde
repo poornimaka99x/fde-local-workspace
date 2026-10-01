@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Configure a local OmniRoute as FDE's session-limit fallback. Idempotent.
+
+  omniroute-fde env                 hardened ~/.omniroute/.env (adds what is missing,
+                                    never overwrites an existing secret)
+  omniroute-fde providers           the exact commands to connect the approved providers
+  omniroute-fde combo --model P/M [--model P/M ...]
+                                    create the 'fde-fallback' priority combo
+  omniroute-fde account [--name gateway]
+                                    register the FDE fallback account for the combo
+  omniroute-fde all                 env, then print every remaining step in order
+
+Provider keys and the OmniRoute API key are always pasted by you, through stdin
+or the dashboard. This script never asks for, reads or prints one.
+"""
+import argparse
+import os
+import pathlib
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+
+COMBO = "fde-fallback"
+DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR") or pathlib.Path.home() / ".omniroute")
+ENV_FILE = DATA_DIR / ".env"
+
+# Enterprise API-key providers only. Subscription OAuth (cc/, codex, chatgpt-web,
+# zed, cursor...), free, keyless and auto targets are refused: they either share
+# the limit that was just hit, break the provider's terms, or send client code to
+# unknown third parties.
+ALLOWED_PREFIXES = ("anthropic/", "bedrock/", "azure/", "azure-openai/", "azure-ai/")
+
+SETTINGS = [
+    ("OMNIROUTE_SERVER_HOST", "127.0.0.1", "bind the server to loopback (default is 0.0.0.0)"),
+    ("API_HOST", "127.0.0.1", "bind the API port to loopback"),
+    ("LIVE_WS_HOST", "127.0.0.1", "keep the dashboard websocket local"),
+    ("REQUIRE_API_KEY", "true", "otherwise a wrong key is treated as anonymous"),
+    ("CALL_LOG_RETENTION_DAYS", "1", "call logs hold request detail"),
+    ("APP_LOG_RETENTION_DAYS", "7", "admin audit trail"),
+    ("OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS", "false", "no LAN provider endpoints"),
+]
+GENERATED = [
+    ("JWT_SECRET", lambda: secrets.token_urlsafe(48), "dashboard session signing"),
+    ("API_KEY_SECRET", lambda: secrets.token_hex(32), "encrypts API keys at rest"),
+    ("STORAGE_ENCRYPTION_KEY", lambda: secrets.token_hex(32),
+     "encrypts the SQLite store; BACK IT UP: losing it loses the data"),
+    ("INITIAL_PASSWORD", lambda: secrets.token_urlsafe(16), "first dashboard login"),
+]
+LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def cmd_env(_args):
+    DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(DATA_DIR, 0o700)
+    existing = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
+    present = {m.group(1): i for i, l in enumerate(existing) if (m := LINE.match(l))}
+    lines, changed, kept = list(existing), [], []
+    for key, value, why in SETTINGS:
+        entry = f"{key}={value}"
+        if key in present:
+            current = lines[present[key]].split("=", 1)[1].split("#", 1)[0].strip().strip('"\'')
+            if current != value:
+                lines[present[key]] = entry
+                changed.append(key)
+        else:
+            # Comments on their own line: not every .env parser strips inline ones.
+            lines.append(f"# FDE: {why}")
+            lines.append(entry)
+            changed.append(key)
+    for key, make, why in GENERATED:
+        if key in present:
+            kept.append(key)          # never rotate a secret behind the operator's back
+        else:
+            lines.append(f"# FDE: {why}")
+            lines.append(f"{key}={make()}")
+            changed.append(key)
+    if changed:
+        if ENV_FILE.exists():
+            backup = ENV_FILE.with_name(".env.before-fde")
+            shutil.copy2(ENV_FILE, backup)
+            os.chmod(backup, 0o600)
+        fd = os.open(str(ENV_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+    os.chmod(ENV_FILE, 0o600)
+    print(f"{ENV_FILE} (0600)")
+    print(f"  set      {', '.join(changed) or 'nothing — already configured'}")
+    if kept:
+        print(f"  kept     {', '.join(kept)} (existing secrets are never rotated here)")
+    if "INITIAL_PASSWORD" in changed:
+        print("  dashboard password: read INITIAL_PASSWORD from that file, then change it after first login")
+    print("  restart OmniRoute for these to apply:  omniroute stop; omniroute serve --daemon")
+    return 0
+
+
+def cmd_providers(_args):
+    print("""Connect only these enterprise providers (each reads its key from stdin):
+
+  pbpaste | omniroute providers add anthropic --credential-stdin
+      Anthropic API key: per-token billing, separate from your Claude subscription limit.
+
+  pbpaste | omniroute providers add bedrock --credential-stdin \\
+      --provider-specific-data '{"region":"eu-west-1"}'
+      Bedrock API key for the region your Claude models are enabled in.
+
+  pbpaste | omniroute providers add azure-openai --credential-stdin \\
+      --provider-specific-data '{"baseUrl":"https://<resource>.openai.azure.com"}'
+      Optional last resort: a GPT deployment on your own Azure resource.
+
+Then list the exact model ids to put in the combo:
+  omniroute models anthropic;  omniroute models bedrock;  omniroute models azure-openai
+
+Dashboard switches to turn OFF (Settings): compression, semantic cache,
+zero-latency optimisations, background degradation, stealth / TLS fingerprinting.
+FDE also sends x-omniroute-compression: off on every request.""")
+    return 0
+
+
+def cmd_combo(args):
+    models = args.model or []
+    if not models:
+        print("give the targets in priority order, e.g.\n"
+              "  omniroute-fde combo --model anthropic/<sonnet-id> --model bedrock/<sonnet-id> "
+              "--model azure-openai/<gpt-id>", file=sys.stderr)
+        return 2
+    refused = [m for m in models if not m.startswith(ALLOWED_PREFIXES) or "/auto" in m]
+    if refused:
+        print(f"refused: {', '.join(refused)}\n  allowed providers: "
+              f"{', '.join(p.rstrip('/') for p in ALLOWED_PREFIXES)} "
+              "(no subscription OAuth, free, keyless or auto targets)", file=sys.stderr)
+        return 3
+    if not shutil.which("omniroute"):
+        print("omniroute is not installed: npm install -g omniroute", file=sys.stderr)
+        return 4
+    argv = ["omniroute", "combo", "create", COMBO, "--strategy", "priority"]
+    for m in models:
+        argv += ["--model", m]
+    print("+ " + " ".join(argv), flush=True)
+    rc = subprocess.call(argv)
+    if rc == 0:
+        print(f"combo '{COMBO}': {' -> '.join(models)} (priority: falls back only on error)")
+    return rc
+
+
+def cmd_account(args):
+    fde = shutil.which("fde") or str(pathlib.Path(__file__).with_name("fde"))
+    argv = [fde, "accounts", "add", "--provider", "claude-omniroute",
+            "--name", args.name, "--combo", COMBO, "--base-url", args.base_url]
+    print("+ " + " ".join(argv), flush=True)
+    rc = subprocess.call(argv)
+    if rc == 0:
+        aid = f"omniroute_{re.sub(r'[^a-z0-9]+', '_', args.name.lower()).strip('_')}"
+        print("\nNext, in the OmniRoute dashboard: Endpoints > create an API key, copy it, then:")
+        print(f"  pbpaste | fde accounts set-secret {aid}")
+        print(f"  fde accounts verify {aid}     # loopback, enforced auth, combo, fde-core")
+    return rc
+
+
+def cmd_all(args):
+    cmd_env(args)
+    print()
+    cmd_providers(args)
+    print(f"""
+Then:
+  omniroute-fde combo --model anthropic/<id> --model bedrock/<id> [--model azure-openai/<id>]
+  omniroute-fde account --name gateway""")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="omniroute-fde", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("env").set_defaults(fn=cmd_env)
+    sub.add_parser("providers").set_defaults(fn=cmd_providers)
+    c = sub.add_parser("combo")
+    c.add_argument("--model", action="append", metavar="PROVIDER/MODEL")
+    c.set_defaults(fn=cmd_combo)
+    a = sub.add_parser("account")
+    a.add_argument("--name", default="gateway")
+    a.add_argument("--base-url", default="http://127.0.0.1:20128")
+    a.set_defaults(fn=cmd_account)
+    sub.add_parser("all").set_defaults(fn=cmd_all)
+    args = parser.parse_args()
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

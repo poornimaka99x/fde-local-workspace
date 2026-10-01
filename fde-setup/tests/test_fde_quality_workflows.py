@@ -135,6 +135,19 @@ class QualityWorkflowTests(unittest.TestCase):
 
 
 class ProvenanceTests(unittest.TestCase):
+    def test_evaluation_policy_drift_is_included(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, installed = Path(tmp) / "source", Path(tmp) / "installed"
+            for root in (source, installed):
+                (root / "config").mkdir(parents=True)
+                (root / "config/routing-policy.json").write_text('{}')
+                (root / "config/evaluation-suite.json").write_text('{"cases":[{"checks":["safe"]}]}')
+            (installed / "config/evaluation-suite.json").write_text('{"cases":[{"checks":[]}]}')
+            report = fde_provenance.report(source, installed)
+            self.assertEqual(report["differences"], 1)
+            row = next(r for r in report["files"] if r["path"] == "config/evaluation-suite.json")
+            self.assertEqual(row["changedPaths"], ["/cases/0/checks/0"])
+
     def test_diff_reports_paths_not_secret_values_and_does_not_mutate(self):
         with tempfile.TemporaryDirectory() as tmp:
             source, installed = Path(tmp) / "source", Path(tmp) / "installed"

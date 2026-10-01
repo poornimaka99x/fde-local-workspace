@@ -70,6 +70,19 @@ class HarnessScriptTest(unittest.TestCase):
             result = self.run_script(CONFIG_AUDIT, "--plugin-root", copied, "--json", expected=1)
             self.assertTrue(any("undeclared inheritance" in e for e in json.loads(result.stdout)["errors"]))
 
+    def test_malformed_permission_tools_return_audit_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "fde-core"
+            shutil.copytree(PLUGIN, copied)
+            policy_path = copied / "agents/permissions.json"
+            policy = json.loads(policy_path.read_text())
+            for invalid in (None, 3, ["Read", 3], [], "Read"):
+                with self.subTest(tools=invalid):
+                    policy["agents"]["security-reviewer"]["tools"] = invalid
+                    policy_path.write_text(json.dumps(policy))
+                    result = self.run_script(CONFIG_AUDIT, "--plugin-root", copied, "--json", expected=1)
+                    self.assertTrue(any("permission contract" in e for e in json.loads(result.stdout)["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()
