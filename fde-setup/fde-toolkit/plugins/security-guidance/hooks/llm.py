@@ -1695,4 +1695,3 @@ Respond with JSON."""
 
     return "\n".join(lines)
 
-

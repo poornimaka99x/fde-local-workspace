@@ -156,7 +156,7 @@ denied; symbol lookup, references and navigation are allowed.
 fde mcp configure playwright --set allowedOrigins='http://localhost:3000'
 fde mcp verify playwright
 ```
-Pinned to `@playwright/mcp@0.0.80`. Headless and isolated by default: no browser
+Pinned to `@playwright/mcp@0.0.83`. Headless and isolated by default: no browser
 profile is written to disk and no signed-in session is reused. Script evaluation,
 file upload and installation tools are denied.
 
@@ -387,7 +387,8 @@ and Langfuse have not been configured.
   playwright       mutation-capable  browser-session        18 governed tool(s)
 ```
 
-Those tool counts are not estimates. Playwright 0.0.80 reports 24 tools and 18
+Those tool counts were verified against Playwright 0.0.80 (0.0.83 only adds
+`browser_emulate_media`, which is not allowlisted). Playwright 0.0.80 reports 24 tools and 18
 survive the allowlist; `browser_evaluate`, `browser_install`,
 `browser_file_upload`, `browser_pdf_save` and the tracing pair are denied. Chrome
 DevTools 1.9.0 reports 29 and 19 survive; every interaction tool

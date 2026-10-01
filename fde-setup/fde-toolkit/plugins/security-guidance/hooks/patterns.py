@@ -343,4 +343,3 @@ def rule_names_to_mask(rule_names):
         if name in _RULE_NAME_TO_ID:
             mask |= 1 << _RULE_NAME_TO_ID[name]
     return mask
-

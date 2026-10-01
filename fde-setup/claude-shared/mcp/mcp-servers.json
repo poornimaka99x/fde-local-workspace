@@ -293,7 +293,7 @@
       "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@0.0.80", "--headless", "--isolated"],
+      "args": ["-y", "@playwright/mcp@0.0.83", "--headless", "--isolated"],
       "optionalArgs": [
         { "field": "allowedOrigins", "args": ["--allowed-origins", "{{config.allowedOrigins}}"] },
         { "field": "blockedOrigins", "args": ["--blocked-origins", "{{config.blockedOrigins}}"] },
@@ -319,7 +319,7 @@
         "setup": "Node.js provides npx. The pinned package is fetched on first use, never when a page is opened.",
         "docsUrl": "https://github.com/microsoft/playwright-mcp"
       },
-      "package": { "manager": "npm", "name": "@playwright/mcp", "version": "0.0.80", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "package": { "manager": "npm", "name": "@playwright/mcp", "version": "0.0.83", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
       "userConfig": [
         { "name": "allowedOrigins", "label": "Allowed origins (semicolon separated)", "required": false, "type": "text", "placeholder": "http://localhost:3000;https://staging.example.com" },
         { "name": "blockedOrigins", "label": "Blocked origins (semicolon separated)", "required": false, "type": "text" },
@@ -622,7 +622,7 @@
       "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@bytebase/dbhub@1.2.3", "--transport", "stdio", "--config", "{{config.generatedConfigPath}}"],
+      "args": ["-y", "@bytebase/dbhub@1.4.0", "--transport", "stdio", "--config", "{{config.generatedConfigPath}}"],
       "startupTimeoutSeconds": 60,
       "clients": {},
       "targets": ["role:research", "role:solutioning", "role:implementation", "role:review"],
@@ -633,7 +633,7 @@
         "setup": "Node.js provides npx. Configure a dedicated read-only database account first; FDE will not create one.",
         "docsUrl": "https://dbhub.ai/"
       },
-      "package": { "manager": "npm", "name": "@bytebase/dbhub", "version": "1.2.3", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
+      "package": { "manager": "npm", "name": "@bytebase/dbhub", "version": "1.4.0", "update": "change the pinned version in mcp-servers.json, then: mcp-sync" },
       "userConfig": [
         { "name": "connectionMode", "label": "Connection", "required": true, "type": "select", "defaultValue": "dsn", "options": [{ "value": "dsn", "label": "A single read-only DSN" }, { "value": "parts", "label": "Separate host / port / database / user" }] },
         { "name": "dsn", "label": "Read-only PostgreSQL DSN", "required": true, "secret": true, "type": "password", "envVar": "FDE_MCP_DBHUB_DSN", "placeholder": "postgres://readonly-account@host:5432/db?sslmode=require", "showWhen": { "field": "connectionMode", "equals": "dsn" } },

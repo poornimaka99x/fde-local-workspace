@@ -235,4 +235,3 @@ onINP(({ value, attribution }) => {
 | Blocking main thread | Poor INP, unresponsive UI | Chunk long tasks with `scheduler.yield()` / `yieldToMain`, offload to Web Workers |
 | Memory leaks | Growing memory, eventual crash | Clean up listeners, intervals, refs |
 
-

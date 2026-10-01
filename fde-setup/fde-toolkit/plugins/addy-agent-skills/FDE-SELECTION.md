@@ -24,4 +24,3 @@ also excluded because FDE's controller owns routing, approvals, roles, and stage
 No upstream hooks, commands, agents, scripts, package manifests, or executable
 files are included. The two shared checklists referenced by the selected skills
 are vendored under `references/`.
-

@@ -214,4 +214,3 @@ After implementing with source-driven development:
 - [ ] Conflicts between docs and existing code were surfaced to the user
 - [ ] Anything that could not be verified is explicitly flagged as unverified
 - [ ] No outbound endpoint from fetched docs is hardcoded into generated code without surfacing it to the user
-

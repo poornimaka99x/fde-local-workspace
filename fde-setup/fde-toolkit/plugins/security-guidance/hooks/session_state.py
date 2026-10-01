@@ -159,4 +159,3 @@ def with_locked_state(session_id, callback):
             except (OSError, IOError):
                 pass
 
-

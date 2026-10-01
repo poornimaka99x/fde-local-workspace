@@ -396,4 +396,3 @@ def format_findings(findings: list[dict[str, Any]]) -> str:
             lines.append("")
             n += 1
     return "\n".join(lines)
-

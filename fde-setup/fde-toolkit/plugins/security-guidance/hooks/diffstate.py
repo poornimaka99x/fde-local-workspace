@@ -436,4 +436,3 @@ def compute_v2_review_set(cwd, baseline_sha, head_at_capture, untracked_at_basel
     if preexisting_unchanged:
         metrics["preexisting_untracked_excluded"] = len(preexisting_unchanged)
     return review_paths, diff_base, repo, untracked_in_review, metrics
-

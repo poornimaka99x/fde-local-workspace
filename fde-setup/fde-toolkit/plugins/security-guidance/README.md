@@ -121,4 +121,3 @@ Open an issue on the [security-guidance plugin repo](https://github.com/anthropi
 - Provider setup (1P / Bedrock / Vertex / LLM gateway / etc.)
 - A minimal repro diff
 - The relevant section of `~/.claude/security/log.txt`
-

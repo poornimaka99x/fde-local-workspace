@@ -524,10 +524,21 @@ run_path = pathlib.Path(sys.argv[2])
 run_settings = json.loads(run_path.read_text())
 if profile_path.is_file():
     profile_settings = json.loads(profile_path.read_text())
-    for key in ("enabledPlugins", "extraKnownMarketplaces"):
-        value = profile_settings.get(key)
-        if isinstance(value, dict):
-            run_settings[key] = value
+    plugins = profile_settings.get("enabledPlugins")
+    if isinstance(plugins, dict):
+        # Only the FDE toolkit's own, capability-governed plugins reach a run. A
+        # plugin installed globally for everyday use (a memory hook, a style
+        # rewriter) would otherwise run its hooks inside every run without
+        # appearing in the capability policy or the run's evidence.
+        kept = {k: v for k, v in plugins.items() if k.endswith("@fde-toolkit")}
+        dropped = sorted(k for k, v in plugins.items() if v and k not in kept)
+        run_settings["enabledPlugins"] = kept
+        if dropped:
+            print("fde-start: not loaded in this run (outside the FDE toolkit): "
+                  + ", ".join(dropped), file=sys.stderr)
+    markets = profile_settings.get("extraKnownMarketplaces")
+    if isinstance(markets, dict) and "fde-toolkit" in markets:
+        run_settings["extraKnownMarketplaces"] = {"fde-toolkit": markets["fde-toolkit"]}
 run_path.write_text(json.dumps(run_settings, indent=2) + "\n")
 PY
 

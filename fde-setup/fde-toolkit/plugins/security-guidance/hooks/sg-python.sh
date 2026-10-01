@@ -42,4 +42,3 @@ echo "security-guidance: no working Python 3 interpreter found." >&2
 echo "  tried: python3, python, py -3" >&2
 echo "  on Windows, install Python from https://python.org (NOT the Microsoft Store)" >&2
 exit 1
-

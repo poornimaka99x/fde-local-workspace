@@ -721,4 +721,3 @@ def filter_preexisting_from_diff(diff_files, cwd, baseline_sha):
 
     return filtered
 
-

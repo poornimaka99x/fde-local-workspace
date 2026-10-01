@@ -494,4 +494,3 @@ After any performance-related change:
 - [ ] Any new cache states what it keys on and how it goes stale
 - [ ] The measured user-facing metric has a synthetic budget or field monitor that can detect regression
 - [ ] Existing tests still pass (optimization didn't break behavior)
-

@@ -709,6 +709,10 @@ class TestNoBypassFlags(unittest.TestCase):
                 for n, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
                     if self.EXEMPT in line:
                         continue
+                    # A pinned plugin's reviewer rule that names the flag to detect it.
+                    if (p.parts[-3:] == ("security-guidance", "hooks", "llm.py")
+                            and "**Agent/Subprocess Permission Bypass**" in line):
+                        continue
                     for flag in self.FORBIDDEN:
                         if flag in line:
                             hits.append(f"{p.relative_to(REPO)}:{n}: {line.strip()[:70]}")

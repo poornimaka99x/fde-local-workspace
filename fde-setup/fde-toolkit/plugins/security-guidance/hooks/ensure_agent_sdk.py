@@ -223,4 +223,3 @@ if __name__ == "__main__":
     if pv:
         metrics["pv"] = pv
     print(json.dumps({"metrics": metrics}), flush=True)
-

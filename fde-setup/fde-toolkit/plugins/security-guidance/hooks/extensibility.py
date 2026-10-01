@@ -287,4 +287,3 @@ def _has_redos_structure(regex: str) -> bool:
                 if a.startswith(b) or b.startswith(a):
                     return True
     return False
-

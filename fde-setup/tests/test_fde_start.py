@@ -89,7 +89,8 @@ class FdeStartTest(unittest.TestCase):
             "disabled": ["skill:fde-core:crosscheck", "tool:WebSearch"],
         }))
         (self.profiles / "work" / "settings.json").write_text(json.dumps({
-            "enabledPlugins": {"fde-core@fde-toolkit": True},
+            "enabledPlugins": {"fde-core@fde-toolkit": True,
+                               "claude-mem@thedotmack": True},
             "extraKnownMarketplaces": {
                 "fde-toolkit": {"source": {
                     "source": "directory",

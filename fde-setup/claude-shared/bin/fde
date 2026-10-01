@@ -4634,6 +4634,22 @@ def check_git_remote():
 SAFETY_EXEMPT = "fde-safety-exempt"
 
 
+# Vendored, hash-locked plugins cannot carry the exempt marker without breaking
+# their lock. These are the exact lines that NAME a bypass flag in order to
+# detect it — a security reviewer's rule text — keyed by file and by a phrase
+# that only the detection sentence contains. Anything else in those files is
+# still scanned.
+BYPASS_DETECTION_TEXT = {
+    ("security-guidance", "hooks", "llm.py"): "**Agent/Subprocess Permission Bypass**",
+}
+
+
+def _bypass_detection_text(path, line):
+    parts = tuple(pathlib.Path(path).parts[-3:])
+    phrase = BYPASS_DETECTION_TEXT.get(parts)
+    return bool(phrase) and phrase in line
+
+
 def scan_for_bypass_flags(roots):
     """Find sandbox-bypass flags anywhere they could reach a real invocation.
 
@@ -4653,7 +4669,7 @@ def scan_for_bypass_flags(roots):
             except OSError:
                 continue
             for n, line in enumerate(txt.splitlines(), 1):
-                if SAFETY_EXEMPT in line:
+                if SAFETY_EXEMPT in line or _bypass_detection_text(q, line):
                     continue
                 for flag in FORBIDDEN_BYPASS_FLAGS:
                     if flag in line:
@@ -4675,7 +4691,8 @@ def copilot_credential_report(agents=None):
         return {"configured": False,
                 "detail": "registry or provider templates unreadable"}
     ids = [aid for aid, agent in (agents.get("agents") or {}).items()
-           if (templates.get("providers") or {}).get(
+           if agent.get("kind") == "copilot-studio"
+           and (templates.get("providers") or {}).get(
                account_provider(agent), {}).get("loginMode") == "secret"]
     if not ids:
         return {"configured": False, "detail": "no Copilot account is registered"}

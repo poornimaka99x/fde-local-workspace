@@ -247,4 +247,3 @@ For apps with LLM features. See the [OWASP GenAI Security Project](https://genai
 | LLM09 | Misinformation | Ground answers with citations; validate critical claims; keep a human in the loop |
 | LLM10 | Unbounded Consumption | Cap tokens, request rate, and loop/recursion depth |
 
-
