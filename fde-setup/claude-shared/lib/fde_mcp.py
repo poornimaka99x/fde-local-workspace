@@ -934,8 +934,20 @@ def child_environment(name, server, *, settings=None, secrets_dir=None):
 
 # ------------------------------------------------------- dependency detection --
 
+# Where per-user installers put binaries. A desktop app launched from the Dock or
+# Finder does not read ~/.zshrc, so these are missing from its PATH even though
+# the same tool works in a terminal.
+_USER_BIN_DIRS = (".cargo/bin", ".local/bin", ".bun/bin", "go/bin")
+_SYSTEM_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
+
+
 def _which(binary):
-    return shutil.which(binary)
+    found = shutil.which(binary)
+    if found or os.sep in str(binary):
+        return found
+    home = pathlib.Path(os.environ.get("HOME", pathlib.Path.home()))
+    extra = [str(home / d) for d in _USER_BIN_DIRS] + list(_SYSTEM_BIN_DIRS)
+    return shutil.which(binary, path=os.pathsep.join(extra))
 
 
 def missing_dependencies(server):
