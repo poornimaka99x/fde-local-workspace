@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "agents": {
+    "ci-investigator": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "delivery-manager": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "design-system-steward": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "implementation-engineer": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "integration-scout": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "pr-analyst": {
+      "mode": "restricted",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "reason": "Independent artifact review; the orchestrator retrieves evidence and records findings."
+    },
+    "product-analyst": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "release-manager": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "reliability-reviewer": {
+      "mode": "restricted",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "reason": "Independent artifact review; the orchestrator retrieves evidence and records findings."
+    },
+    "repo-cartographer": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "researcher": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "reviewer": {
+      "mode": "restricted",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "reason": "Independent artifact review; the orchestrator retrieves evidence and records findings."
+    },
+    "security-reviewer": {
+      "mode": "restricted",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "reason": "Independent artifact review; the orchestrator retrieves evidence and records findings."
+    },
+    "solutioner": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "sre-observability": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "standards-reviewer": {
+      "mode": "restricted",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "reason": "Independent artifact review; the orchestrator retrieves evidence and records findings."
+    },
+    "tdd-guide": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "test-engineer": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "ui-ux-designer": {
+      "mode": "inherit",
+      "reason": "Uses the orchestrator tool surface within the approved run; no additional specialist-level isolation is claimed."
+    },
+    "workflow-evaluator": {
+      "mode": "restricted",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "reason": "Independent artifact review; the orchestrator retrieves evidence and records findings."
+    }
+  }
+}

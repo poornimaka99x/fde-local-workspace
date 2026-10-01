@@ -82,7 +82,8 @@ def build_report(plugin_root: Path, repo: Path | None):
     issues = [item for item in items if item["flags"]]
     return {
         "pluginRoot": str(plugin_root),
-        "method": "characters/4; comparative estimate, not live model usage",
+        "method": "characters/4; full-file inventory estimate, not loaded context or live model usage",
+        "measurementKind": "inventory-estimate",
         "totals": totals,
         "estimatedStaticTokens": sum(i["estimatedTokens"] for i in items),
         "mcpServers": mcp_servers,
@@ -102,7 +103,7 @@ def main():
     if args.json:
         print(json.dumps(report, indent=2))
         return
-    print(f"Estimated static context: ~{report['estimatedStaticTokens']:,} tokens")
+    print(f"Full-file inventory estimate: ~{report['estimatedStaticTokens']:,} tokens (not loaded context)")
     for kind, total in sorted(report["totals"].items()):
         print(f"  {kind:<18} {total['count']:>3} files  ~{total['estimatedTokens']:,} tokens")
     print(f"  {'MCP servers':<18} {len(report['mcpServers']):>3} configured  "

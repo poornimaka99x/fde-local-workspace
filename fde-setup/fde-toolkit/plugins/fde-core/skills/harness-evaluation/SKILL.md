@@ -22,3 +22,9 @@ from success after retries; never use retries to hide nondeterminism. Store the
 case, baseline, result, model/tool versions and failure evidence together.
 Promote an updated skill only when capability cases pass and safety/regression
 cases do not deteriorate.
+
+Use the installed eight-case `config/evaluation-suite.json` as a starting
+catalogue. Read [recording-results.md](references/recording-results.md) to capture
+real attempts and run `fde evaluate` with an optional baseline. This report
+aggregates evidence-backed judgments; it does not execute or judge the tasks.
+Do not claim measured model improvement from deterministic harness tests alone.

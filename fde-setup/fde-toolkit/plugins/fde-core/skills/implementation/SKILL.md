@@ -22,10 +22,11 @@ the requirement without unacceptable cost.
 
 Use `tdd-evidence` for behavior changes. Implement the smallest complete slice,
 validate contracts and failure paths, and run formatter, linter/static analysis,
-types, tests and build. Once the implementation is green, delegate the recently
-modified code to `code-simplifier:code-simplifier`. Its refinement must preserve
-behavior and stay inside the approved task scope; rerun every affected check
-after it edits. Do not add code comments by default; use one only when
+types, tests and build. Once the implementation is green, use
+`code-simplifier:code-simplifier` only when recently modified code has a named
+complexity or duplication problem and the approved specialist budget permits
+it. Its refinement must preserve behavior and stay inside the approved task
+scope; rerun every affected check after it edits. Do not add code comments by default; use one only when
 required non-obvious context cannot be made clear through naming, types or code
 structure. Coding by
 Codex is allowed only through `ask-codex --write` after an exact, one-use FDE

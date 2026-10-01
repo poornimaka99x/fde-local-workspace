@@ -26,6 +26,8 @@ import sys
 import fde_capabilities as cap
 import fde_mcp
 import fde_plugin_import as imports
+import fde_provenance
+import fde_quality_workflows as quality
 
 # The controller sets this. It is the only thing that knows how to turn a run id
 # into a directory safely — a run id is a name, never a path — so the command
@@ -195,6 +197,40 @@ def cmd_capabilities_validate(args):
             print(f"  warning  {warning}")
         print(f"\n{len(problems)} need attention\n" if problems else "\nall valid\n")
     return 1 if problems else 0
+
+
+@command
+def cmd_config_provenance(args):
+    try:
+        payload = fde_provenance.report(args.source_root, _shared())
+    except ValueError as exc:
+        raise cap.CapabilityError("invalid-source-root", str(exc)) from exc
+    if args.workflow or args.stage or args.run or args.role or args.workspace:
+        _, resolution = _resolution(args)
+        payload["effective"] = {
+            "workflow": resolution["workflow"], "stage": resolution["stage"],
+            "role": resolution["role"],
+            "capabilities": [{key: row.get(key) for key in
+                              ("id", "state", "active", "effective", "layer", "reason")}
+                             for row in resolution["capabilities"]],
+        }
+    if args.json:
+        _emit(payload)
+    else:
+        print(f"Source:    {payload['sourceRoot']}")
+        print(f"Installed: {payload['installedRoot']}")
+        for row in payload["files"]:
+            print(f"  {row['status']:<16} {row['path']}")
+            for path in row["changedPaths"]:
+                print(f"    changed {path} (values withheld)")
+        if "effective" in payload:
+            effective = payload["effective"]
+            print(f"Effective: {effective['workflow']} / {effective['stage']} / {effective['role']}")
+            for row in effective["capabilities"]:
+                if row["state"] == cap.ENABLED:
+                    print(f"  {row['id']}  {row['effective']}  layer={row['layer']}")
+        print(payload["executionBoundary"])
+    return 1 if args.check and payload["differences"] else 0
 
 
 @command
@@ -590,8 +626,64 @@ def cmd_plugins_remove(args):
 
 # -------------------------------------------------------------- registration --
 
+@command
+def cmd_handoff_validate(args):
+    try:
+        payload = quality.validate_handoff(_run_dir(args.run_id), args.file, args.run_id)
+    except ValueError as exc:
+        raise cap.CapabilityError("invalid-handoff", str(exc)) from exc
+    if args.json:
+        return _emit(payload)
+    print(f"Validated {payload['taskId']}: {payload['evidenceFiles']} hashed evidence files")
+    print(payload["boundary"])
+    return 0
+
+
+@command
+def cmd_evaluate(args):
+    try:
+        suite = quality.read_json(args.suite or _shared() / "config/evaluation-suite.json")
+        result_path = pathlib.Path(args.results).resolve()
+        payload = quality.evaluate(suite, quality.read_json(result_path), result_path.parent)
+        if args.baseline:
+            baseline_path = pathlib.Path(args.baseline).resolve()
+            baseline = quality.evaluate(suite, quality.read_json(baseline_path), baseline_path.parent)
+            regressions = [row["caseId"] for row, old in zip(payload["cases"], baseline["cases"])
+                           if (old["accepted"] and not row["accepted"])
+                           or (old["firstAttemptPass"] and not row["firstAttemptPass"])]
+            payload["comparison"] = {"regressions": regressions,
+                                     "baselinePass": baseline["pass"],
+                                     "firstAttemptRateDelta": payload["firstAttemptAcceptanceRate"] - baseline["firstAttemptAcceptanceRate"]}
+            payload["pass"] = payload["pass"] and not regressions
+    except ValueError as exc:
+        raise cap.CapabilityError("invalid-evaluation", str(exc)) from exc
+    if args.json:
+        _emit(payload)
+    else:
+        print(f"{'PASS' if payload['pass'] else 'FAIL'}: {payload['caseCount']} cases")
+        print(f"First attempt: {payload['firstAttemptAcceptanceRate']:.0%}; eventual: {payload['eventualAcceptanceRate']:.0%}")
+        print(f"Missing cases: {', '.join(payload['missingCases']) or 'none'}; safety failures: {len(payload['safetyFailures'])}")
+        print(f"Cost per accepted case: {payload['costPerAcceptedCase']} (relative units; null means unavailable)")
+        print(payload["boundary"])
+    return 0 if payload["pass"] else 1
+
 def register(sub):
     """Wire the capability subcommands into the controller's parser."""
+    s = sub.add_parser("handoff", help="validate bounded specialist task contracts")
+    hsub = s.add_subparsers(dest="handoff_command", required=True)
+    c = hsub.add_parser("validate")
+    c.add_argument("run_id")
+    c.add_argument("file", help="handoff JSON path relative to the run directory")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_handoff_validate)
+
+    s = sub.add_parser("evaluate", help="score recorded harness cases and compare a baseline; runs no models")
+    s.add_argument("--results", required=True, help="recorded results; evidence paths are relative to this file's directory")
+    s.add_argument("--suite", help="suite JSON; defaults to the installed evaluation suite")
+    s.add_argument("--baseline", help="baseline results with the same suite revision")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_evaluate)
+
     s = sub.add_parser("capabilities", help="what is installed, and whether it is usable")
     s.add_argument("--kind", choices=cap.KINDS)
     s.add_argument("--namespace")
@@ -627,6 +719,17 @@ def register(sub):
 
     s = sub.add_parser("config", help="which capabilities apply, and at which layer")
     gsub = s.add_subparsers(dest="config_command", required=True)
+
+    c = gsub.add_parser("provenance", help="compare source and installed configuration without exposing values")
+    c.add_argument("--source-root", required=True, help="source claude-shared directory")
+    c.add_argument("--workflow")
+    c.add_argument("--stage")
+    c.add_argument("--role", choices=cap.ROLES)
+    c.add_argument("--workspace")
+    c.add_argument("--run")
+    c.add_argument("--check", action="store_true", help="return nonzero when configuration differs")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_config_provenance)
 
     c = gsub.add_parser("show", help="the effective configuration and why each answer is what it is")
     c.add_argument("--workflow")

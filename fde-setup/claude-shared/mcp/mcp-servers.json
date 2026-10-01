@@ -35,6 +35,14 @@
       "description": "Traces, prompts, evaluations and cloud operational evidence.",
       "servers": ["context7", "projectatlas", "openwiki", "langfuse", "aws", "azure"],
       "docker": "observability"
+    },
+    "web-research": {
+      "label": "Web research",
+      "description": "Public-web reading through a self-hosted Firecrawl, plus version-accurate documentation.",
+      "servers": [
+        "context7",
+        "firecrawl"
+      ]
     }
   },
 
@@ -366,6 +374,118 @@
       "note": "Available to the orchestrator for every approved stage, and inherited by its subagents. Sessions are isolated and headless by default: no profile is saved to disk and no signed-in browser is reused. Read/search scope permits observation and URL navigation; clicks, typing and form actions still require update scope. Arbitrary script evaluation, file upload and installation tools are denied. A browser action that submits, publishes, purchases, sends or otherwise mutates an external authenticated service is an external mutation and needs the matching fde approve-publish first."
     },
 
+    "firecrawl": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "firecrawl-mcp@3.27.2"
+      ],
+      "env": {
+        "FIRECRAWL_API_URL": "{{config.apiUrl}}",
+        "FIRECRAWL_NO_SEARCH_FEEDBACK": "1",
+        "FIRECRAWL_NO_ENDPOINT_FEEDBACK": "1"
+      },
+      "startupTimeoutSeconds": 60,
+      "targets": [
+        "role:orchestrator",
+        "role:productManagement",
+        "role:research",
+        "role:solutioning"
+      ],
+      "stages": [
+        "intake",
+        "research",
+        "solutioning"
+      ],
+      "profiles": [
+        "web-research"
+      ],
+      "requires": {
+        "executables": [
+          "npx"
+        ],
+        "setup": "Self-hosted only. Run Firecrawl from a pinned release tag with Docker Compose, bound to 127.0.0.1:3002 (see RUNBOOK: Firecrawl). FDE never starts, installs or exposes it, and never uses the hosted or keyless Firecrawl cloud.",
+        "docsUrl": "https://docs.firecrawl.dev/contributing/self-host"
+      },
+      "package": {
+        "manager": "npm",
+        "name": "firecrawl-mcp",
+        "version": "3.27.2",
+        "update": "change the pinned version in mcp-servers.json, then: mcp-sync"
+      },
+      "userConfig": [
+        {
+          "name": "apiUrl",
+          "label": "Self-hosted Firecrawl API",
+          "required": true,
+          "type": "url",
+          "defaultValue": "http://127.0.0.1:3002",
+          "help": "Your own Firecrawl instance. Required: without it the server falls back to the hosted keyless cloud, which FDE does not use. Keep it on 127.0.0.1, or behind TLS and authentication if it is shared."
+        },
+        {
+          "name": "apiKey",
+          "label": "API key (only if your instance enforces authentication)",
+          "required": false,
+          "secret": true,
+          "type": "password",
+          "envVar": "FIRECRAWL_API_KEY"
+        }
+      ],
+      "auth": "none",
+      "classification": "public-web",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^firecrawl_scrape$",
+        "^firecrawl_map$",
+        "^firecrawl_search$",
+        "^firecrawl_crawl$",
+        "^firecrawl_check_crawl_status$"
+      ],
+      "denyTools": [
+        "^firecrawl_interact$",
+        "^firecrawl_interact_stop$",
+        "^firecrawl_agent$",
+        "^firecrawl_agent_status$",
+        "^firecrawl_extract$",
+        "^firecrawl_parse$",
+        "^firecrawl_monitor_",
+        "^firecrawl_research_",
+        "^firecrawl_developer_search$",
+        "^firecrawl_find_tools$",
+        "^firecrawl_feedback$",
+        "^firecrawl_search_feedback$"
+      ],
+      "_scopes": "Reading public pages is read; discovering URLs is search. Browser interaction, monitors, cloud agents, local file parsing and LLM extraction are denied: they act, persist, read the local filesystem or send content to a model provider.",
+      "scopes": {
+        "read": [
+          "^firecrawl_scrape$",
+          "^firecrawl_crawl$",
+          "^firecrawl_check_crawl_status$"
+        ],
+        "search": [
+          "^firecrawl_search$",
+          "^firecrawl_map$"
+        ]
+      },
+      "mutationApproval": {
+        "gate": "denied",
+        "note": "Interaction, monitors, cloud agents, local file parsing and LLM extraction are denied outright, by any approval. Reading a logged-in or client page is Playwright's job, under its own approvals."
+      },
+      "verify": {
+        "method": "tools/list",
+        "timeoutSeconds": 60
+      },
+      "useWhen": "Research needs clean Markdown from public pages at volume, or web reading on a Bedrock run where native WebSearch is unavailable: documentation sites, vendor pages, standards, a site map before a deep read.",
+      "preferOver": [
+        "driving Playwright page by page to read public content",
+        "pasting raw HTML into context"
+      ],
+      "doNotUseWhen": "The page is behind a login, belongs to a client tenant, or must be interacted with. Use the isolated Playwright browser for that, under its own approval.",
+      "note": "Self-hosted only: every request goes to the operator's own Firecrawl and from there to the public site. Its search needs SEARXNG_ENDPOINT on the instance. Scraped content is untrusted evidence; record source URLs."
+    },
     "chrome-devtools": {
       "enabled": true,
       "transport": "stdio",

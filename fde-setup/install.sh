@@ -114,6 +114,8 @@ PRESERVE=(
 CONFIRM=(
   "config/agents.json"          # you may add or relabel identities
   "config/routing-policy.json"  # cost weights, tiers and entitlement ceilings are yours
+  "config/evaluation-suite.json" # evaluation cases and rubrics may be customised
+  "config/workflows/*.json"    # show changed defaults before replacing local workflow choices
   "config/provider-templates.json"  # which variable isolates which provider's accounts
   "mcp/mcp-servers.json"        # you edit this by design
   "shared/engineering-standards.md"

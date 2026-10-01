@@ -16,3 +16,8 @@ criteria. Add a traceability table from requirement to Jira, design, code and
 test. Stop for clarification when an unresolved decision changes scope or
 architecture. Reading Jira is allowed after the guard; updating it requires an
 approved publication manifest.
+
+Assign stable requirement IDs before design or implementation handoff. Carry
+each ID through the outcome, acceptance criterion, design/ADR, code and test
+evidence. Mark links that are not yet established as unresolved, never inferred
+completion. Reuse the same IDs when scope is refined.

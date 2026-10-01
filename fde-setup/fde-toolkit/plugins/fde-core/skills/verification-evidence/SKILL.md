@@ -14,6 +14,11 @@ pass, fail, unavailable or not applicable with command, environment and output
 location. A truncated log is not evidence unless it still contains the causal
 result and exit status.
 
+Map every requirement ID to its acceptance check and actual evidence. Include
+negative and failure paths proportionate to the change. Distinguish an
+independent review from the implementer's self-check; record unresolved
+findings and any required evidence that is unavailable.
+
 For the verification stage, write
 `artifacts/implementation/verification-report.md`, then append its immutable
 hash to the run ledger. Use `pass` only when the full approved scope and its

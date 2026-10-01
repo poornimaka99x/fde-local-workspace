@@ -12,8 +12,11 @@ are merge blockers and SHOULD deviations require written PR rationale. Do not re
 the whole document — `standards list` maps sections to purpose; pull the ones this
 gate run actually tests (typically `standards show 17`, then 14, 10, 19 and 20).
 Read repository overrides and tool configuration, then establish which checks
-are executable. Delegate semantic review to `standards-reviewer`, security to
-`security-reviewer`, and test evidence to `test-engineer`. Run, where applicable:
+are executable. Within the approved specialist budget, delegate only checks
+that need an independent judgment: standards to `standards-reviewer`, security
+to `security-reviewer`, test design/evidence to `test-engineer`. A small routine
+change need not activate all three. Security-sensitive work still requires its
+planned independent security review. Run, where applicable:
 formatter; linter/static analysis; types; complexity and duplication; unit,
 integration, contract and end-to-end tests with coverage; build; migration
 apply/rollback; dependency vulnerability, secret and SAST scans. Report each

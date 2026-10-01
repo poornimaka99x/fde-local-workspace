@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "forward-deployed-engineer",
   "label": "Forward Deployed Engineer",
-  "revision": "2026-09-16.1",
+  "revision": "2026-10-01.1",
   "description": "The full forward-deployed delivery lifecycle: business intent through operations, with an independent reviewer at every stage.",
   "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
   "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
@@ -21,9 +21,6 @@
       ],
       "common": {
         "enable": [
-          "mcp:fde:atlassian",
-          "mcp:fde:context7",
-          "mcp:fde:figma",
           "mcp:fde:playwright",
           "skill:fde:client-context",
           "skill:fde:context-budget",
@@ -60,9 +57,17 @@
         ]
       },
       "optional": [
+        "mcp:fde:atlassian",
+        "mcp:fde:context7",
+        "mcp:fde:figma",
+        "mcp:fde:firecrawl",
         "mcp:fde:serena"
       ],
       "mcpScopes": {
+        "mcp:fde:firecrawl": [
+          "read",
+          "search"
+        ],
         "mcp:fde:playwright": [
           "read",
           "search"
@@ -84,7 +89,8 @@
         ]
       },
       "notes": {
-        "serena": "Offered for analysis of an existing system, once that analysis is approved."
+        "serena": "Offered for analysis of an existing system, once that analysis is approved.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -95,11 +101,7 @@
       ],
       "common": {
         "enable": [
-          "mcp:fde:atlassian",
           "mcp:fde:context7",
-          "mcp:fde:figma",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:client-context",
           "skill:fde:crosscheck",
@@ -134,8 +136,18 @@
           "tool:fde:Task"
         ]
       },
-      "optional": [],
+      "optional": [
+        "mcp:fde:atlassian",
+        "mcp:fde:figma",
+        "mcp:fde:firecrawl",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas"
+      ],
       "mcpScopes": {
+        "mcp:fde:firecrawl": [
+          "read",
+          "search"
+        ],
         "mcp:fde:playwright": [
           "read",
           "search"
@@ -159,6 +171,9 @@
           "read",
           "search"
         ]
+      },
+      "notes": {
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -170,11 +185,7 @@
       "common": {
         "enable": [
           "mcp:fde:context7",
-          "mcp:fde:figma",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
-          "mcp:fde:serena",
           "skill:fde:crosscheck",
           "skill:fde:design-system",
           "skill:fde:mcp-usage",
@@ -213,10 +224,19 @@
         "mcp:fde:aws",
         "mcp:fde:azure",
         "mcp:fde:dbhub",
+        "mcp:fde:figma",
+        "mcp:fde:firecrawl",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas",
+        "mcp:fde:serena",
         "skill:ponytail:ponytail-audit",
         "skill:ponytail:ponytail-debt"
       ],
       "mcpScopes": {
+        "mcp:fde:firecrawl": [
+          "read",
+          "search"
+        ],
         "mcp:fde:playwright": [
           "read",
           "search"
@@ -255,7 +275,8 @@
       },
       "notes": {
         "dbhub": "Offered when database analysis is in scope.",
-        "cloud": "aws and azure are offered read-only, when cloud architecture is in scope."
+        "cloud": "aws and azure are offered read-only, when cloud architecture is in scope.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -266,12 +287,8 @@
       ],
       "common": {
         "enable": [
-          "mcp:fde:atlassian",
           "mcp:fde:context7",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
-          "mcp:fde:serena",
           "skill:fde:crosscheck",
           "skill:fde:jira-delivery",
           "skill:fde:quality-gates",
@@ -303,7 +320,12 @@
           "tool:fde:Task"
         ]
       },
-      "optional": [],
+      "optional": [
+        "mcp:fde:atlassian",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas",
+        "mcp:fde:serena"
+      ],
       "mcpScopes": {
         "mcp:fde:playwright": [
           "read",
@@ -333,7 +355,8 @@
         ]
       },
       "notes": {
-        "substitution": "repo-cartographer covers the codebase-discovery role here. The Anthropic feature-dev plugin was considered for it and rejected on licence grounds; this is a recorded substitution with a narrower agent, not a silent one."
+        "substitution": "repo-cartographer covers the codebase-discovery role here. The Anthropic feature-dev plugin was considered for it and rejected on licence grounds; this is a recorded substitution with a narrower agent, not a silent one.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -345,10 +368,7 @@
       "common": {
         "enable": [
           "mcp:fde:context7",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
-          "mcp:fde:serena",
           "plugin:ponytail",
           "skill:fde:implementation",
           "skill:fde:quality-gates",
@@ -402,16 +422,19 @@
         "hook:user:evo:SubagentStop",
         "hook:user:evo:UserPromptSubmit",
         "mcp:fde:figma",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas",
+        "mcp:fde:serena",
         "plugin:user:evo",
         "skill:fde:design-system",
         "skill:fde:design-to-code",
         "skill:fde:evo-experimentation",
+        "skill:ponytail:ponytail-help",
         "skill:user:evo:discover",
         "skill:user:evo:optimize",
         "skill:user:evo:report",
         "skill:user:evo:ship",
-        "skill:user:evo:subagent",
-        "skill:ponytail:ponytail-help"
+        "skill:user:evo:subagent"
       ],
       "mcpScopes": {
         "mcp:fde:serena": [
@@ -446,7 +469,8 @@
         "security": "security-reviewer is offered, and should be switched on, for security-sensitive changes.",
         "ponytail": "Ponytail runs in full mode here. Its minimal-code guidance never overrides acceptance criteria, security, privacy, accessibility, error handling, data-loss protection, regulatory controls, an accepted ADR, required testing or an approval gate.",
         "ponytailPlugin": "plugin:ponytail is enabled here and in quality-review only. Everywhere else it stays off, which is what keeps its lifecycle hooks out of the stages it has no business in.",
-        "serenaScope": "read and search only. Serena's editing tools are withheld by its own allowlist, and repository writes belong to the run's one-time Codex write approval rather than to a connector. Asking for `update` here would be a grant that buys nothing."
+        "serenaScope": "read and search only. Serena's editing tools are withheld by its own allowlist, and repository writes belong to the run's one-time Codex write approval rather than to a connector. Asking for `update` here would be a grant that buys nothing.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -458,12 +482,8 @@
       ],
       "common": {
         "enable": [
-          "mcp:fde:chrome-devtools",
           "mcp:fde:context7",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
-          "mcp:fde:serena",
           "plugin:ponytail",
           "skill:fde:ci-diagnose",
           "skill:fde:quality-gates",
@@ -507,9 +527,13 @@
         "mcp:fde:atlassian",
         "mcp:fde:aws",
         "mcp:fde:azure",
+        "mcp:fde:chrome-devtools",
         "mcp:fde:dbhub",
         "mcp:fde:figma",
         "mcp:fde:langfuse",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas",
+        "mcp:fde:serena",
         "skill:ponytail:ponytail-audit",
         "skill:ponytail:ponytail-debt",
         "skill:ponytail:ponytail-gain"
@@ -565,7 +589,8 @@
       },
       "notes": {
         "langfuse": "Offered when AI observability is in scope.",
-        "playwrightScope": "read and update: an end-to-end check has to click, type and navigate. Its tracing, evaluate and upload tools stay outside every scope this workflow grants."
+        "playwrightScope": "read and update: an end-to-end check has to click, type and navigate. Its tracing, evaluate and upload tools stay outside every scope this workflow grants.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       },
       "ponytailMode": "lite"
     },
@@ -579,8 +604,6 @@
       "common": {
         "enable": [
           "mcp:fde:context7",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:handover",
           "skill:fde:verification-evidence",
@@ -613,6 +636,8 @@
       },
       "optional": [
         "mcp:fde:atlassian",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas",
         "skill:fde:design-system"
       ],
       "mcpScopes": {
@@ -640,7 +665,8 @@
       },
       "notes": {
         "atlassian": "Offered when requirements or tickets have to be updated.",
-        "design-system": "Offered when the deliverable includes design-system work."
+        "design-system": "Offered when the deliverable includes design-system work.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -651,10 +677,6 @@
       ],
       "common": {
         "enable": [
-          "mcp:fde:atlassian",
-          "mcp:fde:langfuse",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:ci-diagnose",
           "skill:fde:handover",
@@ -691,8 +713,12 @@
         ]
       },
       "optional": [
+        "mcp:fde:atlassian",
         "mcp:fde:aws",
-        "mcp:fde:azure"
+        "mcp:fde:azure",
+        "mcp:fde:langfuse",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas"
       ],
       "mcpScopes": {
         "mcp:fde:playwright": [
@@ -727,7 +753,8 @@
       },
       "notes": {
         "bash": "Source control and builds need a shell. What leaves this machine does not become permitted by having one: deployment, merge, publication, infrastructure mutation and production change keep their own approval gates.",
-        "cloud": "aws and azure are offered read-only; the cloud in use is the operator's to choose."
+        "cloud": "aws and azure are offered read-only; the cloud in use is the operator's to choose.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -738,13 +765,6 @@
       ],
       "common": {
         "enable": [
-          "mcp:fde:aws",
-          "mcp:fde:azure",
-          "mcp:fde:chrome-devtools",
-          "mcp:fde:dbhub",
-          "mcp:fde:langfuse",
-          "mcp:fde:projectatlas",
-          "mcp:fde:openwiki",
           "mcp:fde:playwright",
           "skill:fde:ci-diagnose",
           "skill:fde:handover",
@@ -779,6 +799,13 @@
         ]
       },
       "optional": [
+        "mcp:fde:aws",
+        "mcp:fde:azure",
+        "mcp:fde:chrome-devtools",
+        "mcp:fde:dbhub",
+        "mcp:fde:langfuse",
+        "mcp:fde:openwiki",
+        "mcp:fde:projectatlas",
         "tool:fde:Bash"
       ],
       "mcpScopes": {
@@ -817,7 +844,8 @@
       "notes": {
         "readonly": "Operations defaults to read-only investigation. Every connector here is scoped to read and search, and Bash is offered rather than granted. A code change, a data change, a rollback, a restart, a scaling action, an infrastructure change or a production remediation needs its own approval gate.",
         "bash": "Offered, not enabled: an investigation that needs a shell is a decision the operator makes, once, in the open.",
-        "browserScope": "read only, on both browser connectors. Operations observes; it does not drive."
+        "browserScope": "read only, on both browser connectors. Operations observes; it does not drive.",
+        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     }
   ],

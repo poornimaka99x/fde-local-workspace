@@ -8,9 +8,10 @@ produces, so it needs no arguments:
   ANTHROPIC_BASE_URL    the gateway root, no /v1 suffix
   ANTHROPIC_MODEL       the approved combo the session is pinned to
 
-Checks, in order: the key file exists and is private, the gateway answers
-GET /v1/models with that key, the configured combo is in the catalogue, and the
-profile has the fde-core plugin (without it a resumed run cannot /engage).
+Checks, in order: the key file exists and is private, inference refuses an
+anonymous caller (REQUIRE_API_KEY=true), the gateway answers GET /v1/models with
+the key, the configured combo is in the catalogue, and the profile has the
+fde-core plugin (without it a resumed run cannot /engage).
 Exit 0 only when all pass. The key travels in a request header only, never in
 argv or output.
 """
@@ -49,6 +50,28 @@ def main():
 
     # The gateway is normally on localhost: never send that through a proxy.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    # /v1/models is gated by the dashboard login, not by REQUIRE_API_KEY, so a
+    # 401 there proves nothing; and with REQUIRE_API_KEY off a wrong key is
+    # silently treated as anonymous. Probe inference itself, anonymously, with
+    # a model that cannot exist: 401/403 means enforced, anything else means the
+    # port spends your providers for whoever can reach it. No provider is called.
+    probe = urllib.request.Request(
+        f"{base}/v1/chat/completions", method="POST",
+        data=b'{"model":"fde-auth-probe-no-such-model","max_tokens":1,'
+             b'"messages":[{"role":"user","content":"probe"}]}',
+        headers={"Content-Type": "application/json"})
+    try:
+        with opener.open(probe, timeout=8):
+            enforced = False
+    except urllib.error.HTTPError as exc:
+        enforced = exc.code in (401, 403)
+    except (urllib.error.URLError, OSError) as exc:
+        fail(f"gateway at {base} is not answering ({getattr(exc, 'reason', exc)}); "
+             "start it with: omniroute", 5)
+    if not enforced:
+        fail(f"gateway at {base} accepts anonymous inference; set REQUIRE_API_KEY=true "
+             "and restart OmniRoute", 8)
+
     request = urllib.request.Request(
         f"{base}/v1/models",
         headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})

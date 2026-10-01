@@ -1,6 +1,6 @@
 ---
 name: mcp-usage
-description: When an active MCP server must be preferred over recall, grep or a guess — and when calling one is ceremony. Read this whenever a run has MCP servers available, before research, implementation, verification, CI diagnosis, delivery or observability work.
+description: Select and use approved MCP tools when a task needs external evidence, repository navigation, browser interaction or operational diagnosis.
 ---
 
 # Using the MCP servers this run actually has

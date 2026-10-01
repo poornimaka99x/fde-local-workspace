@@ -91,11 +91,44 @@ def audit(plugin_root: Path, shared_root: Path | None):
             errors.append(f"skill name mismatch: {path} ({meta.get('name')!r} != {expected!r})")
         if not meta.get("description"):
             errors.append(f"skill description missing: {path}")
-    for path in sorted(plugin_root.glob("agents/*.md")):
+    permission_path = plugin_root / "agents" / "permissions.json"
+    permissions = {}
+    if permission_path.exists():
+        try:
+            document = json.loads(permission_path.read_text())
+            if not isinstance(document, dict) or document.get("schemaVersion") != 1 or not isinstance(document.get("agents"), dict):
+                raise ValueError("expected schemaVersion 1 and an agents object")
+            permissions = document["agents"]
+        except (OSError, ValueError) as exc:
+            errors.append(f"invalid agent permission contract: {exc}")
+    agent_paths = sorted(plugin_root.glob("agents/*.md"))
+    for stale in permissions.keys() - {p.stem for p in agent_paths}:
+        errors.append(f"permission contract names missing agent: {stale}")
+    authority = []
+    for path in agent_paths:
         meta = frontmatter(path.read_text(encoding="utf-8", errors="replace"))
-        for key in ("name", "description", "tools", "model"):
+        for key in ("name", "description", "model"):
             if not meta.get(key):
                 errors.append(f"agent {path} missing {key}")
+        policy = permissions.get(path.stem, {})
+        if not isinstance(policy, dict):
+            errors.append(f"invalid permission contract for {path.stem}")
+            continue
+        tools = [tool.strip() for tool in meta.get("tools", "").split(",") if tool.strip()]
+        mode = policy.get("mode")
+        reason = policy.get("reason")
+        valid_reason = isinstance(reason, str) and bool(reason.strip())
+        declared = policy.get("tools")
+        valid_tools = (isinstance(declared, list) and bool(declared)
+                       and all(isinstance(tool, str) and bool(tool.strip()) for tool in declared))
+        if mode == "inherit" and valid_reason and "tools" not in meta and "tools" not in policy:
+            authority.append({"agent": path.stem, "mode": "inherit", "tools": None})
+        elif mode == "restricted" and valid_reason and valid_tools and tools and sorted(tools) == sorted(declared):
+            authority.append({"agent": path.stem, "mode": "restricted", "tools": tools})
+        elif not policy and tools:
+            authority.append({"agent": path.stem, "mode": "restricted", "tools": tools})
+        else:
+            errors.append(f"agent {path.stem} has undeclared inheritance or tools disagree with its permission contract")
         if all(tool in meta.get("tools", "") for tool in ("Bash", "Write", "Edit")):
             warnings.append(f"high-authority agent; confirm scope is necessary: {path.name}")
 
@@ -140,7 +173,9 @@ def audit(plugin_root: Path, shared_root: Path | None):
         if codex.get("write_requires_approval") is not True:
             errors.append("Codex write approval invariant is missing")
 
-    return {"errors": sorted(set(errors)), "warnings": sorted(set(warnings))}
+    return {"errors": sorted(set(errors)), "warnings": sorted(set(warnings)),
+            "agentAuthority": authority,
+            "boundary": "Static declaration audit only. Inherited agents use the parent tool surface; runtime/client enforcement requires separate verification."}
 
 
 def main():

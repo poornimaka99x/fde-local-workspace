@@ -683,3 +683,10 @@ latter remains owned by each MCP-capable client.
   accounts' contexts separate — they are not a way to pool capacity.
 - A run directory holds client material and an approval ledger. It is gitignored
   and belongs to the machine, not to the repository.
+
+## Quality and efficiency controls
+
+See [measured FDE quality](docs/FDE-QUALITY-OPTIMIZATION.md) for configuration
+provenance, declared specialist permissions, bounded handoff validation and
+evidence-backed evaluation reports. Use `fde config provenance`,
+`fde handoff validate` and `fde evaluate`; these read-only checks grant no authority.

@@ -105,3 +105,9 @@ fde resume <run-id> --next
 
 At context-heavy phase boundaries, write durable state first and use
 `fde brief <run-id>` as the bounded resume view.
+
+Before delegating, read [specialist-handoffs.md](references/specialist-handoffs.md)
+and validate a bounded task sidecar. Keep simple work with the orchestrator when
+no specialist resolves a named uncertainty. Select optional connectors for the
+actual task before plan approval; use `fde config show` and `fde mcp effective`
+to distinguish selected capabilities from connected, enforceable access.

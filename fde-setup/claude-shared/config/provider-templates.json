@@ -185,6 +185,9 @@
       "idPrefix": "omniroute",
       "loginMode": "secret",
       "fallbackOnly": true,
+      "env": {
+        "ANTHROPIC_CUSTOM_HEADERS": "x-omniroute-compression: off"
+      },
       "fallbackNote": "OmniRoute sends this run's conversation, code and tool output to whichever providers the combo routes to, outside your Claude accounts. It is never assigned in a plan: it is offered only when a Claude session or usage limit is hit, and used only after you approve it for that limit hit.",
       "summary": "Claude Code pointed at a local OmniRoute gateway, pinned to one named combo. A session-limit fallback only, used after explicit approval.",
       "credential": {

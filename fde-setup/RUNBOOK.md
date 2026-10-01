@@ -81,6 +81,30 @@ for that limit hit only. It sends the run's conversation and code to the
 providers in your combo, so build that combo from providers approved for client
 work. `auto` and `auto/*` are refused because they can reach keyless free providers.
 
+Recommended instance settings (`~/.omniroute/.env`):
+
+```bash
+OMNIROUTE_SERVER_HOST=127.0.0.1  HOST=127.0.0.1  API_HOST=127.0.0.1   # loopback only
+REQUIRE_API_KEY=true              # without it, a wrong key is treated as anonymous
+JWT_SECRET=$(openssl rand -base64 48)
+API_KEY_SECRET=$(openssl rand -hex 32)
+STORAGE_ENCRYPTION_KEY=$(openssl rand -hex 32)   # back this up
+INITIAL_PASSWORD=$(openssl rand -base64 16)
+CALL_LOG_RETENTION_DAYS=1         # call logs hold request detail; keep them short-lived
+```
+
+The `fde-fallback` combo uses the **Priority** strategy, with no `cc/`, Codex,
+ChatGPT-web, free or keyless providers in it:
+
+1. Claude through the Anthropic API (paid per token, separate from your
+   subscription limit), or Claude on Bedrock in `eu-west-1`
+2. The other of those two
+3. A GPT model on your Azure OpenAI resource, as a last resort
+
+In the dashboard, also switch off compression, the semantic cache, the
+zero-latency optimizations, and stealth or TLS spoofing. Every FDE request also
+sends `x-omniroute-compression: off`.
+
 ```bash
 npm install -g omniroute && omniroute          # dashboard: create a combo and an API key
 fde accounts add --provider claude-omniroute --name gateway --combo fde-fallback
@@ -95,6 +119,43 @@ fde accounts verify omniroute_gateway          # gateway, key, combo and fde-cor
   When none is left, `fde invoke` stops with exit code 75, and the orchestrator
   asks you. Your typed phrase is piped to `--use-omniroute`. The approved route
   stays frozen, and the combo chooses the model.
+
+### Optional — public-web research with self-hosted Firecrawl
+
+Firecrawl turns public pages into clean Markdown. Use it for research at
+volume, or on Bedrock, where Anthropic's native web search isn't available. FDE
+supports **self-hosted only**. The MCP server always gets `FIRECRAWL_API_URL`,
+so it never falls back to the hosted or keyless Firecrawl cloud. FDE never
+starts or installs Firecrawl itself.
+
+```bash
+git clone --branch <release-tag> --depth 1 https://github.com/firecrawl/firecrawl
+cd firecrawl
+cat > docker-compose.override.yaml <<'YAML'
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:3002:3002"      # the default publishes an unauthenticated API on every interface
+YAML
+docker compose up -d
+curl -s -X POST http://127.0.0.1:3002/v2/scrape -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}' | head -c 200
+fde mcp verify firecrawl                       # the URL defaults to http://127.0.0.1:3002
+```
+
+- **Search:** set `SEARXNG_ENDPOINT` in the instance's `.env` so search is
+  reliable. Scrape, map and crawl don't need it.
+- **Exposed tools:** scrape, map, search and crawl only. Interaction, monitors,
+  cloud agents, local-file parsing and LLM extraction are denied.
+- **Where it's offered:** an optional server in intake, research and
+  solutioning. It's also available through the new `web-research` profile.
+- **Not for client pages:** pages behind a login, or on a client tenant, stay
+  with Playwright under its own approvals.
+- **Sharing the instance:** if it leaves this machine, add TLS and
+  authentication first (`USE_DB_AUTHENTICATION`). Then store the key in the
+  server's API key field.
+- **Licensing:** Firecrawl itself is AGPL-3.0. Running it internally is fine;
+  offering it to others as a network service brings source obligations.
 
 ### Optional — grounded repository memory with OpenWiki
 

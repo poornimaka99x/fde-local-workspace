@@ -370,6 +370,8 @@ class McpSelectionTest(CapabilityTestCase):
     """An MCP default means 'selected when available', never 'go and connect'."""
 
     def test_an_unconnected_server_is_selected_but_not_active(self):
+        self.fde("config", "set", "mcp:fde:serena", "enabled",
+                 "--scope", "stage:forward-deployed-engineer/vertical-slice")
         _document, entries = self.resolved("--workflow", "forward-deployed-engineer",
                                            "--stage", "vertical-slice")
         serena = entries["mcp:fde:serena"]
@@ -393,6 +395,8 @@ class McpSelectionTest(CapabilityTestCase):
         self.assertEqual(health.read_bytes() if health.exists() else None, health_before)
 
     def test_a_degraded_capability_is_reported_with_its_reason(self):
+        self.fde("config", "set", "mcp:fde:aws", "enabled",
+                 "--scope", "stage:forward-deployed-engineer/operations")
         document, _ = self.resolved("--workflow", "forward-deployed-engineer", "--stage", "operations")
         degraded = {entry["ref"]: entry["reason"] for entry in document["degraded"]}
         self.assertIn("fde:aws", degraded)

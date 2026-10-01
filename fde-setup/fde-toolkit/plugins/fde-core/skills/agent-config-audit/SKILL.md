@@ -21,3 +21,10 @@ agent's job, whether external content is treated as data, and whether a new
 automation creates an unapproved external write. Do not silence a finding by
 adding an exemption unless the line is a refusal/checker definition rather than
 an executable bypass.
+
+The agent permission contract is `agents/permissions.json`. Inheritance must be
+explicitly declared there; restricted tools must match native agent frontmatter.
+The static audit does not prove client enforcement. For installation drift use
+`fde config provenance --source-root <checkout>/claude-shared --json`; it
+compares hashes and changed JSON paths without printing configuration values.
+Direct desktop sessions have their own permissions and are not attested by FDE.

@@ -59,10 +59,14 @@ client context file until the user has confirmed the roles for *this* run.
   file in one repository. Being assigned the implementation role is *not* that
   approval. There is no bypass flag in this toolkit.
 
-FDE subagents intentionally omit a `tools` allowlist. They inherit every
-built-in and run-scoped MCP tool the orchestrator can delegate, including the
-isolated browser and approved evidence connectors. This does not widen the
-run's stage, connector scopes, mutation approvals, or publication gates.
+FDE specialist authority is declared in `fde-core/agents/permissions.json`.
+Review-only specialists declare `tools: Read, Grep, Glob`; they return findings
+and request missing evidence through the orchestrator. Other specialists
+explicitly inherit the orchestrator's built-in and run-scoped MCP tools. This
+is no additional isolation: stage scopes and approval gates still apply.
+`agent-config-audit` checks the declarations against the agent frontmatter.
+Direct desktop sessions are outside these controller guarantees; their own
+sandbox, approvals and installed tools remain authoritative.
 - `ask-ms-copilot` — Microsoft 365 Copilot / Copilot Studio: SharePoint, Outlook,
   Teams, M365 documents, Copilot Notebook material. Not source code, not git, not
   Bitbucket, not creating Jira work. `ms-intake` is the manual path for anything

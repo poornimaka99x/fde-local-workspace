@@ -52,6 +52,24 @@ class HarnessScriptTest(unittest.TestCase):
             errors = json.loads(unsafe.stdout)["errors"]
             self.assertTrue(any("sandbox-bypass flag" in item for item in errors))
 
+    def test_agent_authority_is_explicit_and_drift_fails(self):
+        report = json.loads(self.run_script(CONFIG_AUDIT, "--plugin-root", PLUGIN,
+                                           "--shared-root", SHARED, "--json").stdout)
+        authority = {row["agent"]: row for row in report["agentAuthority"]}
+        self.assertEqual(authority["security-reviewer"]["tools"], ["Read", "Grep", "Glob"])
+        self.assertEqual(authority["implementation-engineer"]["mode"], "inherit")
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "fde-core"
+            shutil.copytree(PLUGIN, copied)
+            reviewer = copied / "agents/security-reviewer.md"
+            reviewer.write_text(reviewer.read_text().replace("Read, Grep, Glob", "Read, Grep, Glob, Bash"))
+            result = self.run_script(CONFIG_AUDIT, "--plugin-root", copied, "--json", expected=1)
+            self.assertTrue(any("permission contract" in e for e in json.loads(result.stdout)["errors"]))
+            reviewer.write_text(reviewer.read_text().replace("Read, Grep, Glob, Bash", "Read, Grep, Glob"))
+            (copied / "agents/unknown.md").write_text("---\nname: unknown\ndescription: test\nmodel: sonnet\n---\n")
+            result = self.run_script(CONFIG_AUDIT, "--plugin-root", copied, "--json", expected=1)
+            self.assertTrue(any("undeclared inheritance" in e for e in json.loads(result.stdout)["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()

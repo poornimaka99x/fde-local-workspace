@@ -170,6 +170,16 @@ usage data or trace URLs go to Google and auth headers are redacted. It
 never attaches to your normal signed-in Chrome. Attaching to a running browser is
 an explicit setting with a warning attached, and clearing it is your job.
 
+### Firecrawl — self-hosted only, verify after starting it
+```bash
+fde mcp verify firecrawl
+```
+Pinned to `firecrawl-mcp@3.27.2`, with `FIRECRAWL_API_URL` always set (default
+`http://127.0.0.1:3002`), so it can never fall back to the hosted keyless
+cloud. The two feedback tools are switched off with `FIRECRAWL_NO_*_FEEDBACK`.
+Only scrape, map, search and crawl get through; everything that interacts,
+persists, parses local files or calls a model is denied. Setup is in the RUNBOOK.
+
 ### Atlassian and Figma — sign in, then verify
 Endpoints and OAuth ownership are unchanged: OAuth lives in the MCP client, and
 FDE stores no token. Both stay run-scoped rather than global. Sign in inside the
@@ -332,10 +342,13 @@ route and re-asks.
 
 The isolated Playwright server is eligible for the run's orchestrator in every
 approved stage and profile. It supplies browser navigation and web research when
-Claude runs on Bedrock, where native WebSearch is unavailable. FDE subagents do
-not declare narrower tool allowlists, so they inherit the orchestrator's active
-built-ins and run-scoped MCP servers. Readiness, stage selection, MCP scopes and
-publication/mutation approvals still apply; inheritance is not a gate bypass.
+Claude runs on Bedrock, where native WebSearch is unavailable. FDE specialist authority is declared in
+`fde-core/agents/permissions.json`: review-only specialists use Read/Grep/Glob
+and request connector evidence through the orchestrator; other specialists
+explicitly inherit its active tool surface. Readiness, stage selection, MCP
+scopes and publication/mutation approvals still apply. The configuration audit
+checks declarations, not live client enforcement; direct desktop sessions are
+outside the controller's attestation.
 
 ## Sample effective configuration per profile
 

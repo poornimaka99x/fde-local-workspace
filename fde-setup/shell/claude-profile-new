@@ -82,7 +82,8 @@ if [[ "$omniroute" == true ]]; then
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "$combo",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "$combo",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$combo",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "$combo"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "$combo",
+    "ANTHROPIC_CUSTOM_HEADERS": "x-omniroute-compression: off"
   },
   "permissions": {
     "deny": [
