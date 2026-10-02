@@ -37,6 +37,13 @@ fde start --json [--orchestrator <who>] [--project <id>] [--shape <name>]
           [--routing manual|auto] [--strategy balanced|quality_first|cost_first]
           [-- <requirement>]
 
+fde start ... [--artifact-profile feature-specs|none]
+fde project create|update ... [--artifact-profile feature-specs|none]
+fde features scaffold <run-id> --feature <FEAT-id> --title <text> [--principles --repo <path>] [--json]
+fde features import <run-id> <repo>/docs/features/<FEAT-id> [--feature <FEAT-id>] [--replace] [--json]
+fde features validate (<run-id> | --path <dir>) --feature <FEAT-id> [--stage <stage>] [--repo <path>] [--json]
+fde features record <run-id> --feature <FEAT-id> --stage <stage> [--reconciled <text>] [--json]
+
 fde approve-plan <run-id> [--reapprove]
 fde routing preview --orchestrator <who> [--strategy <s>] [--shape <name>]
           [--stages a,b,c] [--project <project-id>]
@@ -985,3 +992,20 @@ distinguishes available from unavailable, and the console distinguishes both fro
 and the run cannot be created, because showing the recommended option as chosen
 while quietly creating a manual run on `default` is the one outcome the whole
 mechanism exists to prevent. A failing policy endpoint is said out loud.
+
+## Feature-specs artifact profile
+
+Optional and additive; the full contract is
+[FDE-FEATURE-SPECS.md](FDE-FEATURE-SPECS.md).
+
+- `manifest.json` gains `artifactProfile` only when a profile was selected at
+  start. `project.json` gains it only when set on the project; project views
+  always report `artifactProfile` (null when unset).
+- `fde status --json` adds `artifactProfile` (null when unset) and `features`:
+  null without the profile, otherwise `{profile, principlesDraft, features:
+  [{featureId, path, documents, latestHandoff}]}`.
+- `features.jsonl` is controller-owned like the other run ledgers: one hashed
+  handoff record per `fde features record`. Readers may index it, never write it.
+- `fde features validate --json` exits 0 when valid and 1 when the payload
+  carries errors; the payload is printed either way.
+- `fde version --json` lists `artifact-profile.feature-specs.v1`.

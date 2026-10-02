@@ -68,6 +68,9 @@ try:
     import fde_capability_commands  # noqa: E402
     import fde_plugin_import  # noqa: E402
     import fde_models  # noqa: E402
+    # The optional feature-specs artifact profile: templates and traceability
+    # checks, shared by the run commands and repository-only validation.
+    import fde_feature_specs  # noqa: E402
 except ImportError as _exc:  # pragma: no cover — an install missing half of itself
     sys.exit(f"fde: the MCP catalogue library is missing ({_exc}).\n"
              f"       It belongs at {_here.parent / 'lib' / 'fde_mcp.py'}.\n"
@@ -3407,7 +3410,7 @@ def run_output_hygiene(run: Run, *, apply=True, service_url=None, trigger="manua
 
 
 def new_run(requirement: str = "", project_id=None, model=None, effort=None,
-            routing_mode="manual", routing_strategy=None) -> Run:
+            routing_mode="manual", routing_strategy=None, artifact_profile=None) -> Run:
     key = (requirement or "").strip()
     m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
     jira_key = m.group(1) if m else None
@@ -3442,6 +3445,9 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None,
             "strategy": routing_strategy,
         },
         "toolkit": "fde-core",
+        # Only present when a profile was selected, so a run without one is
+        # recorded exactly as before.
+        **({"artifactProfile": artifact_profile} if artifact_profile else {}),
     })
     r = Run(stem)
     if key:
@@ -3451,6 +3457,12 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None,
             routingMode=routing_mode, routingStrategy=routing_strategy)
     if project_id:
         project_event(project_id, "run.created", runId=stem)
+    if artifact_profile:
+        # Selecting the profile enables its skill for this run through the same
+        # run-scoped override an operator would set, and nothing else.
+        fde_capabilities.set_run_override(r.dir, FEATURE_SKILL, fde_capabilities.ENABLED)
+        r.event("artifact_profile.selected", profile=artifact_profile,
+                capability=FEATURE_SKILL)
     r.event("note", note="Created in awaiting_orchestrator. Choosing an orchestrator and "
                          "scoping the work read nothing; no connector, repository or "
                          "client-context access is permitted until roles are confirmed.")
@@ -3662,7 +3674,7 @@ def resolve_repo_paths(values):
     return out
 
 
-def new_project(name, description="", repos=()):
+def new_project(name, description="", repos=(), artifact_profile=None):
     name = (name or "").strip()
     if not name:
         die("a project needs a name", 2)
@@ -3687,6 +3699,10 @@ def new_project(name, description="", repos=()):
         "createdAt": stamp,
         "updatedAt": stamp,
     }
+    # Additive and optional: a project without a profile has no such key, so
+    # every project written before profiles existed reads exactly as it did.
+    if artifact_profile:
+        doc["artifactProfile"] = artifact_profile
     directory.mkdir(parents=True, exist_ok=True)
     write_json(directory / "project.json", doc)
     project_event(project_id, "project.created", name=name, repoPaths=repo_paths)
@@ -3744,6 +3760,7 @@ def project_summary(doc, run_manifests):
         "name": doc.get("name"),
         "description": doc.get("description") or "",
         "repoPaths": list(doc.get("repoPaths") or []),
+        "artifactProfile": doc.get("artifactProfile"),
         "createdAt": doc.get("createdAt"),
         "updatedAt": doc.get("updatedAt"),
         "runCount": len(run_manifests),
@@ -3787,7 +3804,8 @@ def cmd_projects(args):
 
 
 def cmd_project_create(args):
-    doc = new_project(args.name, args.description or "", args.repo or [])
+    doc = new_project(args.name, args.description or "", args.repo or [],
+                      artifact_profile_arg(getattr(args, "artifact_profile", None)))
     if getattr(args, "json", False):
         return emit_json({"schemaVersion": SCHEMA_VERSION, "project": doc})
     print(f"project  {doc['projectId']}")
@@ -3796,6 +3814,8 @@ def cmd_project_create(args):
         print(f"about    {doc['description']}")
     for repo in doc["repoPaths"]:
         print(f"repo     {repo}")
+    if doc.get("artifactProfile"):
+        print(f"profile  {doc['artifactProfile']}  (new runs inherit it)")
     print(f"\nnext     fde start \"<what you want done>\" --project {doc['projectId']}")
     return 0
 
@@ -3814,9 +3834,14 @@ def cmd_project_update(args):
         changed["description"] = args.description.strip()
     if args.repo:
         changed["repoPaths"] = resolve_repo_paths(args.repo)
+    profile_given = getattr(args, "artifact_profile", None) is not None
+    if profile_given:
+        changed["artifactProfile"] = artifact_profile_arg(args.artifact_profile)
     if not changed:
-        die("nothing to update — give --name, --description or --repo", 2)
+        die("nothing to update — give --name, --description, --repo or --artifact-profile", 2)
     doc.update(changed)
+    if profile_given and doc.get("artifactProfile") is None:
+        doc.pop("artifactProfile", None)
     doc["schemaVersion"] = SCHEMA_VERSION
     doc["updatedAt"] = iso()
     write_json(project_dir(doc["projectId"]) / "project.json", doc)
@@ -4440,6 +4465,9 @@ def status_payload(run: Run, agents, events_limit=50, events_cursor=None):
         "outputHygiene": hygiene_view,
         "session": session_view(run.dir, roles, agents),
         "designPanel": design_panel_summary(run),
+        # null unless the run selected the feature-specs artifact profile.
+        "artifactProfile": manifest.get("artifactProfile"),
+        "features": features_summary(run),
         # Additive and bounded: a run with no routing record answers null, and an
         # older console simply ignores the field. Task prompts, telemetry logs
         # and full candidate sets are deliberately not here — `fde routing
@@ -5214,13 +5242,20 @@ def _start(args):
             die(f"--strategy takes {', '.join(AUTO_STRATEGIES)}", 2)
     elif strategy:
         die("--strategy applies to --routing auto", 2)
+    # The artifact profile is fixed at start: an explicit choice wins, otherwise
+    # the project's. Changing the project later does not change existing runs.
+    given_profile = getattr(args, "artifact_profile", None)
+    profile = (artifact_profile_arg(given_profile) if given_profile is not None
+               else (project or {}).get("artifactProfile"))
     run = new_run(req, project_id=project["projectId"] if project else None,
                   model=model, effort=effort, routing_mode=routing_mode,
-                  routing_strategy=strategy)
+                  routing_strategy=strategy, artifact_profile=profile)
     print(f"run    {run.id}")
     if project:
         print(f"project {project['projectId']}  ({project.get('name')})")
     print(f"dir    {run.dir}")
+    if profile:
+        print(f"profile {profile}  (feature documents: fde features scaffold {run.id} …)")
     print(f"state  awaiting_orchestrator\n")
     print("Nothing has been read: no Jira, Confluence, SharePoint, email, repository")
     print("or client context. That stays true until roles are confirmed.\n")
@@ -5586,6 +5621,11 @@ CONTRACTS = [
     "design-panel references --json",
     "design-panel packs --json",
     "design-panel lenses --json",
+    "start --artifact-profile",
+    "features scaffold --json",
+    "features import --json",
+    "features validate --json",
+    "features record --json",
 ]
 
 
@@ -5621,7 +5661,7 @@ def cmd_version(args):
         # Capability strings exist so a client can ask "can this controller do
         # X" instead of parsing a version and guessing. They are additive: a
         # capability is added when its contract ships and never repurposed.
-        "capabilities": ROUTING_CAPABILITIES + CAPABILITY_CAPABILITIES,
+        "capabilities": ROUTING_CAPABILITIES + CAPABILITY_CAPABILITIES + FEATURE_CAPABILITIES,
         "routingPolicy": _routing_policy_capability(),
     }
     if getattr(args, "json", False):
@@ -7324,7 +7364,399 @@ def cmd_brief(args):
     if latest:
         print(f"Latest evidence: {latest.get('stage')}={latest.get('status')} "
               f"({latest.get('checkpointId')})")
+    features = features_summary(run)
+    if features:
+        rows = [f"{f['featureId']} ({f['latestHandoff']['stage'] if f['latestHandoff'] else 'no handoff'})"
+                for f in features["features"]]
+        print(f"Feature docs: {', '.join(rows) or 'none yet'} — fde features validate {run.id} --feature <id>")
     print(f"Next: {next_action(run)}")
+    return 0
+
+
+# ---------------------------------------------------------- feature specs --
+
+# The optional `feature-specs` artifact profile. A run that selects it drafts
+# four feature documents under artifacts/features/<FEAT-id>/ and records hashed
+# handoffs of them; a run that does not select it is untouched by everything
+# below. Parsing and the traceability rules live in fde_feature_specs so the
+# same checks run inside a run and against a bare repository checkout.
+#
+# The controller never writes a client repository. Documents reach one through
+# an approved write (see docs/FDE-FEATURE-SPECS.md); here they are only read.
+
+FEATURE_SKILL = "skill:fde:feature-specs"
+FEATURE_LEDGER = "features.jsonl"
+FEATURE_CAPABILITIES = ["artifact-profile.feature-specs.v1"]
+
+
+def artifact_profile_arg(value):
+    """'none' and absence both mean no profile; anything else must be known."""
+    if value in (None, "", "none"):
+        return None
+    if value not in fde_feature_specs.PROFILES:
+        die(f"unknown artifact profile '{value}'. Known: "
+            f"{', '.join(fde_feature_specs.PROFILES)} (or none)", 2)
+    return value
+
+
+def run_artifact_profile(run: Run):
+    return run.manifest().get("artifactProfile")
+
+
+def _require_feature_profile(run: Run, what):
+    if run_artifact_profile(run) != fde_feature_specs.PROFILE:
+        die(f"run {run.id} does not use the feature-specs artifact profile, so {what} "
+            f"does not apply.\n       The profile is chosen at start: fde start … "
+            f"--artifact-profile feature-specs", 5)
+
+
+def _feature_id(value):
+    try:
+        fde_feature_specs.feature_number(value)
+    except fde_feature_specs.FeatureSpecError as exc:
+        die(str(exc), 2)
+    return value
+
+
+def _features_root(run: Run):
+    return run.artifacts_dir / "features"
+
+
+def _feature_dir(run: Run, feature_id, create=False):
+    """artifacts/features/<id>, refusing any symlink on the way."""
+    path = run.dir
+    for part in ("artifacts", "features", feature_id):
+        path = path / part
+        if path.is_symlink():
+            die(f"{path.relative_to(run.dir)} in run {run.id} is a symlink; refusing", 2)
+        if create:
+            path.mkdir(mode=0o755, exist_ok=True)
+    return path
+
+
+def feature_records(run: Run, feature_id=None):
+    rows = read_jsonl(run.dir / FEATURE_LEDGER)
+    return [r for r in rows if feature_id is None or r.get("featureId") == feature_id]
+
+
+def _feature_baseline(run: Run, feature_id):
+    rows = feature_records(run, feature_id)
+    if not rows:
+        return None, None
+    latest = rows[-1]
+    return latest, {name: f.get("sha256") for name, f in (latest.get("files") or {}).items()}
+
+
+def _resolve_dir(raw, what):
+    candidate = pathlib.Path(raw).expanduser()
+    if candidate.is_symlink():
+        die(f"{what} is a symlink; give the real directory: {raw}", 2)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        die(f"{what} does not exist: {raw}", 2)
+    if not resolved.is_dir():
+        die(f"{what} is not a directory: {resolved}", 2)
+    return resolved
+
+
+def _run_project_repos(run: Run):
+    project_id = run.manifest().get("projectId")
+    if not project_id or not valid_project_id(project_id):
+        return []
+    doc = read_json(project_dir(project_id) / "project.json") or {}
+    return [pathlib.Path(p) for p in (doc.get("repoPaths") or [])]
+
+
+def _require_inside_project_repos(run: Run, path):
+    repos = _run_project_repos(run)
+    if repos and not any(path == r or path.is_relative_to(r) for r in repos):
+        die(f"{path} is outside this run's project repositories "
+            f"({', '.join(str(r) for r in repos)}); refusing to read it", 6)
+
+
+def _feature_templates_dir():
+    for root in (SHARED / "fde-toolkit", _here.parent.parent / "fde-toolkit"):
+        candidate = root / "plugins" / "fde-core" / "skills" / "feature-specs" / "templates"
+        if (candidate / "spec.md").is_file():
+            return candidate
+    die("the feature-specs templates are missing; re-run install.sh", 3)
+
+
+def features_summary(run: Run):
+    """Status view. null when the run does not use the profile."""
+    if run_artifact_profile(run) != fde_feature_specs.PROFILE:
+        return None
+    root = _features_root(run)
+    features = []
+    if root.is_dir() and not root.is_symlink():
+        for directory in sorted(root.iterdir()):
+            if (not directory.is_dir() or directory.is_symlink()
+                    or not fde_feature_specs.FEATURE_ID_RE.match(directory.name)):
+                continue
+            latest, _ = _feature_baseline(run, directory.name)
+            features.append({
+                "featureId": directory.name,
+                "path": f"artifacts/features/{directory.name}",
+                "documents": sorted(fde_feature_specs.read_documents(directory)),
+                "latestHandoff": ({"recordId": latest.get("recordId"),
+                                   "stage": latest.get("stage"), "at": latest.get("at")}
+                                  if latest else None),
+            })
+    return {"profile": fde_feature_specs.PROFILE, "features": features,
+            "principlesDraft": (root / fde_feature_specs.PRINCIPLES).is_file()}
+
+
+def _print_findings(payload):
+    for f in payload["findings"]:
+        where = f["document"] + (f":{f['line']}" if f.get("line") else "")
+        print(f"  {f['severity']:<7} {f['code']:<28} {where:<20} {f['message']}")
+
+
+def cmd_features_scaffold(args):
+    run = Run(args.run_id)
+    _require_feature_profile(run, "scaffolding feature documents")
+    feature_id = _feature_id(args.feature)
+    title = (args.title or "").strip()
+    if not title or len(title) > 200:
+        die("--title is required (200 characters max)", 2)
+    if args.principles and not args.repo:
+        die("--principles needs --repo: whether to draft principles depends on what "
+            "the repository already has", 2)
+    templates = _feature_templates_dir()
+    target = _feature_dir(run, feature_id, create=True)
+    date = now().strftime("%Y-%m-%d")
+    created, kept = [], []
+    for name in fde_feature_specs.DOCUMENTS:
+        path = target / name
+        if path.exists() or path.is_symlink():
+            kept.append(name)
+            continue
+        text = fde_feature_specs.render((templates / name).read_text(encoding="utf-8"),
+                                        feature_id=feature_id, title=title,
+                                        run_id=run.id, date=date)
+        write_atomic(path, text)
+        created.append(name)
+
+    principles = None
+    if args.principles:
+        run.guard_roles("reading the repository for existing principles")
+        repo = _resolve_dir(args.repo, "repository path")
+        _require_inside_project_repos(run, repo)
+        equivalents = fde_feature_specs.principle_equivalents(repo)
+        draft = _features_root(run) / fde_feature_specs.PRINCIPLES
+        if equivalents:
+            principles = {"state": "not-needed", "equivalents": equivalents}
+        elif draft.exists() or draft.is_symlink():
+            principles = {"state": "kept", "path": f"artifacts/features/{fde_feature_specs.PRINCIPLES}"}
+        else:
+            standards = SHARED / "shared" / "engineering-standards.md"
+            digest = sha256_file(standards) if standards.is_file() else "unavailable"
+            text = fde_feature_specs.render(
+                (templates / fde_feature_specs.PRINCIPLES).read_text(encoding="utf-8"),
+                feature_id=feature_id, title=title, run_id=run.id, date=date,
+                extra={"STANDARDS_SOURCE": "shared/engineering-standards.md",
+                       "STANDARDS_SHA256": digest,
+                       "EQUIVALENTS": "- none found in the repository when this was generated"})
+            write_atomic(draft, text)
+            principles = {"state": "created", "path": f"artifacts/features/{fde_feature_specs.PRINCIPLES}",
+                          "standardsSha256": digest}
+
+    run.event("features.scaffolded", featureId=feature_id, created=created, kept=kept,
+              principles=(principles or {}).get("state"))
+    payload = {"schemaVersion": SCHEMA_VERSION, "runId": run.id, "featureId": feature_id,
+               "path": f"artifacts/features/{feature_id}", "created": created, "kept": kept,
+               "principles": principles}
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"feature  {feature_id}  {title}")
+    print(f"dir      {target}")
+    for name in created:
+        print(f"  created  {name}")
+    for name in kept:
+        print(f"  kept     {name}  (exists; never overwritten)")
+    if principles:
+        if principles["state"] == "not-needed":
+            print(f"  principles  not drafted — the repository already has: "
+                  f"{', '.join(principles['equivalents'])}. Reference them from plan.md.")
+        else:
+            print(f"  principles  {principles['state']}  {principles['path']}")
+    print(f"\nnext     fill the documents, then: fde features validate {run.id} --feature {feature_id}")
+    return 0
+
+
+def cmd_features_import(args):
+    run = Run(args.run_id)
+    _require_feature_profile(run, "importing feature documents")
+    run.guard_roles("reading feature documents from a repository")
+    source = _resolve_dir(args.source, "feature directory")
+    _require_inside_project_repos(run, source)
+    feature_id = _feature_id(args.feature or source.name)
+    documents = fde_feature_specs.read_documents(source)
+    if not documents:
+        die(f"{source} contains none of {', '.join(fde_feature_specs.DOCUMENTS)}", 2)
+    target = _feature_dir(run, feature_id, create=True)
+    imported, kept = {}, []
+    for name, data in documents.items():
+        dest = target / name
+        if dest.is_symlink():
+            die(f"{dest} is a symlink; refusing", 2)
+        if dest.is_file() and dest.read_bytes() != data and not args.replace:
+            kept.append(name)
+            continue
+        write_bytes_atomic(dest, data)
+        imported[name] = fde_feature_specs.sha256_bytes(data)
+    run.event("features.imported", featureId=feature_id, source=str(source),
+              files=imported, kept=kept)
+    payload = {"schemaVersion": SCHEMA_VERSION, "runId": run.id, "featureId": feature_id,
+               "source": str(source), "path": f"artifacts/features/{feature_id}",
+               "imported": imported, "kept": kept}
+    if getattr(args, "json", False):
+        return emit_json(payload)
+    print(f"feature  {feature_id}  from {source}")
+    for name, digest in imported.items():
+        print(f"  imported  {name}  sha256 {digest[:12]}")
+    for name in kept:
+        print(f"  kept      {name}  (the run copy differs; pass --replace to take the repository's)")
+    return 0
+
+
+def _repository_comparison(run: Run, feature_id, repo_arg):
+    run.guard_roles("reading the repository copy of the feature documents")
+    repo = _resolve_dir(repo_arg, "repository path")
+    _require_inside_project_repos(run, repo)
+    repo_dir = repo / "docs" / "features" / feature_id
+    theirs = fde_feature_specs.read_documents(repo_dir) if repo_dir.is_dir() else {}
+    ours = fde_feature_specs.read_documents(_feature_dir(run, feature_id))
+    files = {}
+    for name in fde_feature_specs.DOCUMENTS:
+        if name in ours and name in theirs:
+            files[name] = "same" if ours[name] == theirs[name] else "differs"
+        elif name in ours:
+            files[name] = "missing-in-repository"
+        elif name in theirs:
+            files[name] = "missing-in-run"
+    return {"path": str(repo_dir), "files": files,
+            "inSync": bool(files) and all(v == "same" for v in files.values())}
+
+
+def cmd_features_validate(args):
+    feature_id = _feature_id(args.feature)
+    stage = args.stage
+    if bool(args.run_id) == bool(args.path):
+        die("give a run id or --path, not both", 2)
+    if args.path:
+        if args.repo:
+            die("--repo compares a run with a repository; with --path there is no run", 2)
+        directory = _resolve_dir(args.path, "feature directory")
+        payload = fde_feature_specs.validate(fde_feature_specs.read_documents(directory),
+                                             feature_id=feature_id, stage=stage)
+        payload["path"] = str(directory)
+        latest = None
+    else:
+        run = Run(args.run_id)
+        _require_feature_profile(run, "validating feature documents")
+        directory = _feature_dir(run, feature_id)
+        latest, baseline = _feature_baseline(run, feature_id)
+        payload = fde_feature_specs.validate(fde_feature_specs.read_documents(directory),
+                                             feature_id=feature_id, stage=stage,
+                                             baseline=baseline)
+        payload["runId"] = run.id
+        payload["path"] = f"artifacts/features/{feature_id}"
+        payload["latestHandoff"] = ({"recordId": latest.get("recordId"),
+                                     "stage": latest.get("stage"), "at": latest.get("at")}
+                                    if latest else None)
+        if args.repo:
+            payload["repository"] = _repository_comparison(run, feature_id, args.repo)
+    code = 0 if payload["valid"] else 1
+    if getattr(args, "json", False):
+        emit_json(payload)
+        return code
+    print(f"{'VALID' if payload['valid'] else 'INVALID'}  {feature_id}  "
+          f"({payload['errorCount']} error(s), {payload['warningCount']} warning(s))"
+          + (f"  stage {stage}" if stage else ""))
+    ids = payload["ids"]
+    print(f"  {len(ids['requirements'])} requirement(s), {len(ids['checks'])} check(s), "
+          f"{len(ids['tasks'])} task(s), {len(ids['questions'])} question(s)")
+    if latest:
+        print(f"  latest handoff {latest.get('recordId')} at {latest.get('stage')} "
+              f"({latest.get('at')})")
+    _print_findings(payload)
+    repository = payload.get("repository")
+    if repository:
+        state = "in sync" if repository["inSync"] else "not in sync"
+        print(f"  repository {repository['path']}: {state}")
+        for name, value in repository["files"].items():
+            if value != "same":
+                print(f"    {name}: {value}")
+    print(f"\n{payload['boundary']}")
+    return code
+
+
+def cmd_features_record(args):
+    run = Run(args.run_id)
+    _require_feature_profile(run, "recording a feature handoff")
+    feature_id = _feature_id(args.feature)
+    stage = args.stage
+    if stage not in run.stages():
+        die(f"'{STAGE_LABEL[stage]}' is not in this run's plan ({run.plan_line()})", 5)
+    directory = _feature_dir(run, feature_id)
+    documents = fde_feature_specs.read_documents(directory)
+    previous, baseline = _feature_baseline(run, feature_id)
+    # Re-baselining is how a reconciled change is accepted, so the hash check is
+    # not applied here — instead a scope change needs a stated reconciliation.
+    payload = fde_feature_specs.validate(documents, feature_id=feature_id, stage=stage)
+    if not payload["valid"]:
+        if getattr(args, "json", False):
+            emit_json(payload)
+        else:
+            print(f"refused  {feature_id} has {payload['errorCount']} error(s); nothing recorded")
+            _print_findings(payload)
+        return 1
+    changed = [name for name in fde_feature_specs.DOCUMENTS
+               if baseline is not None and baseline.get(name) != payload["hashes"].get(name)]
+    scope_changed = [n for n in changed if n in fde_feature_specs.SCOPE_DOCUMENTS]
+    reconciled = (args.reconciled or "").strip()
+    if scope_changed and not reconciled:
+        die(f"{', '.join(scope_changed)} changed since handoff {previous.get('recordId')} "
+            f"({previous.get('stage')}). Reconcile the scope change through the run, then "
+            f"record again with --reconciled \"<what was agreed>\"", 9)
+    at = iso()
+    record_id = f"fh-{secrets.token_hex(4)}"
+    files = {name: {"path": f"artifacts/features/{feature_id}/{name}", "sha256": digest}
+             for name, digest in sorted(payload["hashes"].items())}
+    record = {
+        "schemaVersion": SCHEMA_VERSION, "at": at, "recordId": record_id,
+        "runId": run.id, "featureId": feature_id, "stage": stage, "files": files,
+        "requirementIds": payload["ids"]["requirements"],
+        "checkIds": payload["ids"]["checks"], "taskIds": payload["ids"]["tasks"],
+        "supersedes": previous.get("recordId") if previous else None,
+        "changedSinceLast": changed,
+        "reconciled": reconciled or None,
+    }
+    append_jsonl(run.dir / FEATURE_LEDGER, record)
+    run.event("features.handoff.recorded", recordId=record_id, featureId=feature_id,
+              stage=stage, files={n: f["sha256"] for n, f in files.items()},
+              changedSinceLast=changed, reconciled=reconciled or None)
+    evidence = [{"path": f["path"], "sha256": f["sha256"],
+                 "source": f"fde features record {record_id}: {feature_id} {name}",
+                 "retrievedAt": at} for name, f in files.items()]
+    out = {"schemaVersion": SCHEMA_VERSION, "record": record,
+           "inputEvidence": evidence, "requirementIds": record["requirementIds"],
+           "warnings": [f for f in payload["findings"] if f["severity"] == "warning"],
+           "boundary": ("A recorded handoff fixes which document versions a task used. It "
+                        "grants nothing: task files, their hashes and approvals stay "
+                        "authoritative.")}
+    if getattr(args, "json", False):
+        return emit_json(out)
+    print(f"recorded {record_id}  {feature_id} at {stage}")
+    for name, f in files.items():
+        print(f"  {name:<16} sha256 {f['sha256'][:12]}")
+    if changed:
+        print(f"  changed since {record['supersedes']}: {', '.join(changed)}")
+    for warning in out["warnings"]:
+        print(f"  warning  {warning['message']}")
+    print(f"\nUse inputEvidence from --json in the handoff sidecar. {out['boundary']}")
     return 0
 
 
@@ -14340,6 +14772,10 @@ def main(argv=None):
                         "default) keeps --model/--effort exactly as before")
     s.add_argument("--strategy", choices=list(AUTO_STRATEGIES),
                    help="how automatic routing trades quality against cost")
+    s.add_argument("--artifact-profile", dest="artifact_profile",
+                   choices=list(fde_feature_specs.PROFILES) + ["none"],
+                   help="optional artifact profile; defaults to the project's. "
+                        "feature-specs drafts spec/plan/tasks/verification documents")
     s.add_argument("--json", action="store_true",
                    help="print the created run as JSON; narration goes to stderr")
     s.set_defaults(fn=cmd_start)
@@ -14655,6 +15091,9 @@ def main(argv=None):
     c.add_argument("--repo", action="append", metavar="PATH",
                    help="an existing repository directory; repeatable. Never created "
                         "or modified by this controller")
+    c.add_argument("--artifact-profile", dest="artifact_profile",
+                   choices=list(fde_feature_specs.PROFILES) + ["none"],
+                   help="artifact profile new runs in this project inherit")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_project_create)
 
@@ -14664,8 +15103,49 @@ def main(argv=None):
     u.add_argument("--description")
     u.add_argument("--repo", action="append", metavar="PATH",
                    help="replaces the recorded repository list; repeatable")
+    u.add_argument("--artifact-profile", dest="artifact_profile",
+                   choices=list(fde_feature_specs.PROFILES) + ["none"],
+                   help="artifact profile future runs inherit; existing runs keep theirs")
     u.add_argument("--json", action="store_true")
     u.set_defaults(fn=cmd_project_update)
+
+    s = sub.add_parser("features",
+                       help="feature documents for runs using the feature-specs artifact profile")
+    fsub = s.add_subparsers(dest="features_cmd", required=True)
+    f = fsub.add_parser("scaffold", help="draft the four feature documents in the run; create-only")
+    f.add_argument("run_id")
+    f.add_argument("--feature", required=True, metavar="FEAT-NNN")
+    f.add_argument("--title", required=True)
+    f.add_argument("--principles", action="store_true",
+                   help="also draft PRINCIPLES.md if the repository has no equivalent")
+    f.add_argument("--repo", metavar="PATH", help="the repository to check for principles")
+    f.add_argument("--json", action="store_true")
+    f.set_defaults(fn=cmd_features_scaffold)
+    f = fsub.add_parser("import", help="snapshot a repository's feature documents into the run")
+    f.add_argument("run_id")
+    f.add_argument("source", metavar="DIR", help="<repo>/docs/features/<FEAT-id>; read only")
+    f.add_argument("--feature", metavar="FEAT-NNN", help="defaults to the directory name")
+    f.add_argument("--replace", action="store_true",
+                   help="replace run copies that differ from the repository's")
+    f.add_argument("--json", action="store_true")
+    f.set_defaults(fn=cmd_features_import)
+    f = fsub.add_parser("validate", help="structure and traceability checks; exit 1 on errors")
+    f.add_argument("run_id", nargs="?")
+    f.add_argument("--path", metavar="DIR", help="validate a directory with no run involved")
+    f.add_argument("--feature", required=True, metavar="FEAT-NNN")
+    f.add_argument("--stage", choices=STAGE_ORDER,
+                   help="decides which documents are required (default: spec.md only)")
+    f.add_argument("--repo", metavar="PATH", help="also compare with <repo>/docs/features/<id>")
+    f.add_argument("--json", action="store_true")
+    f.set_defaults(fn=cmd_features_validate)
+    f = fsub.add_parser("record", help="validate and record a hashed handoff of the documents")
+    f.add_argument("run_id")
+    f.add_argument("--feature", required=True, metavar="FEAT-NNN")
+    f.add_argument("--stage", required=True, choices=STAGE_ORDER)
+    f.add_argument("--reconciled", metavar="TEXT",
+                   help="required when spec, plan or tasks changed since the last handoff")
+    f.add_argument("--json", action="store_true")
+    f.set_defaults(fn=cmd_features_record)
 
     w = psub.add_parser("show", help="a project, its repositories and its runs")
     w.add_argument("project_id")

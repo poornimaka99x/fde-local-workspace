@@ -10,6 +10,17 @@ acceptance criteria or evidence needed to declare success is ambiguous. Plan
 approval does not replace the separate Codex-write, deployment or publication
 gates and does not authorize scope expansion.
 
+## Feature documents (optional profile)
+
+When `fde status --json` reports `artifactProfile: "feature-specs"`, also use
+`/feature-specs` in research, solutioning, planning, implementation and
+verification: spec, plan, tasks and verification documents are drafted in
+`artifacts/features/<FEAT-id>/`, validated and recorded with `fde features`,
+and delivered to the repository only through the approved implementation or
+verification write. They add to the stage artifacts below; they replace none
+of them, and `plan.md` is never the controller's plan. A run without the
+profile ignores this section.
+
 ## Intake and research
 
 Load the client context and authoritative sources assigned to the run. Jira is

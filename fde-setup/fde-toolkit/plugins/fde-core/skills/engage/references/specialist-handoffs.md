@@ -30,6 +30,12 @@ The version 1 sidecar contains:
 | `budget` | `{maxAttempts, maxSeconds, maxCostUnits}` within approved ceilings; cost units are estimates, not currency |
 | `stopCondition`, `escalationCondition` | When to stop, and the specific evidence needed to request escalation |
 
+On a `feature-specs` run, `fde features record <run-id> --feature <id> --stage
+<stage> --json` validates the feature documents and returns `inputEvidence` rows
+and `requirementIds` for the sidecar; use them verbatim. A changed spec, plan or
+tasks document after a recorded handoff is a scope change to reconcile, not a
+file to re-hash quietly.
+
 Reviewers receive requirements, the actual diff/artifact and source evidence.
 Do not seed the review with the author's desired verdict. Missing evidence is
 requested through the orchestrator; reviewers return findings rather than
