@@ -1098,6 +1098,8 @@ class TestInvocation(RoutingTest):
         payload = json.loads(dry.stdout)
         self.assertEqual(payload["argv"], [
             "claude", "--model", expected["model"], "--effort", expected["effort"],
+            "--strict-mcp-config", "--tools", "Read,Grep,Glob,WebSearch,WebFetch",
+            "--add-dir", str((self.sb.shared / "runs" / run_id).resolve()),
             "-p", "propose the options"])
         self.assertEqual(payload["route"]["taskId"], "solutioning-1")
         self.assertEqual(payload["route"]["source"], "approved-routing")

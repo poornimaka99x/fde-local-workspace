@@ -93,6 +93,55 @@ class RunActivation(FDETest):
         self.assertNotIn("--mcp-config", argv)
         self.assertIn("tool scope", result.stderr)
 
+    def _claude_argv(self, run_id, stage="intake", *extra):
+        task = self.sb.run_dir(run_id) / "tasks/scope.md"
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("Summarise the inlined evidence")
+        result = self.sb.fde("invoke", run_id, "claude_alt", str(task),
+                             "--stage", stage, "--dry-run", *extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["argv"], result
+
+    def test_a_claude_invocation_never_loads_the_accounts_own_mcp_servers(self):
+        """Only the run's --mcp-config is loaded: servers in the account's own
+        config (Atlassian, AWS) must not reach a sub-agent, even when the run's
+        config is withheld."""
+        run_id = self.sb.start_full()
+        self.assertEqual(self.sb.full_roles(run_id, orchestrator="claude_alt").returncode, 0)
+        self.sb.advance_to(run_id, "intake")
+        argv, _ = self._claude_argv(run_id)
+        self.assertIn("--strict-mcp-config", argv)
+        (self.sb.run_dir(run_id) / "mcp/claude-alt.settings.json").unlink()
+        argv, _ = self._claude_argv(run_id)
+        self.assertNotIn("--mcp-config", argv)
+        self.assertIn("--strict-mcp-config", argv)
+
+    def test_a_claude_invocation_can_read_its_run_and_nothing_more_is_offered(self):
+        run_id = self.sb.start_full()
+        self.assertEqual(self.sb.full_roles(run_id, orchestrator="claude_alt").returncode, 0)
+        self.sb.advance_to(run_id, "intake")
+        argv, _ = self._claude_argv(run_id)
+        tools = argv[argv.index("--tools") + 1].split(",")
+        for read in ("Read", "Grep", "Glob"):
+            self.assertIn(read, tools)
+        for edit in ("Edit", "Write", "Bash"):
+            self.assertNotIn(edit, tools)
+        self.assertEqual(argv[argv.index("--add-dir") + 1],
+                         str(self.sb.run_dir(run_id).resolve()))
+
+    def test_context_files_are_inlined_for_claude(self):
+        run_id = self.sb.start_full()
+        self.assertEqual(self.sb.full_roles(run_id, orchestrator="claude_alt").returncode, 0)
+        self.sb.advance_to(run_id, "intake")
+        evidence = self.sb.run_dir(run_id) / "evidence/jira.md"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("ACME-1: the acceptance criteria")
+        argv, _ = self._claude_argv(run_id, "intake", "--context-file", str(evidence))
+        body = argv[argv.index("-p") + 1]
+        self.assertIn("# Reference: jira.md", body)
+        self.assertIn("ACME-1: the acceptance criteria", body)
+        self.assertTrue(body.rstrip().endswith("Summarise the inlined evidence"))
+
     def test_a_reassigned_role_takes_its_connector_with_it(self):
         run_id = self.sb.start_full()
         self.sb.full_roles(run_id, orchestrator="claude_alt")

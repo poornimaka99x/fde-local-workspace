@@ -6702,6 +6702,50 @@ def _run_mcp_options(run: Run, agent_id: str, agent: dict) -> list[str]:
     return options
 
 
+# Built-in Claude tools a routed sub-agent may use, by stage. MCP tools are not
+# listed here: they arrive only through the run's --mcp-config/--settings pair.
+# Every stage can read; only research-like stages reach the web; only the stages
+# that change code are offered editing and a shell, and even there each call is
+# still subject to the account's permission rules (nothing here pre-approves it).
+CLAUDE_READ_TOOLS = ("Read", "Grep", "Glob")
+CLAUDE_WEB_TOOLS = ("WebSearch", "WebFetch")
+CLAUDE_EDIT_TOOLS = ("Edit", "Write", "Bash")
+CLAUDE_WEB_STAGES = {"intake", "research", "solutioning", "review", "reconciliation",
+                     "presentation", "planning"}
+CLAUDE_EDIT_STAGES = {"implementation", "verification"}
+
+
+def _claude_tool_scope(run: "Run", stage: str, disabled=()) -> list[str]:
+    """Enforced tool boundary for one `claude -p` invocation.
+
+    - --strict-mcp-config: only the run's generated --mcp-config is loaded, so
+      servers in the account's own config (Atlassian, AWS, ...) never reach a
+      sub-agent — including when the run's config is withheld.
+    - --tools: the built-in set for this stage, enforced by the CLI rather than
+      by wording in the task.
+    - --add-dir: the run directory, so the task file, context files and filed
+      evidence are readable without a permission prompt nobody can answer in
+      print mode. Nothing outside the project and the run is added."""
+    tools = list(CLAUDE_READ_TOOLS)
+    if stage in CLAUDE_WEB_STAGES:
+        tools += CLAUDE_WEB_TOOLS
+    if stage in CLAUDE_EDIT_STAGES:
+        tools += CLAUDE_EDIT_TOOLS
+    tools = [t for t in tools if t not in set(disabled)]
+    return ["--strict-mcp-config", "--tools", ",".join(tools),
+            "--add-dir", str(run.dir.resolve())]
+
+
+def _claude_context_section(context_files) -> str:
+    """Context files inlined for Claude, as ask-codex does for Codex: the
+    sub-agent receives the evidence itself instead of being told to fetch it."""
+    parts = []
+    for path in context_files:
+        text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+        parts.append(f"# Reference: {pathlib.Path(path).name}\n\n{text}\n")
+    return ("\n".join(parts) + "\n# Task\n\n") if parts else ""
+
+
 def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path,
                      write: bool, route=None, context_files=(), continuation_from=None):
     a = agents["agents"][agent_id]
@@ -6750,7 +6794,10 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
                                  and re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", item[5:])})
         if disabled_tools:
             capability_options = ["--disallowedTools", ",".join(disabled_tools)]
-        return ["claude"] + options + claude_options + capability_options + ["-p", body], env
+        scope_options = _claude_tool_scope(run, stage, disabled_tools)
+        body = _claude_context_section(context_files) + body
+        return (["claude"] + options + scope_options + claude_options
+                + capability_options + ["-p", body]), env
     if kind == "codex":
         env["FDE_ROUTED_INVOCATION"] = "1"
         mcp_options = _run_mcp_options(run, agent_id, a)
@@ -6993,8 +7040,8 @@ def cmd_invoke(args):
         die("give the task file once, not both positionally and with --task-file", 2)
     task = _resolve_task_file(run, given)
     context_files = _resolve_sidecar_context(run, args.context_file)
-    if context_files and agents["agents"][agent_id].get("kind") not in ("codex", "gemini"):
-        die("--context-file is supported for Codex and Gemini sidecar invocations", 2)
+    if context_files and agents["agents"][agent_id].get("kind") not in ("codex", "gemini", "claude"):
+        die("--context-file is supported for Claude, Codex and Gemini sidecar invocations", 2)
     if context_files and args.write:
         die("Codex write mode cannot add context outside the approved task file", 2)
     argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write,
@@ -14923,7 +14970,7 @@ def main(argv=None):
                         "on an automatically routed run, and the source of its model and "
                         "effort")
     s.add_argument("--context-file", action="append", default=[], metavar="RUN-FILE",
-                   help="bounded evidence inside the run to pass to Codex or Gemini; repeatable")
+                   help="bounded evidence inside the run to pass to Claude, Codex or Gemini; repeatable")
     s.add_argument("--write", action="store_true", help="Codex only, and only with a live approval")
     s.add_argument("--use-omniroute", dest="use_omniroute", action="store_true",
                    help="continue a limit-hit Claude task on the OmniRoute fallback; "
