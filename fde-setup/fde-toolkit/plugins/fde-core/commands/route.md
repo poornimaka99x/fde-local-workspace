@@ -29,7 +29,7 @@ asked for.
 | Orchestrating a run | any Claude profile, or Codex | Gemini and MS Copilot cannot hold a run together |
 | Scoping a run | `fde plan` / `fde shapes` | most work is a slice, not the whole pipeline |
 | Running it | `/engage <run-id>` | orchestrator → ask → plan → roles → only the stages you asked for |
-| Onboarding a repo | `/repo-init` | writes AGENTS.md that Claude, Codex and Gemini all read |
+| Initializing a project (greenfield or brownfield) | `/repo-init` | folder structure, AGENTS.md, CLAUDE.md, docs/CODING-STANDARDS.md, lint config, implementation log |
 | What is configured, what is broken | `fde doctor` | statuses only, never secrets |
 
 GitHub Copilot is **not** part of this ecosystem. `ask-copilot` is a stub that

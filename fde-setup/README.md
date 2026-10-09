@@ -238,7 +238,10 @@ stores MCP config in a different place and shape.
 | Claude Code | no | `CLAUDE.md` containing `@AGENTS.md` |
 | Gemini CLI | not by default | one-time `context.fileName` setting |
 
-`/repo-init` writes `AGENTS.md` plus the adapters. `/agents-sync` fixes a repo
+`/repo-init` initializes a project. In greenfield mode it builds the folder structure from the agreed
+architecture and stack. In brownfield mode it codifies the existing conventions without restructuring.
+Either way it writes `AGENTS.md`, the `CLAUDE.md` adapter, `docs/CODING-STANDARDS.md` and the
+`docs/implementation/` log. `/agents-sync` fixes a repo
 that has already drifted into several instruction files.
 
 **MCP — one source file, three generated configs, and not everything is global.**
