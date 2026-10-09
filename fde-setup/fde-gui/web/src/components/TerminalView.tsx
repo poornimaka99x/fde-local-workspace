@@ -23,6 +23,8 @@ export const TerminalView = forwardRef<
 >(function TerminalView({ onInput, onResize, readOnly = false, ariaLabel = 'Orchestrator session terminal' }, ref) {
   const host = useRef<HTMLDivElement>(null)
   const terminal = useRef<Terminal | null>(null)
+  const handlers = useRef({ onInput, onResize, readOnly })
+  handlers.current = { onInput, onResize, readOnly }
 
   useImperativeHandle(ref, () => ({
     write: (data: string) => terminal.current?.write(data),
@@ -48,7 +50,7 @@ export const TerminalView = forwardRef<
     const resize = (): void => {
       try {
         fit.fit()
-        onResize(term.cols, term.rows)
+        handlers.current.onResize(term.cols, term.rows)
       } catch {
         /* the pane can be measured before it is laid out */
       }
@@ -56,7 +58,7 @@ export const TerminalView = forwardRef<
     resize()
 
     const typed = term.onData((data) => {
-      if (!readOnly) onInput(data)
+      if (!handlers.current.readOnly) handlers.current.onInput(data)
     })
     const observer = new ResizeObserver(resize)
     observer.observe(host.current)
@@ -67,8 +69,14 @@ export const TerminalView = forwardRef<
       term.dispose()
       terminal.current = null
     }
-    // The callbacks are stable for the life of a session panel.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // An exited process leaves its final screen visible. Changing input mode
+  // must not dispose the terminal and erase the startup error or transcript.
+  useEffect(() => {
+    if (terminal.current === null) return
+    terminal.current.options.disableStdin = readOnly
+    terminal.current.options.cursorBlink = !readOnly
   }, [readOnly])
 
   return (

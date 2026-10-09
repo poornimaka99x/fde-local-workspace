@@ -99,6 +99,11 @@ starting another. Closing the tab detaches; it does not stop the run. **Stop**
 sends an interrupt, and a **Force stop** appears a few seconds later if the
 session is still there — behind a confirmation.
 
+If the process exits during startup, its final terminal output stays visible
+alongside the exit code. Read that message before choosing **Start again**.
+An expired Claude login requires signing in again under **Configuration → AI
+accounts** for the selected profile.
+
 A Codex-led run says so instead of offering a button: it is driven from its own
 Codex task, and the console will not pretend otherwise.
 
