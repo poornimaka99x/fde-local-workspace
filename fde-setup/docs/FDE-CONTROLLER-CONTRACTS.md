@@ -843,7 +843,7 @@ The shipped policy grants three retries per task. Once that batch is exhausted,
 an explicit user request can grant exactly three more with `routing
 refresh-retries`. The grant is task-scoped and append-only: prior attempts,
 classifications, artifacts, and cost remain in the record. A refresh is refused
-before the current batch is exhausted or when the last attempt is not a
+before the current batch or approved ladder is exhausted, or when the last attempt is not a
 classified failure. It does not widen the escalation ladder or the run's total
 cost ceiling.
 
@@ -859,6 +859,18 @@ Escalation climbs only `escalation.ladder` from the policy, never past the
 task's frozen `escalationCeiling`, and never above
 `escalation.requireRecordedFailureAbove` without a recorded failure at that
 rung. `routing.escalated` records each climb with its from/to.
+
+After role reassignment and combined re-approval, the changed task identity
+starts a fresh ladder at its frozen route. Unchanged task identities retain
+their ladder. Attempt numbers, artifacts and run cost remain cumulative;
+`ladderAttempts` and `retries` describe the current identity's contiguous suffix.
+Retry grants from an earlier identity do not carry into that suffix.
+
+Claude verification invocations offer an exact Bash allowlist for frozen-lockfile
+pnpm install, lint, format:check, typecheck, test, build, and local Terraform
+format/init-without-backend/validate for `infra/envs/test`. Existing deny rules
+still apply. This does not authorize deployment, arbitrary shell commands or
+attest to permissions in other sessions.
 
 ### `routing attempts --json`
 

@@ -1140,6 +1140,46 @@ class TestInvocation(RoutingTest):
             self.assertEqual(dry.returncode, 8)
             self.assertIn("sandbox-bypass", dry.stderr)
 
+    def test_verification_commands_are_exact_and_respect_disabled_bash(self):
+        run_id = self.approved_run()
+        run = FDE.Run.__new__(FDE.Run)
+        run.dir = self.sb.shared / "runs" / run_id
+        scope = FDE._claude_tool_scope(run, "verification")
+        allowed = scope[scope.index("--allowedTools") + 1].split(",")
+        self.assertIn("Bash(pnpm test)", allowed)
+        self.assertIn("Bash(terraform -chdir=infra/envs/test init -backend=false)", allowed)
+        self.assertFalse(any("*" in command for command in allowed))
+        self.assertNotIn("--allowedTools", FDE._claude_tool_scope(run, "review"))
+        disabled = FDE._claude_tool_scope(run, "verification", ["Bash"])
+        self.assertNotIn("--allowedTools", disabled)
+        self.assertNotIn("Bash", disabled[disabled.index("--tools") + 1].split(","))
+
+    def test_prompt_text_may_name_bypass_flags_without_blocking_the_run(self):
+        """A brief that documents the escape hatches is content, not an option."""
+        run_id = self.approved_run()
+        task = self.sb.shared / "runs" / run_id / "tasks" / "solutioning.md"
+        names = "--dangerously-skip-permissions, --yolo and danger-full-access"  # fde-safety-exempt: test data
+        task.write_text(f"# Containment\nLock down {names}.\n")
+        dry = self.sb.fde("invoke", run_id, "claude_msc", "tasks/solutioning.md",
+                          "--stage", "solutioning", "--task-id", "solutioning-1",
+                          "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        argv = json.loads(dry.stdout)["argv"]
+        self.assertEqual(argv[-2], "-p")
+        self.assertIn(names, argv[-1])
+        self.assertFalse(any(name in " ".join(argv[:-1]) for name in names.split(", ")))
+
+    def test_a_prompt_that_parses_as_a_bypass_option_is_still_refused(self):
+        """The CLI reads a prompt beginning with '-' as an option."""
+        run_id = self.approved_run()
+        task = self.sb.shared / "runs" / run_id / "tasks" / "solutioning.md"
+        task.write_text("--dangerously-skip-permissions")  # fde-safety-exempt: test data
+        dry = self.sb.fde("invoke", run_id, "claude_msc", "tasks/solutioning.md",
+                          "--stage", "solutioning", "--task-id", "solutioning-1",
+                          "--dry-run")
+        self.assertEqual(dry.returncode, 8)
+        self.assertIn("sandbox-bypass", dry.stderr)
+
     def test_an_unapproved_route_cannot_be_invoked(self):
         run_id = self.routed_run(roles={"solutioning": "claude_msc",
                                         "review": "claude_alt"})
@@ -1869,6 +1909,88 @@ class TestAttempts(AttemptTest):
         self.assertEqual(len(attempts["retryGrants"]), 1)
         self.assertEqual(attempts["progress"][0]["retryRefreshes"], 1)
         self.assertIn(self.attempt(run_id).returncode, (0, 1))
+
+    def test_reassigned_identity_starts_fresh_after_combined_reapproval(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="invalid-contract")
+        spent = json.loads(self.sb.fde("routing", "attempts", run_id,
+                                      "--json").stdout)["spentCostUnits"]
+        result = self.sb.fde("roles", run_id, "--reassign",
+                             "--set", "solutioning=claude_bedrock")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stale = self.attempt(run_id, account="claude_bedrock")
+        self.assertEqual(stale.returncode, 7, stale.stderr)
+        result = self.sb.fde("approve-plan", run_id, "--reapprove",
+                             stdin=f"APPROVE PLAN {run_id}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dry = self.sb.fde("invoke", run_id, "claude_bedrock", "tasks/s.md",
+                           "--stage", "solutioning", "--task-id", "solutioning-1",
+                           "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertEqual(self.attempt(run_id, account="claude_bedrock").returncode, 1)
+        history = self.ledger(run_id)
+        self.assertEqual(history[-1]["attempt"], 2)
+        self.assertEqual(history[-1]["mode"], "initial")
+        self.assertEqual(history[1]["outcome"], "fail")
+        doc = self.routing_doc(run_id)
+        run = FDE.Run.__new__(FDE.Run)
+        run.id = run_id
+        run.dir = self.sb.shared / "runs" / run_id
+        self.assertGreater(FDE.routing_spent_cost_units(run), spent)
+        tight = json.loads(json.dumps(doc))
+        tight["limits"]["maxCostUnits"] = spent
+        other = next(t for t in tight["tasks"] if t["taskId"] == "review-1")
+        with self.assertRaises(FDE.RoutingError) as refusal:
+            FDE.plan_next_attempt(run, {}, tight, other, probe=True)
+        self.assertEqual(refusal.exception.code, "routing-budget-exhausted")
+        self.assertEqual(FDE.routing_task_progress(run, doc, "solutioning-1")["retries"], 0)
+        # An unrelated review assignment has no effect on this ladder.
+        self.sb.fde("roles", run_id, "--reassign", "--set", "review=claude_msc")
+        self.sb.fde("approve-plan", run_id, "--reapprove",
+                    stdin=f"APPROVE PLAN {run_id}\n")
+        self.assertEqual(self.attempt(run_id, account="claude_bedrock").returncode, 5)
+
+    def test_automatic_account_failover_does_not_restart_the_ladder(self):
+        run_id = self.approved()
+        self.attempt(run_id)
+        self.outcome(run_id, classification="invalid-contract")
+        doc = self.routing_doc(run_id)
+        run = FDE.Run.__new__(FDE.Run)
+        run.id = run_id
+        run.dir = self.sb.shared / "runs" / run_id
+        record = self.ledger(run_id)[-1]
+        record["accountId"] = "claude_bedrock"
+        record["approvedAccountId"] = "claude_msc"
+        FDE.append_jsonl(FDE.routing_attempts_path(run), record)
+        self.assertEqual(len(FDE.routing_ladder_attempts(run, doc, "solutioning-1")), 1)
+        # Older failover records bind to the same approved decision hash.
+        record.pop("approvedAccountId")
+        FDE.append_jsonl(FDE.routing_attempts_path(run), record)
+        self.assertEqual(len(FDE.routing_ladder_attempts(run, doc, "solutioning-1")), 1)
+
+    def test_refresh_at_full_ladder_before_retry_count_exhaustion(self):
+        run_id = self.approved()
+        while True:
+            result = self.attempt(run_id)
+            if result.returncode == 9:
+                self.assertIn("escalation", result.stderr)
+                break
+            self.assertEqual(result.returncode, 1, result.stderr)
+            outcome = json.loads(self.outcome(run_id, classification="invalid-contract").stdout)
+            if not outcome["retryPermitted"]:
+                self.assertEqual(outcome["retryRefusal"]["code"], "routing-escalation-ceiling")
+                break
+        refreshed = self.sb.fde("routing", "refresh-retries", run_id,
+                                "--task-id", "solutioning-1", "--approve",
+                                "--reason", "explicit bounded retry at ceiling", "--json")
+        self.assertEqual(refreshed.returncode, 0, refreshed.stderr)
+        self.assertTrue(json.loads(refreshed.stdout)["grant"]["ladderExhausted"])
+        self.assertEqual(self.attempt(run_id).returncode, 1)
+        again = self.sb.fde("routing", "refresh-retries", run_id,
+                            "--task-id", "solutioning-1", "--approve",
+                            "--reason", "too soon", "--json")
+        self.assertNotEqual(again.returncode, 0)
 
     def test_the_cost_ceiling_pauses_instead_of_continuing(self):
         tight = json.loads(json.dumps(FAKE_POLICY))

@@ -6713,14 +6713,6 @@ CLAUDE_EDIT_TOOLS = ("Edit", "Write", "Bash")
 CLAUDE_WEB_STAGES = {"intake", "research", "solutioning", "review", "reconciliation",
                      "presentation", "planning"}
 CLAUDE_EDIT_STAGES = {"implementation", "verification"}
-# Local verification only. Account/project deny rules continue to take precedence.
-CLAUDE_VERIFICATION_COMMANDS = (
-    "Bash(pnpm install --frozen-lockfile)", "Bash(pnpm lint)",
-    "Bash(pnpm format:check)", "Bash(pnpm typecheck)", "Bash(pnpm test)",
-    "Bash(pnpm build)", "Bash(terraform fmt -check -recursive infra)",
-    "Bash(terraform -chdir=infra/envs/test init -backend=false)",
-    "Bash(terraform -chdir=infra/envs/test validate)",
-)
 
 
 def _claude_tool_scope(run: "Run", stage: str, disabled=()) -> list[str]:
@@ -6740,10 +6732,7 @@ def _claude_tool_scope(run: "Run", stage: str, disabled=()) -> list[str]:
     if stage in CLAUDE_EDIT_STAGES:
         tools += CLAUDE_EDIT_TOOLS
     tools = [t for t in tools if t not in set(disabled)]
-    permissions = []
-    if stage == "verification" and "Bash" in tools:
-        permissions = ["--allowedTools", ",".join(CLAUDE_VERIFICATION_COMMANDS)]
-    return permissions + ["--strict-mcp-config", "--tools", ",".join(tools),
+    return ["--strict-mcp-config", "--tools", ",".join(tools),
             "--add-dir", str(run.dir.resolve())]
 
 
@@ -6755,26 +6744,6 @@ def _claude_context_section(context_files) -> str:
         text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
         parts.append(f"# Reference: {pathlib.Path(path).name}\n\n{text}\n")
     return ("\n".join(parts) + "\n# Task\n\n") if parts else ""
-
-
-def invocation_has_bypass_flag(argv):
-    """True when a sandbox-bypass flag could reach a CLI as an option.
-
-    The prompt payload (the final value after Claude's -p, or the Copilot
-    message) is content, not configuration. A brief may name these flags to
-    say which ones to lock down, and that must not block the run. The payload
-    is exempt only while the CLI cannot parse it as an option: one that begins
-    with '-' is checked like every other token."""
-    control = list(argv)
-    name = pathlib.Path(control[0]).name if control else ""
-    payload = None
-    if name == "claude" and len(control) >= 2 and control[-2] == "-p":
-        payload = control.pop()
-    elif name == "ask-ms-copilot" and len(control) == 2:
-        payload = control.pop()
-    if payload is not None and payload.lstrip().startswith("-"):
-        control.append(payload)
-    return any(f in " ".join(control) for f in FORBIDDEN_BYPASS_FLAGS)  # fde-safety-exempt: guard
 
 
 def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.Path,
@@ -7078,7 +7047,7 @@ def cmd_invoke(args):
     argv, extra_env = build_invocation(agents, run, agent_id, stage, task, args.write,
                                        route=route, context_files=context_files)
 
-    if invocation_has_bypass_flag(argv):  # fde-safety-exempt: guard
+    if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
         die("refusing to run: the invocation contains a sandbox-bypass flag", 8)
 
     resolved_route = {
@@ -7144,7 +7113,7 @@ def cmd_invoke(args):
         argv, extra_env = build_invocation(
             agents, run, fallback_id, stage, task, False, route=None,
             context_files=context_files, continuation_from=from_id)
-        if invocation_has_bypass_flag(argv):  # fde-safety-exempt: guard
+        if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
             die("refusing to run: the OmniRoute invocation contains a sandbox-bypass flag", 8)
 
     if use_omniroute:
@@ -7325,7 +7294,7 @@ def cmd_invoke(args):
             agents, run, current_id, stage, task, args.write,
             route=current_route, context_files=context_files,
             continuation_from=continuation_from)
-        if invocation_has_bypass_flag(argv):  # fde-safety-exempt: guard
+        if any(f in " ".join(argv) for f in FORBIDDEN_BYPASS_FLAGS):  # fde-safety-exempt: guard
             die("refusing to run: the failover invocation contains a sandbox-bypass flag", 8)
 
 
@@ -10876,35 +10845,10 @@ def routing_retry_grants(run: Run, task_id=None):
     return [record for record in records if record.get("taskId") == task_id]
 
 
-def routing_ladder_attempts(run: Run, doc, task_id):
-    """The contiguous attempt suffix belonging to the current task identity.
-
-    Invocation still requires the combined approval. Reassigning another task
-    cannot restart this one; ledger numbering and run spend never restart.
-    """
-    task = next((t for t in doc.get("tasks") or [] if t["taskId"] == task_id), {})
-    current = []
-    for record in reversed(routing_attempts(run, task_id)):
-        approved_account = record.get("approvedAccountId") or record.get("accountId")
-        same_decision = (record.get("decisionHash") is not None
-                         and record.get("decisionHash") == doc.get("decisionHash"))
-        if approved_account != task.get("accountId") and not same_decision:
-            break
-        current.append(record)
-    return list(reversed(current))
-
-
-def routing_ladder_grants(run: Run, doc, task_id):
-    history = routing_attempts(run, task_id)
-    offset = len(history) - len(routing_ladder_attempts(run, doc, task_id))
-    return [g for g in routing_retry_grants(run, task_id)
-            if int(g.get("attemptsAlreadyUsed") or 0) > offset]
-
-
 def routing_retry_allowance(run: Run, doc, task_id):
     base = int((doc.get("limits") or {}).get("maxRetries") or 0)
     refreshed = sum(int(record.get("retriesGranted") or 0)
-                    for record in routing_ladder_grants(run, doc, task_id))
+                    for record in routing_retry_grants(run, task_id))
     return base + refreshed
 
 
@@ -11000,22 +10944,20 @@ def routing_task_progress(run: Run, doc, task_id):
     attempts = routing_attempts(run, task_id)
     task = next((entry for entry in doc.get("tasks") or []
                  if entry.get("taskId") == task_id), None)
-    ladder_attempts = routing_ladder_attempts(run, doc, task_id)
-    last = ladder_attempts[-1] if ladder_attempts else None
+    last = attempts[-1] if attempts else None
     same_rung = 0
     if last is not None:
-        for record in reversed(ladder_attempts):
+        for record in reversed(attempts):
             if (record.get("model"), record.get("effort")) != (last.get("model"),
                                                                last.get("effort")):
                 break
             same_rung += 1
-    grants = routing_ladder_grants(run, doc, task_id)
+    grants = routing_retry_grants(run, task_id)
     base_retries = int(policy_limits.get("maxRetries") or 0)
     return {
         "taskId": task_id,
         "attempts": len(attempts),
-        "ladderAttempts": len(ladder_attempts),
-        "retries": max(0, len(ladder_attempts) - 1),
+        "retries": max(0, len(attempts) - 1),
         "escalations": sum(1 for record in attempts
                            if record.get("mode") == "escalation"),
         "attemptsAtCurrentRung": same_rung,
@@ -11087,7 +11029,7 @@ def plan_next_attempt(run: Run, agents, doc, task, *, probe=False):
     limits = doc.get("limits") or {}
     task_id = task["taskId"]
     progress = routing_task_progress(run, doc, task_id)
-    attempts = routing_ladder_attempts(run, doc, task_id)
+    attempts = routing_attempts(run, task_id)
 
     def _exhausted(**fields):
         if not probe:
@@ -11120,7 +11062,7 @@ def plan_next_attempt(run: Run, agents, doc, task, *, probe=False):
 
     if not attempts:
         return _within_budget(task.get("estimatedCostUnits"), {
-            "attempt": progress["attempts"] + 1,
+            "attempt": 1,
             "mode": "initial",
             "model": task.get("model"),
             "effort": task.get("effort"),
@@ -11290,8 +11232,6 @@ def record_routing_attempt(run: Run, doc, task, plan, *, usage=None, outcome="un
         "requiredRole": task.get("requiredRole"),
         "specialist": task.get("specialist"),
         "accountId": task.get("accountId"),
-        "approvedAccountId": next((t.get("accountId") for t in doc.get("tasks") or []
-                                   if t["taskId"] == task["taskId"]), task.get("accountId")),
         "provider": task.get("provider"),
         "model": plan.get("model"),
         "effort": plan.get("effort"),
@@ -11485,7 +11425,7 @@ def cmd_routing_refresh_retries(args):
                            "a retry refresh needs a reason so the extra spend is auditable")
 
     progress = routing_task_progress(run, doc, task_id)
-    attempts = routing_ladder_attempts(run, doc, task_id)
+    attempts = routing_attempts(run, task_id)
     if not attempts:
         raise RoutingError("routing-refresh-not-exhausted",
                            f"task '{task_id}' has not used an initial attempt",
@@ -11496,12 +11436,7 @@ def cmd_routing_refresh_retries(args):
                            f"task '{task_id}' does not end in a classified failure",
                            "Record a classified failed outcome before granting more retries.",
                            exit_code=5)
-    ladder_full = False
-    try:
-        plan_next_attempt(run, load_agents(), doc, task, probe=True)
-    except RoutingError as exc:
-        ladder_full = exc.code == "routing-escalation-ceiling"
-    if progress["retries"] < progress["maxRetries"] and not ladder_full:
+    if progress["retries"] < progress["maxRetries"]:
         remaining = progress["maxRetries"] - progress["retries"]
         raise RoutingError("routing-refresh-not-exhausted",
                            f"task '{task_id}' still has {remaining} approved retry "
@@ -11519,17 +11454,15 @@ def cmd_routing_refresh_retries(args):
             die("confirmation did not match; no retries were granted", 8)
 
     prior_limit = progress["maxRetries"]
-    granted = ROUTING_RETRY_REFRESH_SIZE
     grants = routing_retry_grants(run, task_id)
     record = {
         "at": iso(),
         "runId": run.id,
         "taskId": task_id,
         "batch": len(grants) + 1,
-        "retriesGranted": granted,
-        "ladderExhausted": ladder_full,
+        "retriesGranted": ROUTING_RETRY_REFRESH_SIZE,
         "priorRetryLimit": prior_limit,
-        "newRetryLimit": prior_limit + granted,
+        "newRetryLimit": prior_limit + ROUTING_RETRY_REFRESH_SIZE,
         "attemptsAlreadyUsed": progress["attempts"],
         "retriesAlreadyUsed": progress["retries"],
         "decisionHash": doc.get("decisionHash"),
