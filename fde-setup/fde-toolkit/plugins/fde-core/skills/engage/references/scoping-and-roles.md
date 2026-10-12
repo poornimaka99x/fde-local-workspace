@@ -89,3 +89,16 @@ combined approval, tell the user to type `/exit`; the launcher resumes the same
 conversation with the generated role-restricted MCP configuration and
 `FDE_RUN_ID=<run-id>`. End the scoping process without fetching data. When the
 launcher is not in use, provide the generated manual launch command instead.
+
+## Follow-up runs
+
+A new or follow-up run has its own orchestrator session (account, model, session
+ID and run-scoped connectors), so it never continues in the current
+conversation. After creating one, point the user at the surface they are on:
+
+- In the FDE console (`FDE_CONSOLE=1`): open the run under **Runs**, then
+  **Session → Resume session**. Do not send them to a terminal.
+- Otherwise: `fde-start --resume <run-id>`.
+
+Both start scoping and `/engage` on their own; never ask the user to type
+`/engage` or `/fde-core:engage` after them.

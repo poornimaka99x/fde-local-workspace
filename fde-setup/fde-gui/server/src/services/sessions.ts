@@ -368,6 +368,9 @@ export function sessionEnv(config: GuiConfig): NodeJS.ProcessEnv {
     LANG: process.env.LANG ?? 'en_US.UTF-8',
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
+    // Tells fde-start, and through it the orchestrator, that the operator is in
+    // the console, so follow-up runs are opened here rather than in a terminal.
+    FDE_CONSOLE: '1',
   }
   // Installation overrides, when the operator set them for this server.
   for (const name of ['FDE_CONTROLLER', 'FDE_MCP_SYNC', 'FDE_CLAUDE_BIN', 'FDE_CODEX_BIN'] as const) {
