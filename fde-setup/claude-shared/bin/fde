@@ -6305,6 +6305,14 @@ def cmd_output_hygiene(args):
 def cmd_guard(args):
     """Called by skills before touching anything external."""
     run = Run(args.run_id)
+    bound_run = os.environ.get("FDE_RUN_ID", "").strip()
+    if bound_run and bound_run != run.id:
+        die(
+            f"this session is bound to run {bound_run}; refusing to authorize "
+            f"activity for run {run.id}.\n"
+            f"       start that run's own session: fde-start --resume {run.id}",
+            6,
+        )
     run.guard_roles(args.activity)
     if args.role:
         who = run.assignees(args.role)

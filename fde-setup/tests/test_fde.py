@@ -348,6 +348,28 @@ class TestRoles(FDETest):
             self.assertNotEqual(r.returncode, 0, f"{args} should have been refused")
             self.assertIn("not confirmed", r.stderr + r.stdout)
 
+    def test_guard_refuses_a_different_run_from_a_bound_session(self):
+        """A run-scoped Claude session cannot borrow another run's approval."""
+        first = self.sb.start_full("ACME-1 first")
+        second = self.sb.start_full("ACME-2 second")
+        self.assertEqual(self.sb.full_roles(first).returncode, 0)
+        self.assertEqual(self.sb.full_roles(second).returncode, 0)
+
+        refused = self.sb.fde(
+            "guard", second, "--activity", "reading AWS",
+            FDE_RUN_ID=first,
+        )
+        self.assertEqual(refused.returncode, 6)
+        self.assertIn(f"session is bound to run {first}", refused.stderr)
+        self.assertIn(f"fde-start --resume {second}", refused.stderr)
+
+        allowed = self.sb.fde(
+            "guard", first, "--activity", "reading AWS",
+            FDE_RUN_ID=first,
+        )
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertEqual(allowed.stdout.strip(), "ok")
+
     def test_second_task_asks_again(self):
         """2. A second run asks again and inherits nothing."""
         first = self.sb.start_full("ACME-1 first")

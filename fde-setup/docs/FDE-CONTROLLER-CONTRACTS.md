@@ -140,6 +140,16 @@ string. The local console does exactly this.
 The existing codes (5 illegal transition, 6 guard, 7 approval, 9 evidence,
 10 hygiene) are unchanged.
 
+## Run-bound guards
+
+`fde-start --resume <run-id>` sets `FDE_RUN_ID=<run-id>` in the Claude process.
+When that variable is present, `fde guard <run-id>` refuses exit 6 if its
+argument names a different run. A run-scoped conversation therefore cannot
+borrow another run's confirmed roles or connector authority. Start the other
+run through its own `fde-start --resume <run-id>` process instead. Direct
+operator calls made outside a run-scoped process have no `FDE_RUN_ID` and keep
+their existing behavior.
+
 ## Projects
 
 A project groups runs. It holds no workflow state of its own.
