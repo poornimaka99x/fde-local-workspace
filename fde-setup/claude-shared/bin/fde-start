@@ -19,7 +19,11 @@ usage() {
 usage:
   fde-start [--orchestrator IDENTITY] [--model ALIAS-OR-ID]
             [--effort auto|low|medium|high|xhigh|max]
-  fde-start --resume <run-id>
+  fde-start --resume <run-id> [--orchestrator IDENTITY]
+
+--orchestrator with --resume is used only when the run has none yet (for
+example a follow-up run created from another run's session); otherwise you are
+asked. An existing orchestrator is changed only with fde orchestrator --reassign.
 
 Starts a chat with the selected orchestrator. In that chat:
   1. give the request;
@@ -190,18 +194,10 @@ json.load(sys.stdin)
   return 0
 }
 
-if [[ -n "$resume_id" ]]; then
-  run_id="$resume_id"
-  run_dir="$RUNS/$run_id"
-  [[ -d "$run_dir" ]] || { echo "fde-start: no such run: $run_id" >&2; exit 4; }
-  orchestrator_id="$(read_json_field "$run_dir/roles.json" assignments.orchestrator)"
-  [[ -n "$orchestrator_id" ]] || {
-    echo "fde-start: run $run_id has no orchestrator assigned yet" >&2; exit 3; }
-  load_launch "$orchestrator_id" || exit $?
-else
-  if [[ -z "$orchestrator" ]]; then
-    echo "Choose the orchestrator for this run:"
-    "$FDE" accounts list --json | python3 -c '
+# choose_orchestrator: ask the operator which Claude identity holds the run.
+choose_orchestrator() {
+  echo "Choose the orchestrator for this run:"
+  "$FDE" accounts list --json | python3 -c '
 import json, sys
 accounts = json.load(sys.stdin).get("accounts") or []
 launchable = [a for a in accounts
@@ -213,7 +209,31 @@ for a in launchable:
     state = "signed in" if a.get("loggedIn") else "SIGNED OUT"
     print("  {:<24} {}  [{}]".format(a["id"], a["label"], state))
 '
-    read -r -p "orchestrator: " orchestrator
+  read -r -p "orchestrator: " orchestrator
+  [[ -n "$orchestrator" ]] || { echo "fde-start: no orchestrator chosen" >&2; exit 3; }
+}
+
+if [[ -n "$resume_id" ]]; then
+  run_id="$resume_id"
+  run_dir="$RUNS/$run_id"
+  [[ -d "$run_dir" ]] || { echo "fde-start: no such run: $run_id" >&2; exit 4; }
+  orchestrator_id=""
+  [[ -f "$run_dir/roles.json" ]] && \
+    orchestrator_id="$(read_json_field "$run_dir/roles.json" assignments.orchestrator)"
+  if [[ -n "$orchestrator_id" ]]; then
+    load_launch "$orchestrator_id" || exit $?
+  else
+    # A follow-up run created from inside another run's session cannot be
+    # given an orchestrator there (that session is bound to its own run), so
+    # it arrives here with none. Choosing one is the operator's decision, made
+    # now, rather than a dead end.
+    [[ -n "$orchestrator" ]] || choose_orchestrator
+    load_launch "$orchestrator" || exit $?
+    "$FDE" orchestrator "$run_id" "$orchestrator_id"
+  fi
+else
+  if [[ -z "$orchestrator" ]]; then
+    choose_orchestrator
   fi
   load_launch "$orchestrator" || exit $?
   start_args=(start)
@@ -453,12 +473,17 @@ if [[ "${FDE_CONSOLE:-}" == "1" ]]; then
   launcher_note="This session runs inside the FDE console. Each run has its own
 orchestrator session, so a new or follow-up run cannot continue in this
 conversation. When you create one, tell me to open it in the console (Runs ->
-<run-id> -> Session -> Resume session); that starts its scoping and /engage
-automatically. Never tell me to open a terminal, run fde-start or type /engage."
+<run-id> -> Session); if it has no orchestrator yet the console asks me to choose
+one there, then starts its scoping and /engage automatically. Never run fde
+orchestrator on another run (this session is bound to $run_id and the controller
+refuses it). Never tell me to open a terminal, run fde-start or type /engage."
 else
   launcher_note="Each run has its own orchestrator session, so a new or
 follow-up run cannot continue in this conversation. When you create one, give me
-exactly: fde-start --resume <run-id> (it starts scoping and /engage on its own),
+exactly: fde-start --resume <run-id> (it asks me for the orchestrator if the run
+has none, then starts scoping and /engage on its own). Never run fde orchestrator
+on another run: this session is bound to $run_id and the controller refuses it.
+Alternatively,
 or the FDE console's Resume session for that run. Do not tell me to type /engage
 or /fde-core:engage after it."
 fi

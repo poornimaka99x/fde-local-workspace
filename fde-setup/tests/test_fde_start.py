@@ -193,6 +193,43 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("Do not ask me to repeat or re-record the request", log)
         self.assertNotIn("Hold an interactive scoping conversation. Ask for my request", log)
 
+    def test_resume_asks_for_an_orchestrator_when_a_follow_up_run_has_none(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+        })
+        # What a bound orchestrator session can do for a follow-up: create the
+        # run, but not assign it an orchestrator.
+        created = subprocess.run(
+            [str(FDE), "start", "follow-up to an earlier run", "--json"],
+            text=True, capture_output=True, env=env,
+        )
+        self.assertEqual(created.returncode, 0, msg=created.stderr)
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        manifest = self.shared / "runs" / run_id / "manifest.json"
+        self.assertEqual(json.loads(manifest.read_text())["state"], "awaiting_orchestrator")
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            input="work\n", text=True, capture_output=True, env=env,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("Choose the orchestrator for this run", result.stdout)
+        roles = json.loads((self.shared / "runs" / run_id / "roles.json").read_text())
+        self.assertEqual(roles["assignments"]["orchestrator"], "claude_work")
+        self.assertIn("controller already has this run's request", self.log.read_text())
+
     def test_resume_replaces_a_session_id_claude_never_persisted(self):
         env = dict(os.environ)
         env.update({

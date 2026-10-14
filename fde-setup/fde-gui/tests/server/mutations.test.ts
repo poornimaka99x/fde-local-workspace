@@ -309,6 +309,28 @@ describe('safe mutations', () => {
     }
   })
 
+  it('gives a follow-up run with no orchestrator its first one without --reassign', async () => {
+    const choosing = await makeHarness({ withDesignRegistry: true })
+    try {
+      choosing.fixture(`status-${RUN}`, {
+        ...statusFixture(RUN),
+        state: 'awaiting_orchestrator',
+        roles: { confirmed: false, confirmedAt: null, selectedAt: null, orchestrator: null, assignments: [] },
+      })
+      choosing.fixture(`orchestrator-${RUN}-claude_alt`, {})
+      const response = await choosing.app.inject({
+        method: 'POST',
+        url: `/api/runs/${RUN}/orchestrator`,
+        headers: mutating(choosing.token),
+        payload: { accountId: 'alt' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(choosing.calls()).toContainEqual(['orchestrator', RUN, 'claude_alt'])
+    } finally {
+      await choosing.destroy()
+    }
+  })
+
   it('refuses to switch a run to an unknown or non-interactive account', async () => {
     for (const accountId of ['missing', 'chatgpt_codex']) {
       const response = await post(`/api/runs/${RUN}/orchestrator`, { accountId })

@@ -188,6 +188,10 @@ export function SessionPanel({
   }
 
   const running = session?.status === 'running'
+  // A follow-up run created from inside another run's session arrives with no
+  // orchestrator: that session is bound to its own run and cannot assign one.
+  // The operator chooses it here, and the session starts straight away.
+  const unassigned = !run.roles.orchestrator
   const resumable = run.session.resumable && run.session.provider === 'claude'
   const switchCandidates = (accounts.data?.accounts ?? []).filter((account) =>
     account.orchestratorEligible !== false
@@ -202,7 +206,7 @@ export function SessionPanel({
   const switchOrchestrator = async (): Promise<void> => {
     const account = switchCandidates.find((candidate) => candidate.id === switchAccount)
     if (account === undefined) return
-    if (!window.confirm(
+    if (!unassigned && !window.confirm(
       `Switch this run from ${run.roles.orchestrator?.label ?? 'its current orchestrator'} to ${account.label}? `
       + 'The old chat transcript will not transfer. Durable run files and history remain available.',
     )) return
@@ -218,7 +222,9 @@ export function SessionPanel({
       setShowSwitch(false)
       setSwitchAccount('')
       setSwitchNotice(
-        result.reapprovalRequired
+        unassigned
+          ? `${account.label} now orchestrates this run. Starting its scoping session…`
+          : result.reapprovalRequired
           ? `Switched to ${account.label}. Start the replacement session, review its revised plan and routing, and approve it when prompted.`
           : `Switched to ${account.label}. Start the replacement session below.`,
       )
@@ -227,6 +233,7 @@ export function SessionPanel({
       await refresh()
       onRunChanged()
       announceChange()
+      if (unassigned && state?.available !== false) await resume()
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not reach the local server.'))
     } finally {
@@ -271,7 +278,32 @@ export function SessionPanel({
         {error ? <ErrorState error={error} /> : null}
         {switchNotice ? <p className="banner ok" role="status">{switchNotice}</p> : null}
 
-        {!resumable ? (
+        {unassigned && session === null ? (
+          <div className="stack">
+            <label>
+              <strong>Orchestrator account</strong>
+              <br />
+              <select value={switchAccount} onChange={(event) => setSwitchAccount(event.target.value)}>
+                <option value="">Choose an account…</option>
+                {switchCandidates.map((account: ClaudeAccount) => (
+                  <option key={account.id} value={account.id}>{account.label}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="action primary"
+              type="button"
+              disabled={switchAccount === '' || switching || connecting}
+              onClick={() => void switchOrchestrator()}
+            >
+              {switching || connecting ? 'Starting…' : 'Set orchestrator and start'}
+            </button>
+            {accounts.error ? <ErrorState error={accounts.error} /> : null}
+            {accounts.data !== null && switchCandidates.length === 0 ? (
+              <p className="muted">No signed-in, orchestration-capable Claude account is available.</p>
+            ) : null}
+          </div>
+        ) : !resumable ? (
           <p className="muted" style={{ marginBottom: 0 }}>
             This console will not invent a resume path that does not exist.
           </p>

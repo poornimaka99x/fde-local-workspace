@@ -222,6 +222,66 @@ describe('the session panel', () => {
     expect(posted.filter((call) => call.url.includes('/session/resume'))).toHaveLength(1)
   })
 
+  it('lets the operator choose the first orchestrator of a follow-up run, then starts it', async () => {
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/api/claude/accounts')) {
+          return new Response(JSON.stringify({ accounts: [
+            {
+              id: 'bedrock', identityId: 'claude_bedrock', label: 'Claude Code: Bedrock', profile: 'bedrock',
+              provider: 'anthropic', profilePresent: true, authState: 'authenticated',
+              authMethod: 'test', models: [], capabilities: ['orchestration'],
+              orchestratorEligible: true, designPanelEligible: false,
+            },
+          ] }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        if (init?.method === 'POST') {
+          posted.push({ url, body: typeof init.body === 'string' ? JSON.parse(init.body) : null })
+          if (url.endsWith('/session/resume')) {
+            return new Response(JSON.stringify({
+              status: 'started',
+              ticket: 'first-ticket',
+              session: {
+                runId: '20260903-acme-1-aaaa', status: 'running', pid: 7,
+                startedAt: '2026-09-03T10:00:00+00:00', exitedAt: null, exitCode: null,
+                cwd: '/tmp', command: [], envKeys: [], stopRequestedAt: null, attachedClients: 0,
+              },
+            }), { status: 200, headers: { 'content-type': 'application/json' } })
+          }
+          return new Response(JSON.stringify({ switched: true, reapprovalRequired: false, run: runFixture() }),
+            { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ available: true, session: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <SessionPanel
+        run={runFixture({
+          state: 'awaiting_orchestrator',
+          roles: { confirmed: false, confirmedAt: null, selectedAt: null, orchestrator: null, assignments: [] },
+          session: { provider: null, profile: null, sessionId: null, resumable: false,
+            resumeReason: 'This run has no orchestrator yet' },
+        } as Partial<RunStatus>)}
+      />,
+    )
+    await screen.findByRole('option', { name: 'Claude Code: Bedrock' })
+    await user.selectOptions(screen.getByLabelText('Orchestrator account'), 'bedrock')
+    await user.click(screen.getByRole('button', { name: 'Set orchestrator and start' }))
+    await waitFor(() => expect(posted.map((entry) => entry.url)).toEqual([
+      '/api/runs/20260903-acme-1-aaaa/orchestrator',
+      '/api/runs/20260903-acme-1-aaaa/session/resume',
+    ]))
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
   it('switches a stopped run to another eligible account after confirmation', async () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     vi.stubGlobal(

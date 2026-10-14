@@ -83,7 +83,7 @@ describe('resume sessions', () => {
     await resume(RUN)
     const env = FakeTerminal.spawned[0]?.options.env ?? {}
     expect(Object.keys(env).sort()).toEqual([
-      'CLAUDE_PROFILES_DIR', 'CLAUDE_SHARED', 'COLORTERM', 'FDE_PROJECTS_DIR',
+      'CLAUDE_PROFILES_DIR', 'CLAUDE_SHARED', 'COLORTERM', 'FDE_CONSOLE', 'FDE_PROJECTS_DIR',
       'FDE_RUNS_DIR', 'HOME', 'LANG', 'PATH', 'TERM', 'USER',
     ])
     expect(JSON.stringify(env)).not.toContain(harness.token)

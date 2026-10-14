@@ -15425,7 +15425,9 @@ def main(argv=None):
         die(
             f"this session is bound to run {bound_run}; refusing to operate "
             f"on run {target_run}.\n"
-            f"       start that run's own session: fde-start --resume {target_run}",
+            f"       start that run's own session: fde-start --resume {target_run}\n"
+            f"       (or, in the FDE console, Runs -> {target_run} -> Session). If the\n"
+            f"       run has no orchestrator yet, the operator chooses one there.",
             6,
         )
     try:

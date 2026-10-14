@@ -442,9 +442,12 @@ export function registerRunRoutes(
         // The explicit --reassign is the operator's requested identity change.
         // It approves nothing: an approved automatic route becomes stale and
         // must still be reviewed and re-approved in the replacement session.
-        await runController(config, [
-          'orchestrator', runId, account.identityId, '--reassign',
-        ])
+        // A run with no orchestrator yet (a follow-up created from another
+        // run's session) gets its first assignment; --reassign is only for a
+        // change the operator is making to an existing one.
+        await runController(config, before.roles.orchestrator
+          ? ['orchestrator', runId, account.identityId, '--reassign']
+          : ['orchestrator', runId, account.identityId])
         const run = statusSchema.parse(
           await runControllerJson(config, ['status', runId, '--json', '--events-limit', '50']),
         )

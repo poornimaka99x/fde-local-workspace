@@ -102,3 +102,10 @@ conversation. After creating one, point the user at the surface they are on:
 
 Both start scoping and `/engage` on their own; never ask the user to type
 `/engage` or `/fde-core:engage` after them.
+
+Never run `fde orchestrator <new-run-id> …` from the current session: it is
+bound to its own run and the controller refuses to touch another one. Leave the
+follow-up in `awaiting_orchestrator`; the operator chooses its orchestrator when
+they open it (the console's Session tab offers a chooser, and
+`fde-start --resume` prompts). Do not tell the user the follow-up session "will
+ask" anything about identities beyond that choice.
