@@ -6305,14 +6305,6 @@ def cmd_output_hygiene(args):
 def cmd_guard(args):
     """Called by skills before touching anything external."""
     run = Run(args.run_id)
-    bound_run = os.environ.get("FDE_RUN_ID", "").strip()
-    if bound_run and bound_run != run.id:
-        die(
-            f"this session is bound to run {bound_run}; refusing to authorize "
-            f"activity for run {run.id}.\n"
-            f"       start that run's own session: fde-start --resume {run.id}",
-            6,
-        )
     run.guard_roles(args.activity)
     if args.role:
         who = run.assignees(args.role)
@@ -15427,6 +15419,15 @@ def main(argv=None):
     s.set_defaults(fn=cmd_consume_approval)
 
     args = p.parse_args(argv)
+    bound_run = os.environ.get("FDE_RUN_ID", "").strip()
+    target_run = getattr(args, "run_id", None)
+    if bound_run and target_run and target_run != bound_run:
+        die(
+            f"this session is bound to run {bound_run}; refusing to operate "
+            f"on run {target_run}.\n"
+            f"       start that run's own session: fde-start --resume {target_run}",
+            6,
+        )
     try:
         return args.fn(args)
     except RoutingError as exc:
