@@ -485,6 +485,8 @@ label { font-size: 13px; }
   gap: 14px; margin-bottom: 14px;
 }
 .form-grid label { display: grid; gap: 5px; align-content: start; }
+.form-grid .check-row { grid-template-columns: auto 1fr; align-items: start; }
+.form-grid .check-row input { margin-top: 3px; }
 fieldset {
   border: 1px solid var(--border); border-radius: var(--radius-lg);
   padding: 14px 16px; margin: 0 0 16px; background: var(--surface);

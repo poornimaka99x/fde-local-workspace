@@ -216,6 +216,21 @@ connection only when every tool it offers reads. A connection that has never bee
 verified is listed as withheld, with the reason — FDE will not describe as
 read-only something it has not asked.
 
+## Completed-conversation retention
+
+**Configuration → Retention** controls automatic cleanup of governed run
+conversations whose controller state is `complete`. The default is enabled and
+keeps completed runs for five days from their last controller update. FLOW
+checks when its server starts, once an hour while it remains open, and whenever
+the setting changes.
+
+Cleanup never selects active, incomplete or awaiting-approval runs. Before each
+cleanup it re-reads the run under the same run, session, project and design-panel
+locks used by manual deletion. The controller then moves the complete run —
+including its artifacts and evidence — to recoverable `runs/.trash`; it is not
+permanently erased. Disable the setting to retain completed runs indefinitely,
+or choose between 1 and 3650 days.
+
 ## When something looks wrong
 
 | What you see | What it means | What to do |

@@ -97,7 +97,7 @@ A profile is a named slice of the catalogue for a kind of work.
 | --- | --- | --- |
 | `coding` | context7, projectatlas, openwiki, serena | `coding` |
 | `frontend-testing` | context7, projectatlas, openwiki, playwright, chrome-devtools | `frontend-testing` |
-| `client-delivery` | context7, projectatlas, openwiki, atlassian, figma | `client-delivery` |
+| `client-delivery` | context7, projectatlas, openwiki, atlassian, figma, microsoft365 | `client-delivery` |
 | `data` | context7, projectatlas, openwiki, dbhub | `data` |
 | `observability` | context7, projectatlas, openwiki, langfuse, aws, azure | `observability` |
 
@@ -194,6 +194,60 @@ exact retrieved material, including source URLs or IDs, inside the run and pass
 it with `fde invoke --context-file`. The controller logs each evidence path and
 hash, caps the total handoff at 512 KiB, and refuses paths outside the run.
 
+### Microsoft 365 — official Microsoft Work IQ MCP server
+
+FDE uses Microsoft's current, single Work IQ endpoint:
+`https://workiq.svc.cloud.microsoft/mcp`. Microsoft documents Work IQ MCP as the
+new-project path; the older workload-specific Copilot, Mail, Teams, SharePoint,
+OneDrive, User and Word MCP servers are compatibility surfaces and should not be
+used for new production integrations.
+
+Work IQ's generic tools cover Microsoft 365 resources by path. For example,
+`fetch /me/chats/{id}/messages` reads Teams chat messages, while `list_agents`
+discovers Microsoft 365 or Copilot Studio agents that the signed-in identity may
+use. Licensing, tenant policy and that user's permissions still decide what
+Microsoft returns.
+
+FDE exposes only verified tools matching `fetch`, `fetch_blob`, `get_schema`,
+`search_paths`, `call_function`, `retrieve` and `list_agents`. `ask`,
+`create_entity`, `update_entity`, `delete_entity` and `do_action` are denied.
+This allowlist constrains the MCP tool surface; it does not attest that a remote
+Copilot Studio agent has no independently configured actions. Tenant admins must
+review each agent and Work IQ policy separately.
+
+Create one single-tenant public-client app registration in the Microsoft 365
+tenant, enable Work IQ for the organization, grant only the required delegated
+Work IQ permissions and tenant admin consent, and register this redirect URI.
+Microsoft's `WorkIQAgent.Ask` permission expressly includes read and write access
+to Microsoft 365 resources available to agents; FDE therefore does not expose
+the `ask` tool merely because that broad OAuth permission was consented.
+
+```text
+http://127.0.0.1:8080/oauth/callback
+```
+
+Then configure the non-secret tenant and application identifiers:
+
+```bash
+fde mcp configure microsoft365 --set tenantId=<client tenant GUID> \
+  --set clientId=<your Entra application id>
+fde mcp verify microsoft365
+```
+
+Each verification starts the pinned `mcp-remote@0.15.1` compatibility adapter
+and opens Microsoft sign-in in the browser. The adapter turns the official
+remote HTTP server into stdio for Claude, Codex and Gemini; it is not the MCP
+data server. It caches the delegated OAuth token in its own owner-local
+configuration directory. FDE stores neither token nor client secret.
+
+`list_agents` is the governed Work IQ discovery route for agents available to
+the signed-in user. Invoking an agent through Work IQ's `ask` tool is withheld
+because its delegated permission includes downstream writes. A separately
+published Copilot Studio MCP channel has its own per-agent URL and the
+`MCS.InvokeAsMCP` permission; it is not silently folded into this connector.
+Keep using `ask-ms-copilot` (RUNBOOK Phase 5) for such a channel until it is
+separately classified and added to the catalogue.
+
 ### DBHub — configure first
 ```bash
 fde mcp configure dbhub \
@@ -255,6 +309,7 @@ says why.
 | --- | --- | --- |
 | Atlassian, Figma | OAuth 2.1 | the MCP client, per that provider's supported model. FDE stores nothing. |
 | Langfuse, DBHub | a key pair / a database password | an owner-only file under `~/.claude-shared/secrets/mcp/<server>/<field>`, injected into one child process |
+| Microsoft 365 / Work IQ | delegated Entra OAuth for Microsoft's official Work IQ MCP server | the pinned local OAuth adapter's owner-local cache. FDE stores the tenant/client identifiers, but never the token. |
 | AWS, Azure | the local CLI credential chain | your machine's existing `~/.aws` / `az login` session. FDE copies nothing. |
 | Context7, ProjectAtlas, OpenWiki, Serena, Playwright, Chrome DevTools | none | — |
 

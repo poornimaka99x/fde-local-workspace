@@ -28,9 +28,11 @@ import { registerConnectionRoutes } from './routes/connections'
 import { registerMcpRoutes } from './routes/mcp'
 import { registerCapabilityRoutes } from './routes/capabilities'
 import { registerSystemRoutes } from './routes/systems'
+import { registerRetentionRoutes } from './routes/retention'
 import { AccountService } from './services/accounts'
 import { ChatService } from './services/chats'
 import { DesignPanelService } from './services/design-panel'
+import { RetentionService } from './services/retention'
 
 const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -52,15 +54,21 @@ const MISSING_BUILD_PAGE = `<!doctype html><html lang="en"><head><meta charset="
 export function buildApp(config: GuiConfig, services?: Partial<Services>): FastifyInstance {
   const accounts = services?.accounts ?? new AccountService(config)
   const watcher = services?.watcher ?? new ChangeWatcher()
+  const locks = services?.locks ?? new AdvisoryLocks()
+  const sessions = services?.sessions ?? new SessionManager(null)
+  const designPanels = services?.designPanels ?? new DesignPanelService(config, accounts, watcher)
   const resolved: Services = {
-    locks: services?.locks ?? new AdvisoryLocks(),
+    locks,
     watcher,
     // No backend unless one is supplied: an installation without node-pty says
     // so rather than pretending it can open a terminal.
-    sessions: services?.sessions ?? new SessionManager(null),
+    sessions,
     accounts,
     chats: services?.chats ?? new ChatService(config, accounts),
-    designPanels: services?.designPanels ?? new DesignPanelService(config, accounts, watcher),
+    designPanels,
+    retention: services?.retention ?? new RetentionService(
+      config, locks, sessions, designPanels, watcher,
+    ),
   }
   resolved.watcher.start([config.runsRoot, config.projectsRoot])
   const app = Fastify({
@@ -122,6 +130,11 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
   registerRoutingRoutes(app, config, resolved)
   registerDesignPanelRoutes(app, resolved)
   registerSystemRoutes(app, config, resolved)
+  registerRetentionRoutes(app, resolved)
+
+  // Production starts the scheduler when the listener comes up. Unit callers
+  // that only build/ready the app remain deterministic.
+  app.addHook('onListen', async () => resolved.retention.start())
 
   // The terminal routes live inside their own plugin so the websocket support
   // is loaded before the route that needs it. Hooks from the root — headers,
@@ -141,6 +154,7 @@ export function buildApp(config: GuiConfig, services?: Partial<Services>): Fasti
     resolved.sessions.shutdown()
     resolved.chats.shutdown()
     resolved.designPanels.shutdown()
+    resolved.retention.stop()
   })
 
   const sendIndex = async (reply: FastifyReply): Promise<unknown> => {

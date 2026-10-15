@@ -527,6 +527,67 @@ class MutationProtection(unittest.TestCase):
         self.assertTrue(any("must say which approval" in p for p in problems), problems)
 
 
+class Microsoft365(unittest.TestCase):
+    """Official Microsoft 365 endpoints are OAuth, tenant and run scoped."""
+
+    def setUp(self):
+        self.catalog = mcp.Catalog.load(CATALOG)
+        self.server = self.catalog.get("microsoft365")
+
+    def test_it_is_run_scoped_never_global(self):
+        self.assertFalse(set(self.server["targets"]) & set(mcp.GLOBAL_TARGETS))
+        self.assertIn("role:review", self.server["targets"])
+        self.assertIn("review", self.server["stages"])
+        self.assertEqual(self.server["profiles"], ["client-delivery"])
+
+    def test_it_uses_the_official_work_iq_endpoint_through_a_pinned_oauth_adapter(self):
+        view = mcp.client_view("microsoft365", self.server, "claude",
+                               settings={"values": {
+                                   "tenantId": "tenant-guid", "clientId": "client-guid",
+                               }, "tools": {}})
+        self.assertIn(
+            "https://workiq.svc.cloud.microsoft/mcp",
+            view["args"])
+        self.assertIn('{"client_id":"client-guid"}', view["args"])
+        self.assertTrue(any(a.startswith("mcp-remote@") and
+                            not a.endswith("@latest") for a in view["args"]))
+
+    def test_work_iq_tools_have_explicit_scopes(self):
+        self.assertEqual(mcp.scope_of_tool("fetch", self.server), "read")
+        self.assertEqual(mcp.scope_of_tool("ask", self.server), "update")
+        self.assertEqual(mcp.scope_of_tool("list_agents", self.server), "search")
+        self.assertEqual(mcp.scope_of_tool("create_entity", self.server), "create")
+        self.assertEqual(mcp.scope_of_tool("do_action", self.server), "update")
+
+    def test_it_stays_inactive_until_a_tenant_is_chosen(self):
+        state, reason = mcp.server_state("microsoft365", self.server,
+                                         {"values": {}, "tools": {}}, {})
+        self.assertEqual(state, mcp.NOT_CONFIGURED)
+        self.assertIn("tenant", reason.lower())
+
+    def test_no_credential_is_stored_in_the_catalogue(self):
+        self.assertFalse(mcp.secret_fields(self.server))
+        self.assertEqual(self.server["auth"], "oauth")
+
+    def test_work_iq_exposes_only_verified_read_and_search_tools(self):
+        offered = [
+            "fetch", "retrieve", "list_agents", "ask", "get_schema", "search_paths",
+            "create_entity", "update_entity", "delete_entity", "do_action",
+        ]
+        health = {"microsoft365": {
+            "initialize": 200, "authenticated": True, "outcome": "ok",
+            "tools": [{"name": name} for name in offered],
+        }}
+        allowed = mcp.enforceable_tools(
+            "microsoft365", self.server,
+            {"values": {"tenantId": "tenant-guid", "clientId": "client-guid"},
+             "tools": {}}, health)
+        self.assertEqual(allowed, [
+            "fetch", "get_schema", "list_agents", "retrieve", "search_paths",
+        ])
+        self.assertEqual(self.server["mutationApproval"]["gate"], "denied")
+
+
 class Secrets(unittest.TestCase):
     """9, 10, 11 and 15. Referenced, injected, composed at launch, never stored."""
 

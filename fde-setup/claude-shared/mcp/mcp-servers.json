@@ -21,7 +21,7 @@
     "client-delivery": {
       "label": "Acme delivery",
       "description": "Requirements, delivery traceability and design context for client engagements.",
-      "servers": ["context7", "projectatlas", "openwiki", "atlassian", "figma"],
+      "servers": ["context7", "projectatlas", "openwiki", "atlassian", "figma", "microsoft365"],
       "docker": "client-delivery"
     },
     "data": {
@@ -616,6 +616,116 @@
       "doNotUseWhen": "The run has no design stage, or the question is answerable from the design system documentation already in the repository.",
       "gateway": { "docker": "client-delivery" },
       "note": "Official remote Figma MCP server. Run-scoped to the selected UI/UX designer, orchestrator or assigned reviewer after plan approval; OAuth remains in that provider's MCP client. Reading is allowed within the approved plan. Any canvas write or transfer of a reconciled design requires fde approve-publish <run-id> figma. Design-panel participants receive only the generated Figma and isolated Playwright MCP tool scope; built-in file and shell tools remain unavailable."
+    },
+
+    "microsoft365": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.15.1",
+        "https://workiq.svc.cloud.microsoft/mcp",
+        "8080",
+        "--host",
+        "127.0.0.1",
+        "--static-oauth-client-info",
+        "{\"client_id\":\"{{config.clientId}}\"}"
+      ],
+      "env": {},
+      "startupTimeoutSeconds": 120,
+      "clients": {},
+      "targets": [
+        "role:orchestrator",
+        "role:research",
+        "role:review"
+      ],
+      "stages": [
+        "intake",
+        "research",
+        "planning",
+        "review",
+        "publication"
+      ],
+      "profiles": [
+        "client-delivery"
+      ],
+      "requires": {
+        "executables": [
+          "npx"
+        ],
+        "setup": "Register a single-tenant public Entra client for the official Work IQ MCP server, grant only the required delegated Work IQ permissions and admin consent, and register http://127.0.0.1:8080/oauth/callback. Then configure tenantId and clientId here. Verification opens Microsoft sign-in; its OAuth cache belongs to mcp-remote, not FDE.",
+        "docsUrl": "https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/mcp/overview"
+      },
+      "package": {
+        "manager": "npm",
+        "name": "mcp-remote",
+        "version": "0.15.1",
+        "update": "change the pinned version in mcp-servers.json, then: mcp-sync"
+      },
+      "userConfig": [
+        {
+          "name": "tenantId",
+          "label": "Entra tenant id",
+          "required": true,
+          "type": "text",
+          "placeholder": "the Microsoft 365 tenant GUID",
+          "help": "Records the intended tenant for operator review. The Work IQ endpoint is shared; tenant binding is enforced by the single-tenant Entra app registration and Microsoft sign-in, not by this field."
+        },
+        {
+          "name": "clientId",
+          "label": "Entra app (client) id",
+          "required": true,
+          "type": "text",
+          "placeholder": "Application (client) ID",
+          "help": "A public-client Entra app approved for the official Work IQ MCP server. FDE stores the identifier, never the OAuth token."
+        }
+      ],
+      "allowTools": [
+        "^(fetch|fetch_blob|retrieve|list_agents|get_schema|search_paths|call_function)$"
+      ],
+      "denyTools": [
+        "^(ask|create_entity|update_entity|delete_entity|do_action)$"
+      ],
+      "scopes": {
+        "read": [
+          "^(fetch|fetch_blob|get_schema)$"
+        ],
+        "search": [
+          "^(retrieve|list_agents|search_paths|call_function)$"
+        ],
+        "create": [
+          "^create_entity$"
+        ],
+        "update": [
+          "^(ask|update_entity|do_action)$"
+        ],
+        "delete": [
+          "^delete_entity$"
+        ]
+      },
+      "auth": "oauth",
+      "classification": "tenant-data",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "mutationApproval": {
+        "gate": "denied",
+        "note": "FDE exposes only verified retrieval, schema and discovery tools. Agent invocation, entity mutations and actions remain unavailable."
+      },
+      "verify": {
+        "method": "tools/list",
+        "timeoutSeconds": 120
+      },
+      "useWhen": "Read Microsoft 365 entities, Teams chats, mail and files, retrieve grounding content, or discover available Microsoft 365 and Copilot Studio agents through the official Work IQ MCP server.",
+      "preferOver": [
+        "asking the operator to paste a Teams thread or email",
+        "ms-intake for content the tenant exposes through Graph"
+      ],
+      "doNotUseWhen": "Before plan approval, for any create/update/delete/action operation, or for content the signed-in account, licence or tenant policy does not expose.",
+      "gateway": {
+        "docker": "client-delivery"
+      },
+      "note": "Official Microsoft Work IQ remote MCP server, run-scoped to the orchestrator, researcher and assigned reviewers. Teams is read through entity paths such as /me/chats/{id}/messages, and list_agents discovers available Microsoft 365 and Copilot Studio agents. Only concrete tools discovered by verification and matching the read/search allowlist are exposed. ask, create_entity, update_entity, delete_entity and do_action remain denied because Microsoft's WorkIQAgent.Ask permission includes read and write access. mcp-remote is only a pinned stdio-to-HTTP OAuth adapter for FDE's three clients; Microsoft remains the MCP server and data provider. The delegated OAuth token is cached by the adapter outside FDE metadata, and FDE never copies it."
     },
 
     "dbhub": {

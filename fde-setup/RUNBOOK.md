@@ -312,6 +312,11 @@ pasting it again.
 
 ## Phase 5 — Microsoft Copilot, the automated path (a few days, mostly waiting)
 
+Microsoft 365, Teams and available agent access is the run-scoped `microsoft365`
+connector. It uses Microsoft's official Work IQ MCP endpoint; setup is in
+docs/MCP-GOVERNANCE.md. This phase covers a separately published Copilot Studio
+agent channel.
+
 Microsoft Copilot here means **Microsoft 365 Copilot / Copilot Studio**. GitHub
 Copilot is not part of this ecosystem; `ask-copilot` is a stub that says so and
 nothing here touches `~/.copilot`.

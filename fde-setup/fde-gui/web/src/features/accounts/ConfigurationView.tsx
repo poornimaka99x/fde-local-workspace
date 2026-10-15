@@ -3,9 +3,10 @@ import { AccountsView } from './AccountsView'
 import { ConnectionsView } from './ConnectionsView'
 import { McpCatalogView } from '../mcp/McpCatalogView'
 import { CapabilitiesView } from '../configuration/CapabilitiesView'
+import { RetentionView } from '../configuration/RetentionView'
 
 export function ConfigurationView(): JSX.Element {
-  const [tab, setTab] = useState<'accounts' | 'connections' | 'mcp' | 'capabilities'>('accounts')
+  const [tab, setTab] = useState<'accounts' | 'connections' | 'mcp' | 'capabilities' | 'retention'>('accounts')
   return <section className="settings-shell">
     <header className="settings-header"><p className="eyebrow">Workspace administration</p><h1>Configuration</h1>
       <p className="lede">Manage AI identities, external services, MCP servers, and the skills, sub-agents and plugins that make up the FLOW harness.</p></header>
@@ -18,12 +19,14 @@ export function ConfigurationView(): JSX.Element {
           exactly the distinction the catalogue exists to keep. */}
       <button role="tab" aria-selected={tab === 'mcp'} onClick={() => setTab('mcp')}>MCP servers<span>Catalogue, readiness and tool scope</span></button>
       <button role="tab" aria-selected={tab === 'capabilities'} onClick={() => setTab('capabilities')}>Capabilities<span>Skills, sub-agents, tools and plugins</span></button>
+      <button role="tab" aria-selected={tab === 'retention'} onClick={() => setTab('retention')}>Retention<span>Automatic cleanup of completed conversations</span></button>
     </div>
     <div className="settings-panel" role="tabpanel">
       {tab === 'accounts' ? <AccountsView />
         : tab === 'connections' ? <ConnectionsView />
           : tab === 'mcp' ? <McpCatalogView />
-            : <CapabilitiesView />}
+            : tab === 'capabilities' ? <CapabilitiesView />
+              : <RetentionView />}
     </div>
   </section>
 }

@@ -4,6 +4,7 @@ import type { ChatService } from './chats'
 import type { DesignPanelService } from './design-panel'
 import type { SessionManager } from './sessions'
 import type { ChangeWatcher } from './watch'
+import type { RetentionService } from './retention'
 
 export interface Services {
   locks: AdvisoryLocks
@@ -12,4 +13,5 @@ export interface Services {
   accounts: AccountService
   chats: ChatService
   designPanels: DesignPanelService
+  retention: RetentionService
 }
