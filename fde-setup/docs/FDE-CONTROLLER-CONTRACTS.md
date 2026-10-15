@@ -226,6 +226,26 @@ them to the same Claude conversation. Omitting them records `default` and
 `auto`. A GUI must validate model identifiers and effort values before passing
 them to the controller.
 
+### Working folder
+
+`fde start --workdir <folder>` records `workingDir` in the manifest: the folder
+the orchestrator session starts in. It must be an absolute, existing directory;
+it is resolved through symlinks, and `/` or the home folder itself is refused
+(Claude scans the folder it starts in, and a folder that broad exhausts file
+descriptors). A run without one has no `workingDir` key, exactly as before.
+
+`fde workdir <run-id> [<folder> | --clear] [--json]` shows, sets or clears it and
+appends `workdir.set` with `path` and `previous`. It is an operator decision: a
+process carrying `FDE_RUN_ID` (an orchestrator session) is refused with exit 6.
+The run summary and `fde status --json` carry `workingDir` (or `null`; a
+recorded value that is not an absolute string is ignored).
+
+`fde-start` changes into `workingDir` before launching Claude and refuses (exit
+2) when it no longer exists. When the folder changed after a conversation was
+recorded, it copies that transcript into Claude's project directory for the new
+folder so `--resume` still finds it. The console starts its session there too,
+falling back to the project's first repository only when none is recorded.
+
 ## Containment rules every reader can rely on
 
 - **A run id is a name, not a path.** Separators, `.` and `..` are refused with

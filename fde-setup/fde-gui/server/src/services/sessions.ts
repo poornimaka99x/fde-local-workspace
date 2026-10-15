@@ -384,7 +384,8 @@ export function sessionEnv(config: GuiConfig): NodeJS.ProcessEnv {
 }
 
 /**
- * Where the session runs: the project's first configured repository, or the
+ * Where the session runs: the first usable candidate (the run's working folder,
+ * then the project's repositories), or the
  * server's own safe directory when the run has no project or the path is not a
  * usable directory.
  */

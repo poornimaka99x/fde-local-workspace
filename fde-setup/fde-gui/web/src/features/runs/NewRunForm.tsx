@@ -9,6 +9,7 @@ import type {
   RunSummary,
 } from '../../lib/types'
 import { ErrorState } from '../../components/States'
+import { PathBrowser } from '../../components/PathBrowser'
 import { ClaudeSettings } from '../../components/ClaudeSettings'
 import type { ClaudeEffort } from '../../lib/types'
 import { RoutingPreview } from './RoutingPreview'
@@ -43,6 +44,8 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
   const routingPolicy = useApi<RoutingPolicyResponse>('/api/routing/policy')
   const [project, setProject] = useState(projectId ?? '')
   const [requirement, setRequirement] = useState('')
+  const [workingDir, setWorkingDir] = useState('')
+  const [browsingFolder, setBrowsingFolder] = useState(false)
   const [orchestrator, setOrchestrator] = useState('work')
   const [model, setModel] = useState('default')
   const [effort, setEffort] = useState<ClaudeEffort>('auto')
@@ -75,6 +78,11 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
   // Until the account list has loaded there is no answer, and guessing "not
   // Codex" would send the operator to a session a Codex-led run cannot have.
   const providerKnown = selectedAccount !== null || accounts.error !== null
+  const projectRepos = (projects.data?.projects ?? [])
+    .find((option) => option.projectId === project)?.repoPaths ?? []
+  // A Claude session starts in this folder and scans it, so it is chosen for
+  // every run a console session will open. Codex-led runs are driven elsewhere.
+  const folderRequired = !codexLed
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -87,6 +95,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
       if (project !== '') body.projectId = project
       if (requirement.trim() !== '') body.requirement = requirement.trim()
       if (shape.trim() !== '') body.shape = shape.trim()
+      if (workingDir !== '') body.workingDir = workingDir
       const created = await apiSend<{ run: RunSummary }>('/api/runs', 'POST', body)
       announceChange()
       const destination = shape.trim() === 'design-panel'
@@ -132,6 +141,43 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
             </select>
           </label>
         </p>
+        <p>
+          <strong>Working folder</strong>{' '}
+          <span className="muted">
+            the folder this run works in — pick the specific project, not a parent of many
+          </span>
+          <br />
+          <span className="stack" style={{ alignItems: 'center' }}>
+            <code className="mono" data-testid="working-folder">
+              {workingDir !== '' ? workingDir : <span className="muted">none chosen</span>}
+            </code>
+            <button className="action" type="button" onClick={() => setBrowsingFolder(true)}>
+              {workingDir === '' ? 'Choose folder…' : 'Change…'}
+            </button>
+            {workingDir !== '' && !folderRequired ? (
+              <button className="action" type="button" onClick={() => setWorkingDir('')}>
+                Clear
+              </button>
+            ) : null}
+          </span>
+          {projectRepos.length > 0 && workingDir === '' ? (
+            <span className="muted">
+              {' '}The browser opens at this project&apos;s repository: {projectRepos[0]}
+            </span>
+          ) : null}
+        </p>
+        {browsingFolder ? (
+          <PathBrowser
+            title="Choose the folder this run works in"
+            mode="directory"
+            startPath={workingDir !== '' ? workingDir : projectRepos[0]}
+            onSelect={(picked) => {
+              setWorkingDir(picked)
+              setBrowsingFolder(false)
+            }}
+            onClose={() => setBrowsingFolder(false)}
+          />
+        ) : null}
         <p>
           <label>
             <strong>What do you want done?</strong>{' '}
@@ -269,7 +315,10 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
           <button
             className="action primary"
             type="submit"
-            disabled={saving || requirement.trim() === '' || !policyKnown}
+            disabled={
+              saving || requirement.trim() === '' || !policyKnown
+              || (folderRequired && workingDir === '')
+            }
           >
             {saving ? 'Creating…' : 'Create run'}
           </button>

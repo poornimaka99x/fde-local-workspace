@@ -88,6 +88,13 @@ const createRunBody = z
       .string()
       .regex(/^[a-z][a-z-]{0,40}(\+[a-z][a-z-]{0,40}){0,4}$/, 'not a named shape')
       .optional(),
+    // The folder the orchestrator session starts in. The controller resolves
+    // it and refuses a missing one, / or the home folder itself.
+    workingDir: z
+  .string()
+  .max(4096)
+  .refine((value) => path.isAbsolute(value) && !value.includes('\0'), 'an absolute folder path')
+      .optional(),
   })
   .refine(
     (body) => body.routing !== 'auto' || (body.model === undefined && body.effort === undefined),
@@ -100,6 +107,14 @@ const createRunBody = z
 
 const uploadQuery = z.object({
   name: line(255).pipe(z.string().min(1, 'an original filename is required')),
+})
+
+const workingDirBody = z.object({
+  workingDir: z
+  .string()
+  .max(4096)
+  .refine((value) => path.isAbsolute(value) && !value.includes('\0'), 'an absolute folder path')
+    .nullable(),
 })
 
 const switchOrchestratorBody = z.object({
@@ -353,6 +368,7 @@ export function registerRunRoutes(
       }
       if (parsed.data.projectId !== undefined) args.push('--project', parsed.data.projectId)
       if (parsed.data.shape !== undefined) args.push('--shape', parsed.data.shape)
+      if (parsed.data.workingDir !== undefined) args.push('--workdir', parsed.data.workingDir)
       // Everything after `--` is the ask, so a requirement that starts with a
       // dash is text and never a flag.
       if (parsed.data.requirement !== undefined && parsed.data.requirement.trim() !== '') {
@@ -365,6 +381,42 @@ export function registerRunRoutes(
       release()
     }
   })
+
+  // Choose, change or clear the folder a run's orchestrator session starts in.
+  // Never while that session is running: the process already has its cwd, and
+  // the change would silently apply only to the next start.
+  app.put<{ Params: { runId: string } }>(
+    '/api/runs/:runId/workdir',
+    async (request, reply) => {
+      const { runId } = request.params
+      if (!requireRunId(runId)) {
+        return problem(reply, 400, 'invalid-run-id', 'That is not a valid run id.')
+      }
+      const parsed = workingDirBody.safeParse(request.body)
+      if (!parsed.success) {
+        return problem(reply, 400, 'invalid-body', 'Choose an absolute folder, or clear it.',
+          describeZod(parsed.error))
+      }
+      const releaseSession = services.locks.tryAcquire(`session:${runId}`)
+      if (releaseSession === null) {
+        return problem(reply, 409, 'busy', 'This run is starting or changing its console session.')
+      }
+      try {
+        if (services.sessions.isRunning(runId)) {
+          return problem(reply, 409, 'session-active',
+            'Stop the orchestrator session before changing its working folder.')
+        }
+        const args = parsed.data.workingDir === null
+          ? ['workdir', runId, '--clear', '--json']
+          : ['workdir', runId, parsed.data.workingDir, '--json']
+        const result = await runControllerJson(config, args)
+        services.watcher.touch()
+        return result
+      } finally {
+        releaseSession()
+      }
+    },
+  )
 
   app.post<{ Params: { runId: string } }>(
     '/api/runs/:runId/orchestrator',

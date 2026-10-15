@@ -140,6 +140,45 @@ describe('the session panel', () => {
     expect(screen.getByText(/will not invent a resume path/)).toBeInTheDocument()
   })
 
+  it('shows the working folder and changes it through the controller while stopped', async () => {
+    const put: { url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const json = (body: unknown): Response => new Response(JSON.stringify(body), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+      if (init?.method === 'PUT') {
+        put.push({ url, body: typeof init.body === 'string' ? JSON.parse(init.body) : null })
+        return json({ schemaVersion: 1, workingDir: '/home/op/diy', changed: true })
+      }
+      if (url.startsWith('/api/fs/browse')) {
+        return json({ path: '/home/op/diy', parent: '/home/op', entries: [], truncated: false })
+      }
+      return json({ available: true, session: null })
+    }))
+    const changed = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <SessionPanel
+        run={runFixture({
+          project: { projectId: 'p', name: 'P', repoPaths: ['/home/op/Documents/Personal'] },
+        })}
+        onRunChanged={changed}
+      />,
+    )
+    expect(await screen.findByTestId('session-working-folder'))
+      .toHaveTextContent('starts in the project folder /home/op/Documents/Personal')
+    await user.click(screen.getByRole('button', { name: 'Choose folder…' }))
+    await user.click(await screen.findByRole('button', { name: /Use this folder/ }))
+    await waitFor(() => expect(put).toHaveLength(1))
+    expect(put[0]).toEqual({
+      url: '/api/runs/20260903-acme-1-aaaa/workdir',
+      body: { workingDir: '/home/op/diy' },
+    })
+    expect(changed).toHaveBeenCalled()
+    expect(await screen.findByText(/next session starts in \/home\/op\/diy/)).toBeInTheDocument()
+  })
+
   it('says so plainly when the installation has no terminal backend', async () => {
     stubFetch({ available: false, session: null })
     render(<SessionPanel run={runFixture()} />)

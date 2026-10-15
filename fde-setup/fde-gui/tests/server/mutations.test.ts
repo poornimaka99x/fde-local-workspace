@@ -263,6 +263,57 @@ describe('safe mutations', () => {
     ])
   })
 
+  it('passes the chosen working folder to the controller, and refuses a relative one', async () => {
+    const response = await post('/api/runs', {
+      requirement: 'tidy the assignment',
+      orchestrator: 'work',
+      workingDir: '/Users/me/Documents/Personal/Assignments/diy',
+    })
+    expect(response.statusCode).toBe(201)
+    const call = harness.calls()[0] ?? []
+    const at = call.indexOf('--workdir')
+    expect(call[at + 1]).toBe('/Users/me/Documents/Personal/Assignments/diy')
+    expect(at).toBeLessThan(call.indexOf('--'))
+
+    const relative = await post('/api/runs', {
+      requirement: 'x', orchestrator: 'work', workingDir: 'Documents/Personal',
+    })
+    expect(relative.statusCode).toBe(400)
+    expect(harness.calls()).toHaveLength(1)
+  })
+
+  it('sets and clears a run\'s working folder through the controller only', async () => {
+    harness.fixture(`workdir-${RUN}-_srv_diy`, {
+      schemaVersion: 1, runId: RUN, workingDir: '/srv/diy', previous: null, changed: true,
+    })
+    harness.fixture(`workdir-${RUN}`, {
+      schemaVersion: 1, runId: RUN, workingDir: null, previous: '/srv/diy', changed: true,
+    })
+    const put = async (payload: unknown) => harness.app.inject({
+      method: 'PUT',
+      url: `/api/runs/${RUN}/workdir`,
+      headers: mutating(harness.token),
+      payload: payload as object,
+    })
+    const set = await put({ workingDir: '/srv/diy' })
+    expect(set.statusCode).toBe(200)
+    expect(set.json().workingDir).toBe('/srv/diy')
+    const cleared = await put({ workingDir: null })
+    expect(cleared.statusCode).toBe(200)
+    expect(harness.calls()).toEqual([
+      ['workdir', RUN, '/srv/diy', '--json'],
+      ['workdir', RUN, '--clear', '--json'],
+    ])
+    const bad = await put({ workingDir: 'relative' })
+    expect(bad.statusCode).toBe(400)
+    const traversal = await harness.app.inject({
+      method: 'PUT', url: '/api/runs/..%2Fetc/workdir',
+      headers: mutating(harness.token), payload: { workingDir: '/srv' },
+    })
+    expect(traversal.statusCode).toBe(400)
+    expect(harness.calls()).toHaveLength(2)
+  })
+
   it('treats a requirement that starts with a dash as text, not a flag', async () => {
     const response = await post('/api/runs', {
       requirement: '--dangerously-do-something',

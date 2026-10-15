@@ -62,6 +62,15 @@ class FdeStartTest(unittest.TestCase):
         self.stub.write_text(textwrap.dedent(r"""
             #!/usr/bin/env bash
             set -euo pipefail
+            if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+              if [[ "${FDE_TEST_AUTH_FAIL:-0}" == "1" ]]; then
+                printf '{"loggedIn":false}\n'
+                exit 1
+              fi
+              [[ "${FDE_TEST_AUTH_UNREADABLE:-0}" == "1" ]] && exit 1
+              printf '{"loggedIn":true}\n'
+              exit 0
+            fi
             count=0
             [[ -f "$FDE_TEST_COUNT" ]] && count=$(cat "$FDE_TEST_COUNT")
             count=$((count + 1))
@@ -192,6 +201,70 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("controller already has this run's request", log)
         self.assertIn("Do not ask me to repeat or re-record the request", log)
         self.assertNotIn("Hold an interactive scoping conversation. Ask for my request", log)
+
+    def test_signed_out_profile_is_refused_before_session_pointer_is_created(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+            "FDE_TEST_AUTH_FAIL": "1",
+        })
+        created = subprocess.run(
+            [str(FDE), "start", "design a prototype", "--orchestrator", "work",
+             "--json"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        run_dir = self.shared / "runs" / run_id
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("is not signed in to Claude", result.stderr)
+        self.assertIn(f"fde accounts login claude_work", result.stderr)
+        self.assertIn(f"fde-start --resume {run_id}", result.stderr)
+        self.assertFalse((run_dir / "orchestrator-session-id").exists())
+        self.assertFalse(self.log.exists())
+
+    def test_unreadable_auth_probe_does_not_claim_the_profile_is_signed_out(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+            "FDE_TEST_AUTH_UNREADABLE": "1",
+        })
+        created = subprocess.run(
+            [str(FDE), "start", "design a prototype", "--orchestrator", "work",
+             "--json"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("is not signed in", result.stderr)
+        self.assertTrue((self.shared / "runs" / run_id / "orchestrator-session-id").exists())
 
     def test_resume_asks_for_an_orchestrator_when_a_follow_up_run_has_none(self):
         env = dict(os.environ)
@@ -426,6 +499,81 @@ class FdeStartTest(unittest.TestCase):
         self.assertNotIn("RAN_AS=" + str(self.profiles / "work"), log)
         copied = list((self.profiles).glob(f"*/projects/*/{sid}.jsonl"))
         self.assertGreaterEqual(len(copied), 2)  # old and new profile both hold it
+
+
+    def _workdir_env(self):
+        env = dict(os.environ)
+        env.update({
+            "HOME": str(self.home),
+            "CLAUDE_SHARED": str(self.shared),
+            "CLAUDE_PROFILES_DIR": str(self.profiles),
+            "FDE_RUNS_DIR": str(self.shared / "runs"),
+            "FDE_CONTROLLER": str(FDE),
+            "FDE_MCP_SYNC": str(self.shared / "bin/mcp-sync"),
+            "FDE_CLAUDE_BIN": str(self.stub),
+            "FDE_TEST_LOG": str(self.log),
+            "FDE_TEST_COUNT": str(self.count),
+        })
+        env.pop("FDE_RUN_ID", None)
+        return env
+
+    def test_resume_starts_claude_in_the_runs_working_folder(self):
+        env = self._workdir_env()
+        folder = (self.root / "assignments" / "diy").resolve()
+        folder.mkdir(parents=True)
+        created = subprocess.run(
+            [str(FDE), "start", "--json", "--orchestrator", "work",
+             "--workdir", str(folder), "--", "tidy the assignment"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        # A conversation recorded while the session ran somewhere broader.
+        sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        (self.shared / "runs" / run_id / "orchestrator-session-id").write_text(sid + "\n")
+        old = self.profiles / "work" / "projects" / "-old-broad-folder"
+        old.mkdir(parents=True)
+        (old / f"{sid}.jsonl").write_text('{"type":"user"}\n')
+        (old / sid).mkdir()
+        self.stub.write_text(textwrap.dedent(r"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'PWD=%s\n' "$PWD" >> "$FDE_TEST_LOG"
+            printf 'NOFILE=%s\n' "$(ulimit -Sn)" >> "$FDE_TEST_LOG"
+            printf 'ARG=%s\n' "$@" >> "$FDE_TEST_LOG"
+        """).lstrip("\n"))
+        self.stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env, cwd=str(self.root),
+        )
+        log = self.log.read_text()
+        self.assertIn(f"PWD={folder}", log, msg=result.stdout + result.stderr)
+        self.assertIn("ARG=--resume", log)
+        slug = "".join(c if c.isalnum() and c.isascii() else "-" for c in str(folder))
+        moved = self.profiles / "work" / "projects" / slug / f"{sid}.jsonl"
+        self.assertTrue(moved.is_file(), msg=result.stdout + result.stderr)
+        self.assertTrue((moved.parent / sid).is_dir())
+        self.assertFalse((old / f"{sid}.jsonl").exists())
+
+    def test_resume_refuses_a_working_folder_that_has_gone(self):
+        env = self._workdir_env()
+        folder = (self.root / "gone").resolve()
+        folder.mkdir()
+        created = subprocess.run(
+            [str(FDE), "start", "--json", "--orchestrator", "work",
+             "--workdir", str(folder), "--", "x"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        folder.rmdir()
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("working folder is missing", result.stderr)
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":

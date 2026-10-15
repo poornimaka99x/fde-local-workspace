@@ -127,7 +127,11 @@ export function registerSessionRoutes(
         return problem(reply, 409, 'busy', 'This run is already starting a session.')
       }
       try {
-        const repoPaths = status.project?.repoPaths ?? []
+        // The run's own working folder first; fde-start changes into it too.
+        const repoPaths = [
+          ...(status.workingDir ? [status.workingDir] : []),
+          ...(status.project?.repoPaths ?? []),
+        ]
         const view = sessions.start({
           runId,
           startBin: config.fdeStartBin,

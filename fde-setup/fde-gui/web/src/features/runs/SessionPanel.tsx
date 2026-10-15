@@ -11,6 +11,7 @@ import type {
   SessionState,
 } from '../../lib/types'
 import { ErrorState } from '../../components/States'
+import { PathBrowser } from '../../components/PathBrowser'
 import { TerminalView, type TerminalHandle } from '../../components/TerminalView'
 
 interface ResumeResult {
@@ -59,6 +60,9 @@ export function SessionPanel({
   const [switchAccount, setSwitchAccount] = useState('')
   const [switching, setSwitching] = useState(false)
   const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  const [browsingFolder, setBrowsingFolder] = useState(false)
+  const [savingFolder, setSavingFolder] = useState(false)
+  const [folderNotice, setFolderNotice] = useState<string | null>(null)
   const accounts = useApi<ClaudeAccountsResponse>('/api/claude/accounts')
 
   const socket = useRef<WebSocket | null>(null)
@@ -203,6 +207,30 @@ export function SessionPanel({
       && account.id !== run.session.profile,
   )
 
+  const workingDir = run.workingDir ?? null
+  const fallbackFolder = run.project?.repoPaths?.[0] ?? null
+
+  const saveFolder = async (picked: string | null): Promise<void> => {
+    setBrowsingFolder(false)
+    setSavingFolder(true)
+    setError(null)
+    setFolderNotice(null)
+    try {
+      await apiSend(`/api/runs/${encodeURIComponent(run.runId)}/workdir`, 'PUT', { workingDir: picked })
+      setFolderNotice(
+        picked === null
+          ? 'Working folder cleared.'
+          : `The next session starts in ${picked}. The same conversation continues there.`,
+      )
+      onRunChanged()
+      announceChange()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError(0, 'network', 'Could not reach the local server.'))
+    } finally {
+      setSavingFolder(false)
+    }
+  }
+
   const switchOrchestrator = async (): Promise<void> => {
     const account = switchCandidates.find((candidate) => candidate.id === switchAccount)
     if (account === undefined) return
@@ -266,6 +294,30 @@ export function SessionPanel({
               </td>
             </tr>
             <tr>
+              <th scope="row">Working folder</th>
+              <td>
+                <span className="stack" style={{ alignItems: 'center' }}>
+                  {workingDir !== null ? (
+                    <code className="mono" data-testid="session-working-folder">{workingDir}</code>
+                  ) : (
+                    <span className="muted" data-testid="session-working-folder">
+                      not chosen
+                      {fallbackFolder !== null ? ` — starts in the project folder ${fallbackFolder}` : ''}
+                    </span>
+                  )}
+                  <button
+                    className="action"
+                    type="button"
+                    disabled={running || savingFolder}
+                    title={running ? 'Stop the session before changing its folder' : undefined}
+                    onClick={() => setBrowsingFolder(true)}
+                  >
+                    {savingFolder ? 'Saving…' : workingDir === null ? 'Choose folder…' : 'Change…'}
+                  </button>
+                </span>
+              </td>
+            </tr>
+            <tr>
               <th scope="row">Resumable</th>
               <td>
                 <span className={`badge ${resumable ? 'ok' : ''}`}>{resumable ? 'yes' : 'no'}</span>
@@ -277,6 +329,16 @@ export function SessionPanel({
 
         {error ? <ErrorState error={error} /> : null}
         {switchNotice ? <p className="banner ok" role="status">{switchNotice}</p> : null}
+        {folderNotice ? <p className="banner ok" role="status">{folderNotice}</p> : null}
+        {browsingFolder ? (
+          <PathBrowser
+            title="Choose the folder this run works in"
+            mode="directory"
+            startPath={workingDir ?? fallbackFolder ?? undefined}
+            onSelect={(picked) => void saveFolder(picked)}
+            onClose={() => setBrowsingFolder(false)}
+          />
+        ) : null}
 
         {unassigned && session === null ? (
           <div className="stack">

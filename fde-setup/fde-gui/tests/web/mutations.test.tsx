@@ -19,6 +19,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+
+async function chooseFolder(user: { click: (element: Element) => Promise<void> }): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }))
+  await user.click(await screen.findByRole('button', { name: /Use this folder/ }))
+  await waitFor(() => expect(screen.getByTestId('working-folder')).toHaveTextContent('/home/op/diy'))
+}
+
 describe('creating and editing through the controller', () => {
   const sent: Sent[] = []
 
@@ -118,7 +125,9 @@ describe('creating and editing through the controller', () => {
 
   it('falls back to manual selection when automatic routing is unavailable', async () => {
     stubFetch((url, init) =>
-      url === '/api/claude/accounts'
+      url.startsWith('/api/fs/browse')
+        ? jsonResponse({ path: '/home/op/diy', parent: '/home/op', entries: [], truncated: false })
+        : url === '/api/claude/accounts'
         ? jsonResponse(accountsResponse)
         : init?.method === 'POST'
         ? jsonResponse({ schemaVersion: 1, run: { runId: '20260903-acme-1-aaaa' } }, 201)
@@ -139,6 +148,8 @@ describe('creating and editing through the controller', () => {
     await user.selectOptions(screen.getByLabelText(/Model/), 'sonnet')
     await user.selectOptions(screen.getByLabelText(/Effort/), 'high')
     await user.type(screen.getByLabelText(/Named shape/), 'research')
+    expect(screen.getByRole('button', { name: 'Create run' })).toBeDisabled()
+    await chooseFolder(user)
     await user.click(screen.getByRole('button', { name: 'Create run' }))
 
     await waitFor(() => expect(sent).toHaveLength(1))
@@ -152,6 +163,7 @@ describe('creating and editing through the controller', () => {
       projectId: 'returns-a1b2',
       requirement: 'ACME-1 returns research',
       shape: 'research',
+      workingDir: '/home/op/diy',
     })
     expect(JSON.stringify(sent[0]?.body)).not.toContain('role')
     expect(JSON.stringify(sent[0]?.body)).not.toContain('approve')

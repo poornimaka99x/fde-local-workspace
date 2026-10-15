@@ -21,6 +21,7 @@ export interface RunSummary {
   state: string | null
   blockedFrom?: string | null
   projectId: string | null
+  workingDir?: string | null
   requirement: string | null
   jiraKey?: string | null
   createdAt?: string | null
@@ -146,6 +147,7 @@ export interface RunStatus {
   blockedFrom: string | null
   projectId: string | null
   project: { projectId: string; name: string | null; repoPaths: string[] } | null
+  workingDir?: string | null
   requirement: { summary: string | null; jiraKey: string | null; hasFile: boolean; path: string | null }
   plan: Record<string, unknown> | null
   planLine: string | null

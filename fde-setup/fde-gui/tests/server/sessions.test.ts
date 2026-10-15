@@ -79,6 +79,31 @@ describe('resume sessions', () => {
     expect(body.session.command).toEqual([harness.config.fdeStartBin, '--resume', RUN])
   })
 
+  it('starts in the run\'s own working folder before the project\'s repository', async () => {
+    const folder = harness.runsRoot
+    harness.fixture(`status-${RUN}`, {
+      ...statusFixture(RUN),
+      workingDir: folder,
+      project: { projectId: 'returns-a1b2', name: 'Returns', repoPaths: [harness.root] },
+    })
+    const response = await resume(RUN)
+    expect(response.statusCode).toBe(201)
+    expect(FakeTerminal.spawned[0]?.options.cwd).toBe(folder)
+  })
+
+  it('refuses to change the working folder while the session runs', async () => {
+    await resume(RUN)
+    const response = await harness.app.inject({
+      method: 'PUT',
+      url: `/api/runs/${RUN}/workdir`,
+      headers: mutating(harness.token),
+      payload: { workingDir: '/srv/elsewhere' },
+    })
+    expect(response.statusCode).toBe(409)
+    expect(response.json().code ?? response.json().type).toBeDefined()
+    expect(harness.calls().some((call) => call[0] === 'workdir')).toBe(false)
+  })
+
   it('hands the session only the environment a FLOW profile needs', async () => {
     await resume(RUN)
     const env = FakeTerminal.spawned[0]?.options.env ?? {}

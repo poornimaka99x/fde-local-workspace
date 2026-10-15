@@ -3410,7 +3410,8 @@ def run_output_hygiene(run: Run, *, apply=True, service_url=None, trigger="manua
 
 
 def new_run(requirement: str = "", project_id=None, model=None, effort=None,
-            routing_mode="manual", routing_strategy=None, artifact_profile=None) -> Run:
+            routing_mode="manual", routing_strategy=None, artifact_profile=None,
+            working_dir=None) -> Run:
     key = (requirement or "").strip()
     m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
     jira_key = m.group(1) if m else None
@@ -3448,6 +3449,10 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None,
         # Only present when a profile was selected, so a run without one is
         # recorded exactly as before.
         **({"artifactProfile": artifact_profile} if artifact_profile else {}),
+        # The folder the orchestrator session starts in. Only present when one
+        # was chosen; without it fde-start keeps the caller's directory and the
+        # console keeps the project's first repository, exactly as before.
+        **({"workingDir": working_dir} if working_dir else {}),
     })
     r = Run(stem)
     if key:
@@ -3457,6 +3462,8 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None,
             routingMode=routing_mode, routingStrategy=routing_strategy)
     if project_id:
         project_event(project_id, "run.created", runId=stem)
+    if working_dir:
+        r.event("workdir.set", path=working_dir, previous=None)
     if artifact_profile:
         # Selecting the profile enables its skill for this run through the same
         # run-scoped override an operator would set, and nothing else.
@@ -3672,6 +3679,36 @@ def resolve_repo_paths(values):
         if text not in out:
             out.append(text)
     return out
+
+
+def resolve_working_dir(raw):
+    """One absolute, symlink-resolved, existing directory for a run's session.
+
+    A filesystem root or the bare home directory is refused: Claude scans the
+    folder it starts in, and a folder that broad exhausts file descriptors and
+    exposes far more than the run is about."""
+    raw = (raw or "").strip()
+    if not raw or "\0" in raw:
+        die("give the folder this run should work in", 2)
+    candidate = pathlib.Path(raw).expanduser()
+    if not candidate.is_absolute():
+        die(f"working folder must be an absolute path: {raw}", 2)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        die(f"working folder does not exist: {raw}", 2)
+    if not resolved.is_dir():
+        die(f"working folder is not a directory: {resolved}", 2)
+    if resolved == pathlib.Path(resolved.anchor) or resolved == HOME.resolve():
+        die(f"working folder is too broad: {resolved}. Choose the project's own folder.", 2)
+    return str(resolved)
+
+
+def run_working_dir(manifest):
+    """The recorded working folder, or None. Data, never trusted as a path
+    unless it is an absolute string."""
+    value = (manifest or {}).get("workingDir")
+    return value if isinstance(value, str) and os.path.isabs(value) else None
 
 
 def new_project(name, description="", repos=(), artifact_profile=None):
@@ -4248,6 +4285,7 @@ def run_summary(run_dir: pathlib.Path, manifest, agents):
         "state": manifest.get("state"),
         "blockedFrom": manifest.get("blockedFrom"),
         "projectId": manifest.get("projectId"),
+        "workingDir": run_working_dir(manifest),
         "requirement": manifest.get("requirement") or None,
         "jiraKey": manifest.get("jiraKey"),
         "createdAt": manifest.get("createdAt"),
@@ -4437,6 +4475,7 @@ def status_payload(run: Run, agents, events_limit=50, events_cursor=None):
         "blockedFrom": manifest.get("blockedFrom"),
         "projectId": project_id,
         "project": project,
+        "workingDir": run_working_dir(manifest),
         "requirement": {
             "summary": manifest.get("requirement") or None,
             "jiraKey": manifest.get("jiraKey"),
@@ -5247,13 +5286,18 @@ def _start(args):
     given_profile = getattr(args, "artifact_profile", None)
     profile = (artifact_profile_arg(given_profile) if given_profile is not None
                else (project or {}).get("artifactProfile"))
+    workdir_arg = getattr(args, "workdir", None)
+    working_dir = resolve_working_dir(workdir_arg) if workdir_arg else None
     run = new_run(req, project_id=project["projectId"] if project else None,
                   model=model, effort=effort, routing_mode=routing_mode,
-                  routing_strategy=strategy, artifact_profile=profile)
+                  routing_strategy=strategy, artifact_profile=profile,
+                  working_dir=working_dir)
     print(f"run    {run.id}")
     if project:
         print(f"project {project['projectId']}  ({project.get('name')})")
     print(f"dir    {run.dir}")
+    if working_dir:
+        print(f"folder {working_dir}")
     if profile:
         print(f"profile {profile}  (feature documents: fde features scaffold {run.id} …)")
     print(f"state  awaiting_orchestrator\n")
@@ -5352,6 +5396,45 @@ def cmd_orchestrator(args):
             "Pass --reassign to change it.", 5)
     return _set_orchestrator(run, args.identity, shape=args.shape,
                              limit_fallback=bool(getattr(args, "limit_fallback", False)))
+
+
+def cmd_workdir(args):
+    """Show, set or clear the folder this run's orchestrator session starts in.
+
+    An operator decision: a running orchestrator session (FDE_RUN_ID set) may
+    not move itself. Changing it never touches the folder's contents."""
+    run = Run(args.run_id)
+    manifest = run.manifest()
+    current = run_working_dir(manifest)
+    if args.path is None and not args.clear:
+        if args.json:
+            return emit_json({"schemaVersion": SCHEMA_VERSION, "runId": run.id,
+                              "workingDir": current})
+        print(current or "(not set)")
+        return 0
+    if os.environ.get("FDE_RUN_ID", "").strip():
+        die("the working folder is the operator's choice; an orchestrator session "
+            "cannot change it. Change it in the FDE console (Session tab) or from a "
+            f"terminal: fde workdir {run.id} <folder>", 6)
+    if args.clear and args.path is not None:
+        die("give a folder or --clear, not both", 2)
+    new = None if args.clear else resolve_working_dir(args.path)
+    if new == current:
+        changed = False
+    else:
+        changed = True
+        if new:
+            manifest["workingDir"] = new
+        else:
+            manifest.pop("workingDir", None)
+        run.save_manifest(manifest)
+        run.event("workdir.set", path=new, previous=current)
+    if args.json:
+        return emit_json({"schemaVersion": SCHEMA_VERSION, "runId": run.id,
+                          "workingDir": new, "previous": current, "changed": changed})
+    print(f"run    {run.id}")
+    print(f"folder {new or '(not set)'}" + ("" if changed else "  (unchanged)"))
+    return 0
 
 
 def cmd_request(args):
@@ -14890,9 +14973,19 @@ def main(argv=None):
                    choices=list(fde_feature_specs.PROFILES) + ["none"],
                    help="optional artifact profile; defaults to the project's. "
                         "feature-specs drafts spec/plan/tasks/verification documents")
+    s.add_argument("--workdir", metavar="FOLDER",
+                   help="the folder the orchestrator session starts in (absolute, "
+                        "existing; not / or your home folder)")
     s.add_argument("--json", action="store_true",
                    help="print the created run as JSON; narration goes to stderr")
     s.set_defaults(fn=cmd_start)
+
+    s = sub.add_parser("workdir", help="show, set or clear the folder a run's session starts in")
+    s.add_argument("run_id")
+    s.add_argument("path", nargs="?")
+    s.add_argument("--clear", action="store_true")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_workdir)
 
     s = sub.add_parser("delete", help="move a run and all its records to recoverable trash")
     s.add_argument("run_id")

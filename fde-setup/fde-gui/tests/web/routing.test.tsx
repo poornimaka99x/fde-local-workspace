@@ -124,6 +124,13 @@ const previewResponse = {
   },
 }
 
+
+async function chooseFolder(user: { click: (element: Element) => Promise<void> }): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }))
+  await user.click(await screen.findByRole('button', { name: /Use this folder/ }))
+  await waitFor(() => expect(screen.getByTestId('working-folder')).toHaveTextContent('/home/op/diy'))
+}
+
 describe('the new-run routing preview', () => {
   const sent: Sent[] = []
 
@@ -150,6 +157,7 @@ describe('the new-run routing preview', () => {
           body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
         })
       }
+      if (url.startsWith('/api/fs/browse')) return jsonResponse({ path: '/home/op/diy', parent: '/home/op', entries: [], truncated: false })
       if (url === '/api/claude/accounts') return jsonResponse(accountsResponse)
       if (url === '/api/routing/policy') return jsonResponse(overrides.policy ?? policyResponse)
       if (url === '/api/routing/preview') {
@@ -186,6 +194,7 @@ describe('the new-run routing preview', () => {
     await screen.findByLabelText(/Automatic model and effort/)
     await user.type(screen.getByLabelText(/What do you want done/), 'Rework the returns screen.')
     await user.type(screen.getByLabelText(/Named shape/), 'design-panel')
+    await chooseFolder(user)
     await user.click(screen.getByRole('button', { name: /Create run/ }))
 
     await waitFor(() => expect(window.location.pathname).toBe('/design-panel/new'))
@@ -373,6 +382,7 @@ describe('the new-run routing preview', () => {
       screen.getByLabelText(/What do you want done/),
       'ACME-1 add a paginated orders endpoint to the existing API',
     )
+    await chooseFolder(user)
     await user.click(screen.getByRole('button', { name: 'Create run' }))
     await waitFor(() =>
       expect(sent.filter((call) => call.url === '/api/runs')).toHaveLength(1))

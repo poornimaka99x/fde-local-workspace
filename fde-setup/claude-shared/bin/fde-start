@@ -14,6 +14,20 @@ CLAUDE_BIN="${FDE_CLAUDE_BIN:-claude}"
 RUNS="${FDE_RUNS_DIR:-${CLAUDE_SHARED:-$HOME/.claude-shared}/runs}"
 SHARED="${CLAUDE_SHARED:-$HOME/.claude-shared}"
 
+# Claude opens many files when it starts in a large folder. macOS gives a
+# process launched from a GUI or a fresh terminal a soft limit of 256-2560
+# descriptors, and Claude then dies with "An unknown error occurred
+# (Unexpected)". Raise the soft limit as far as the hard limit allows; never
+# fail the launch over it.
+raise_fd_limit() {
+  local want="${FDE_NOFILE:-65536}" hard
+  hard="$(ulimit -Hn 2>/dev/null || echo "$want")"
+  [[ "$hard" != "unlimited" && "$hard" =~ ^[0-9]+$ && "$hard" -lt "$want" ]] && want="$hard"
+  [[ "$(ulimit -Sn 2>/dev/null || echo 0)" =~ ^[0-9]+$ ]] || return 0
+  (( $(ulimit -Sn) >= want )) || ulimit -Sn "$want" 2>/dev/null || true
+}
+raise_fd_limit
+
 usage() {
   cat <<'USAGE'
 usage:
@@ -251,6 +265,33 @@ fi
   echo "  create it:  fde accounts add --provider claude --name $orchestrator" >&2
   exit 3; }
 
+# A subscription profile can exist while its OS-keychain login has expired or
+# was never completed. Claude's interactive client reports that failure only
+# after receiving the opening prompt, sometimes as the opaque "Unexpected"
+# error. Refuse only when Claude returns a readable, explicit `loggedIn: false`;
+# an update race or an unreadable status response is not proof of sign-out and
+# must not become a false login refusal. Bedrock and OmniRoute authenticate
+# through their own provider environments, so this probe does not apply there.
+auth_state="unknown"
+if [[ "$launch_provider" == "claude" ]]; then
+  auth_json="$(env ${launch_env[@]+"${launch_env[@]}"} \
+    "$CLAUDE_BIN" auth status 2>/dev/null || true)"
+  auth_state="$(printf '%s' "$auth_json" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin).get("loggedIn")
+except (AttributeError, json.JSONDecodeError):
+    value = None
+print("true" if value is True else "false" if value is False else "unknown")
+')"
+fi
+if [[ "$auth_state" == "false" ]]; then
+  echo "fde-start: account '$orchestrator_id' is not signed in to Claude" >&2
+  echo "  sign in: fde accounts login $orchestrator_id" >&2
+  [[ -n "$resume_id" ]] && echo "  then resume: fde-start --resume $run_id" >&2
+  exit 3
+fi
+
 session_file="$run_dir/orchestrator-session-id"
 [[ -n "$model" ]] || model="$(read_json_field "$run_dir/manifest.json" sessionConfig.model)"
 [[ -n "$effort" ]] || effort="$(read_json_field "$run_dir/manifest.json" sessionConfig.effort)"
@@ -285,6 +326,43 @@ if (( have_session )) && \
   have_session=0
   echo "fde-start: recorded Claude session $old_session_id was not persisted; starting a fresh session"
 fi
+
+# --- working folder -----------------------------------------------------------
+# A run may record the folder its session works in (fde start --workdir, or the
+# console's folder picker). Claude starts there, whoever launched this script.
+working_dir="$(read_json_field "$run_dir/manifest.json" workingDir)"
+if [[ -n "$working_dir" ]]; then
+  if [[ "$working_dir" != /* || ! -d "$working_dir" ]]; then
+    echo "fde-start: this run's working folder is missing: $working_dir" >&2
+    echo "  choose another: fde workdir $run_id <folder>   (or the console's Session tab)" >&2
+    exit 2
+  fi
+  cd "$working_dir"
+  echo "fde-start: working in $working_dir"
+fi
+
+# Claude finds a conversation to --resume under projects/<slug of the cwd>/.
+# When the working folder changed after the conversation was recorded, move the
+# transcript (and its sidecar folder) there so the same conversation continues
+# instead of failing. A move, not a copy: one transcript per session keeps the
+# usage-limit check below reading the live file.
+claude_project_slug() { printf '%s' "$1" | LC_ALL=C sed 's/[^A-Za-z0-9]/-/g'; }
+relocate_transcript() {
+  local found slug target
+  found="$(find "$profile_dir/projects" -type f -name "$session_id.jsonl" -print -quit 2>/dev/null || true)"
+  [[ -n "$found" ]] || return 0
+  slug="$(claude_project_slug "$PWD")"
+  (( ${#slug} <= 200 )) || return 0   # longer names are hashed by Claude; leave them
+  target="$profile_dir/projects/$slug/$session_id.jsonl"
+  [[ "$found" == "$target" ]] && return 0
+  mkdir -p "$(dirname "$target")"
+  mv -f "$found" "$target"
+  if [[ -d "${found%.jsonl}" && ! -e "${target%.jsonl}" ]]; then
+    mv "${found%.jsonl}" "${target%.jsonl}"
+  fi
+  echo "fde-start: moved this run's conversation to the new working folder"
+}
+(( have_session )) && relocate_transcript
 
 run_claude() {
   # The account's environment comes from the controller, whole: which variable

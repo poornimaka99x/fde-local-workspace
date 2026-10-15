@@ -46,6 +46,7 @@ export const runSummarySchema = z
     state: z.string().nullish(),
     blockedFrom: z.string().nullish(),
     projectId: z.string().nullish(),
+    workingDir: z.string().nullish(),
     requirement: z.string().nullish(),
     jiraKey: z.string().nullish(),
     createdAt: z.string().nullish(),
@@ -279,6 +280,8 @@ export const statusSchema = z
       })
       .passthrough()
       .nullish(),
+    // Additive: an older controller omits it.
+    workingDir: z.string().nullish(),
     requirement: requirementSchema,
     plan: loose.nullish(),
     planLine: z.string().nullish(),
