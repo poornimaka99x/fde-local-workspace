@@ -57,6 +57,17 @@ evidence and label proposed components as proposed rather than observed. If the
 run did not select Archify, fall back to a draw.io diagram instead of attempting
 to install or fetch it.
 
+When the requested architecture has to be recovered from a shipped binary,
+application bundle, package, capture or other artifact rather than ordinary
+source, use the selected `rea:reverse-engineer-anything` workflow first. Confirm
+the user is authorized to inspect that target, keep observations, derivations,
+inferences and unknowns distinct, and preserve REA evidence identifiers in the
+ADR and diagram inputs. Do not use REA for normal repository architecture, and
+do not turn a static-analysis request into permission to execute the target,
+attach to a runtime, inject code, mutate a device or extract content. If the REA
+connector is not selected and ready, state the evidence gap instead of installing
+it or inventing the missing behavior.
+
 ## Rules
 
 - No invented numbers. If you do not have a latency budget or a volume figure,

@@ -40,6 +40,11 @@
       "description": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions."
     },
     {
+      "name": "rea",
+      "source": "./plugins/rea",
+      "description": "Pinned REA workflow for evidence-backed reverse engineering of shipped software and artifacts."
+    },
+    {
       "name": "security-guidance",
       "source": "./plugins/security-guidance",
       "description": "FDE-adapted local pattern warnings for security-sensitive code edits, without implicit dependency installation or source-code egress."

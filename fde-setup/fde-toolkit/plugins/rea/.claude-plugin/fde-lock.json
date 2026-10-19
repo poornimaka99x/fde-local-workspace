@@ -1,0 +1,88 @@
+{
+  "accepted": {
+    "executables": false,
+    "hooks": false
+  },
+  "commit": "dfe8378cf5a727e3d93d47a5986233175c6ef898",
+  "commitDate": null,
+  "commitVerified": false,
+  "executables": [],
+  "fileCount": 11,
+  "files": [
+    {
+      "bytes": 266,
+      "path": ".claude-plugin/plugin.json",
+      "sha256": "918967c155cbe3e86d14784335f8f4bb203d4734649fc9be82c24ef4e23980cf"
+    },
+    {
+      "bytes": 7105,
+      "path": "DISCLAIMER.md",
+      "sha256": "200fed9113e41239ac91d7161db71b00669b9989307ae0e1dce404ccb73265f6"
+    },
+    {
+      "bytes": 1064,
+      "path": "LICENSE",
+      "sha256": "798f9e4d18e49b30bf2f12696c8ced73dc4e1413da375a333d01281543a1ea8b"
+    },
+    {
+      "bytes": 24619,
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sha256": "c7db9545d34eb4dac7c0e270cb1a639dfd156d4d462a41bcf65cde71369c222c"
+    },
+    {
+      "bytes": 23510,
+      "path": "skills/reverse-engineer-anything/SKILL.md",
+      "sha256": "976e400f028618926c0b658ee50df79996f5f32402d33b49a23bfdbc232b45e6"
+    },
+    {
+      "bytes": 2125,
+      "path": "skills/reverse-engineer-anything/references/android-applications.md",
+      "sha256": "67a9237d76a5b736640c6404f5e1fe01d83369848142feb7e11d78f4a5e62732"
+    },
+    {
+      "bytes": 8823,
+      "path": "skills/reverse-engineer-anything/references/connection-and-recovery.md",
+      "sha256": "a33760c84ae100f6ffd27d666e515956c5014ac33a6ee2414807833ae666a2b1"
+    },
+    {
+      "bytes": 4877,
+      "path": "skills/reverse-engineer-anything/references/evidence-workflows.md",
+      "sha256": "f04a4e0ce7627851a40b0eccf9367bcb1446631017bc733febcee69997d59245"
+    },
+    {
+      "bytes": 11962,
+      "path": "skills/reverse-engineer-anything/references/javascript-applications.md",
+      "sha256": "aaa78502a3e95268f6269e75f373908045291fedf6ddd106001555ed06bb2bf6"
+    },
+    {
+      "bytes": 18911,
+      "path": "skills/reverse-engineer-anything/references/native-and-artifacts.md",
+      "sha256": "18b8828aec6476be03ca92bdb9506c47cc9ef8c1415c37d33e4af2f8c55cf8f9"
+    },
+    {
+      "bytes": 4798,
+      "path": "skills/reverse-engineer-anything/references/runtime-observation.md",
+      "sha256": "fea85e2005a8fd1c86a946eeede24c20e57592a1deb36576b45216e9854803c8"
+    }
+  ],
+  "hooks": [],
+  "importedPaths": null,
+  "installFiles": [],
+  "installedAt": "2026-10-19T08:05:40+05:30",
+  "license": "MIT",
+  "licenseFile": "LICENSE",
+  "localPath": "/private/tmp/fde-rea-plugin.fujIzK",
+  "name": "rea",
+  "ref": "dfe8378cf5a727e3d93d47a5986233175c6ef898",
+  "reviewNote": "Reviewed subset: reverse-engineer-anything skill, evidence guidance, MIT license, disclaimer and third-party notices. No hooks, executables, install scripts or MCP runtime are vendored.",
+  "runtimes": [],
+  "schemaVersion": 1,
+  "subdirectory": null,
+  "totalBytes": 108060,
+  "treeSha256": "1aada266cfd6c05a9b47f7483a179ddbe03fe8832dc6ab3a8b3d86d791d257ae",
+  "type": "local",
+  "url": "https://github.com/morluto/rea",
+  "validatedAt": "2026-10-19T08:13:03+05:30",
+  "validationStatus": "valid",
+  "version": "6.7.0"
+}

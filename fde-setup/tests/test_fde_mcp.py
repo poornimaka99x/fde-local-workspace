@@ -181,6 +181,38 @@ class Migration(unittest.TestCase):
         self.assertEqual(server["env"]["PROJECTATLAS_NO_TELEMETRY"], "1")
         self.assertEqual(server["mutationApproval"]["gate"], "implementation-write")
 
+    def test_rea_exposes_static_evidence_but_withholds_runtime_and_device_actions(self):
+        catalog = mcp.Catalog.load(CATALOG)
+        server = catalog.get("rea")
+        offered = [
+            "inspect_artifact", "analyze_javascript_application", "inspect_managed_artifact",
+            "open_binary", "binary_overview", "procedure_pseudo_code", "search_strings",
+            "get_evidence_bundle", "close_binary", "capture_process_scenario",
+            "observe_web_execution", "start_frida_session", "load_frida_script",
+            "gdb_console", "execute_rizin_command", "push_adb_file",
+            "install_adb_package", "extract_artifact", "export_evidence_bundle",
+            "annotate_native_function", "set_comment",
+        ]
+        health = {"rea": {
+            "initialize": 200, "authenticated": True, "outcome": "ok",
+            "tools": [{"name": name} for name in offered],
+        }}
+        allowed = mcp.enforceable_tools(
+            "rea", server, {"values": {}, "tools": {}}, health)
+        self.assertEqual(allowed, [
+            "analyze_javascript_application", "binary_overview", "close_binary",
+            "get_evidence_bundle", "inspect_artifact", "inspect_managed_artifact",
+            "open_binary", "procedure_pseudo_code", "search_strings",
+        ])
+        permissions = mcp.render_claude_permissions(
+            {"rea": server}, health=health)["permissions"]
+        self.assertEqual(permissions["deny"], ["mcp__rea"])
+        self.assertIn("mcp__rea__inspect_artifact", permissions["allow"])
+        self.assertNotIn("mcp__rea__capture_process_scenario", permissions["allow"])
+        self.assertNotIn("mcp__rea__install_adb_package", permissions["allow"])
+        self.assertEqual(server["package"]["version"], "6.7.0")
+        self.assertEqual(server["mutationApproval"]["gate"], "denied")
+
     @unittest.skipUnless(FDE.is_file(), "the controller is not present in this tree")
     def test_the_library_and_the_controller_share_one_vocabulary(self):
         fde = load_fde()

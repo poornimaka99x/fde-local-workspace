@@ -1,0 +1,10 @@
+{
+  "name": "rea",
+  "version": "6.7.0",
+  "description": "Pinned REA workflow for evidence-backed reverse engineering of shipped software and artifacts.",
+  "author": {
+    "name": "morluto"
+  },
+  "homepage": "https://github.com/morluto/rea",
+  "license": "MIT"
+}

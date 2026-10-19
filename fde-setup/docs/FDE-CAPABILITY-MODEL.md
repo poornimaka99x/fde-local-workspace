@@ -38,7 +38,10 @@ A capability id is `<kind>:<namespace>:<name>`.
 | namespace      | provider                                              |
 |----------------|-------------------------------------------------------|
 | `fde`          | the built-in fde-core plugin, the MCP catalogue, the built-in tool set |
+| `archify`      | the pinned external Archify plugin                    |
+| `code-simplifier` | the pinned external code-simplifier plugin         |
 | `ponytail`     | the pinned external Ponytail plugin                   |
+| `rea`          | the pinned external REA workflow plugin               |
 | `user:<plugin>`| anything the operator imported                        |
 
 Anthropic's feature-dev plugin was considered for a reserved namespace and is
@@ -372,6 +375,34 @@ falls back to draw.io when it is not selected. The reviewer bundle is unchanged.
 Repository-backed output keeps source evidence, and a passing Archify receipt is
 evidence about the generated artifact—not proof about live infrastructure or a
 client session.
+
+### REA reverse engineering
+
+`REQ-REA-001` — REA's `reverse-engineer-anything` workflow is vendored as the
+pinned `plugin:rea` external plugin at version 6.7.0 under MIT. Its lock records
+upstream commit `dfe8378cf5a727e3d93d47a5986233175c6ef898`, the curated skill,
+its six references, the disclaimer and third-party notices, plus every file
+checksum. The MCP runtime is not vendored and neither REA nor a native provider
+is installed by discovery or selection.
+
+`REQ-REA-002` — The primary `solution-requirements` and
+`technical-architecture` stages select the workflow guidance. It applies only
+when an authorized architecture or behavior question depends on a shipped
+binary, application bundle, package, capture or other artifact and available
+source cannot answer it. Ordinary source-repository architecture continues to
+use repository evidence. `mcp:fde:rea` is offered, never selected implicitly;
+it becomes ready only after the pinned 6.7.0 executable exists and a successful
+`tools/list` verification supplies concrete names for FDE to filter.
+
+`REQ-REA-003` — Ordinary FDE runs expose only an exact, target-preserving
+static-analysis and evidence subset. Target execution, debugger commands,
+runtime observation, injection, extraction, device mutation, target
+annotations, and evidence import/export remain denied even if REA advertises
+them. Selecting the connector is not permission to inspect an unauthorized
+target or to widen static analysis into runtime activity. Findings distinguish
+observations, derivations, inferences and unknowns, preserve evidence IDs and
+limitations, and never claim that decompiler output or a passing static check
+proves unseen runtime behavior.
 
 ### Evo autoresearch
 

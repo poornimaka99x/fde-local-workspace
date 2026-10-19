@@ -27,6 +27,7 @@ import fde_plugin_import as imports   # noqa: E402
 PONYTAIL_COMMIT = "356918eba965ee1eac64bd3a7f0dd02108350de5"
 CODE_SIMPLIFIER_COMMIT = "da823e86c8feef13b73b6712af11eadd38c992f6"
 ARCHIFY_COMMIT = "654da74e084e5a1faf708779c23d6172766be9c1"
+REA_COMMIT = "dfe8378cf5a727e3d93d47a5986233175c6ef898"
 
 
 class PluginTestCase(unittest.TestCase):
@@ -576,6 +577,44 @@ class ArchifyTest(PluginTestCase):
     def test_fde_entry_point_disables_archify_update_network_checks(self):
         entry = (self.plugins / "archify" / "bin" / "archify.mjs").read_text(encoding="utf-8")
         self.assertIn("ARCHIFY_UPDATE_CHECK_DISABLED = '1'", entry)
+
+
+class ReaTest(PluginTestCase):
+    """REQ-REA-001/002: pinned evidence workflow with conditional MCP use."""
+
+    def test_rea_ships_as_a_pinned_curated_skill_with_licensing(self):
+        payload = json.loads(self.fde("plugins", "show", "rea", "--json").stdout)["plugin"]
+        self.assertEqual(payload["namespace"], "rea")
+        self.assertEqual(payload["origin"], "external")
+        self.assertEqual(payload["version"], "6.7.0")
+        self.assertEqual(payload["commit"], REA_COMMIT)
+        self.assertEqual(payload["license"], "MIT")
+        self.assertTrue(payload["pinned"])
+        self.assertEqual(payload["contributes"], {"skill": 1})
+        self.assertEqual(payload["dependencies"], [])
+
+    def test_the_vendored_rea_subset_still_matches_its_pin(self):
+        payload = json.loads(self.fde("plugins", "verify", "rea", "--json").stdout)
+        self.assertEqual(payload["results"][0]["state"], "valid")
+
+    def test_rea_guidance_is_primary_only_and_its_connector_is_optional(self):
+        expected = {"plugin:rea", "skill:rea:reverse-engineer-anything"}
+        for stage in ("solution-requirements", "technical-architecture"):
+            primary, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                       "--stage", stage, "--role", "primary")
+            reviewer, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                        "--stage", stage, "--role", "reviewer")
+            self.assertTrue(expected <= set(primary["enabled"]), stage)
+            self.assertFalse(expected & set(reviewer["enabled"]), stage)
+            self.assertNotIn("mcp:fde:rea", primary["enabled"], stage)
+
+        template = json.loads(self.fde("workflow", "show", "forward-deployed-engineer",
+                                       "--json").stdout)["workflow"]
+        stages = {stage["name"]: stage for stage in template["stages"]}
+        for stage in ("solution-requirements", "technical-architecture"):
+            self.assertIn("mcp:fde:rea", stages[stage]["optional"])
+            self.assertEqual(stages[stage]["mcpScopes"]["mcp:fde:rea"],
+                             ["read", "search"])
 
 
 class GovernanceTest(PluginTestCase):

@@ -394,7 +394,7 @@ class ClassificationTest(unittest.TestCase):
     def test_the_shipped_catalogue_classifies_its_own_allowlists(self):
         """Every tool FDE ships an allowlist for lands somewhere deliberate."""
         catalog = fde_mcp.Catalog.load(SHARED_SRC / "mcp" / "mcp-servers.json")
-        for name in ("serena", "playwright", "chrome-devtools"):
+        for name in ("serena", "rea", "playwright", "chrome-devtools"):
             server = catalog.get(name)
             for pattern in server["allowTools"]:
                 tool = pattern.strip("^$")

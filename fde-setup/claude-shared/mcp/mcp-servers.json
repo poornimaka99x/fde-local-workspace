@@ -9,7 +9,7 @@
     "coding": {
       "label": "Coding",
       "description": "Repository work: semantic navigation and version-accurate library documentation.",
-      "servers": ["context7", "projectatlas", "openwiki", "serena"],
+      "servers": ["context7", "projectatlas", "openwiki", "rea", "serena"],
       "docker": "coding"
     },
     "frontend-testing": {
@@ -287,6 +287,108 @@
       "doNotUseWhen": "A small, direct read of a known file, or a generated / non-code file — the ordinary filesystem tools are cheaper and clearer there.",
       "gateway": { "docker": "coding" },
       "note": "Semantic code navigation over LSP. FDE never installs it: it is detected, and the exact setup command is shown when it is absent. Its editing tools are denied here; an implementation write still goes through the run's own approval, not through this server."
+    },
+
+    "rea": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "rea",
+      "args": ["mcp"],
+      "startupTimeoutSeconds": 120,
+      "clients": {
+        "codex": { "toolTimeoutSeconds": 180 }
+      },
+      "targets": [
+        "role:research", "role:solutioning", "role:securityReview"
+      ],
+      "stages": ["research", "solutioning", "review"],
+      "profiles": ["coding"],
+      "requires": {
+        "executables": ["rea"],
+        "setup": "npm install -g rea-agents@6.7.0 (requires Node.js ^22.19.0, ^24.11.0 or >=26.0.0); provider setup is separate and operator-approved",
+        "docsUrl": "https://github.com/morluto/rea"
+      },
+      "package": {
+        "manager": "npm",
+        "name": "rea-agents",
+        "version": "6.7.0",
+        "install": "npm install -g rea-agents@6.7.0",
+        "update": "change the pinned version in mcp-servers.json, install that version, then run mcp-sync and fde mcp verify rea"
+      },
+      "auth": "none",
+      "classification": "authorized-local-artifact",
+      "mutation": "mutation-capable",
+      "readOnlyPolicy": "patterns",
+      "allowTools": [
+        "^inspect_with_objdump$", "^inspect_go_binary$", "^inspect_rust_binary$",
+        "^inspect_sqlite_database$", "^inspect_packet_fields$", "^inspect_packet_capture$",
+        "^inspect_signal_decoders$", "^decode_signal_recording$", "^inspect_wasm_artifact$",
+        "^inspect_evm_interface$", "^inspect_web_network_capture$", "^inspect_recorded_crash$",
+        "^inspect_binary_layout$", "^inspect_pe_resources$", "^inspect_analysis_view$",
+        "^inspect_firmware_regions$", "^inspect_android_package$", "^inspect_pcap_client$",
+        "^inspect_pcap_capture$", "^identify_flutter_build$", "^inspect_dart_aot$",
+        "^inspect_apktool_client$", "^decode_android_resources$", "^search_android_classes$",
+        "^inspect_android_class$", "^inspect_android_method$", "^trace_android_references$",
+        "^inspect_native_load_image$", "^inspect_native_dispatch_metadata$",
+        "^trace_native_ui_action$", "^trace_native_values$", "^address_name$",
+        "^comment$", "^current_address$", "^current_procedure$", "^current_document$",
+        "^inline_comment$", "^list_bookmarks$", "^list_documents$", "^list_names$",
+        "^list_procedures$", "^list_segments$", "^list_strings$", "^next_address$",
+        "^prev_address$", "^procedure_address$", "^procedure_assembly$",
+        "^procedure_callees$", "^procedure_callers$", "^procedure_info$",
+        "^read_function_instructions$", "^inspect_native_instruction$",
+        "^inspect_native_data_type$", "^resolve_native_call_targets$", "^read_bytes$",
+        "^search_bytes$", "^address_to_file_offset$", "^procedure_references$",
+        "^procedure_pseudo_code$", "^resolve_containing_procedure$",
+        "^search_procedures$", "^search_strings$", "^xrefs$", "^get_objc_classes$",
+        "^get_objc_protocols$", "^batch_decompile$", "^get_call_graph$",
+        "^analyze_swift_types$", "^find_xrefs_to_name$", "^binary_overview$",
+        "^analyze_function$", "^inspect_native_api$", "^trace_feature$",
+        "^trace_call_path$", "^inspect_macho$", "^inspect_signature$", "^inspect_plist$",
+        "^list_architectures$", "^demangle_swift$", "^inspect_artifact$",
+        "^decode_interface_builder$", "^inspect_asset_catalog$", "^inspect_keyed_archive$",
+        "^trace_dylib_resolution$", "^inspect_managed_artifact$",
+        "^inspect_managed_members$", "^inspect_managed_native_boundaries$",
+        "^compare_managed_members$", "^verify_managed_native_boundaries$",
+        "^project_managed_application_graph$", "^analyze_javascript_application$",
+        "^inspect_electron_fuses$", "^reconcile_javascript_runtime$",
+        "^trace_application_feature$", "^trace_javascript_semantics$",
+        "^compare_application_versions$", "^compare_source_to_bundle$",
+        "^compare_javascript_export_shapes$", "^build_reconstruction_obligation_ledger$",
+        "^evaluate_reconstruction_coverage$", "^project_android_application_graph$",
+        "^project_apple_application_graph$", "^project_harmony_application_graph$",
+        "^open_binary$", "^close_binary$", "^binary_session$", "^get_evidence_bundle$",
+        "^get_navigation_context$", "^inspect_address_context$", "^compare_artifacts$",
+        "^compare_wasm_interfaces$", "^compare_functions$", "^compare_bundles$",
+        "^find_changed_behavior$", "^build_call_path$", "^verify_reconstruction$",
+        "^list_unknowns$", "^verify_unknown_resolution$"
+      ],
+      "denyTools": [
+        "^(?:capture|observe|start|stop|push|pull|install|uninstall|load|unload|resume|execute|set|unset|annotate|extract|export|import|recover|record|update)_",
+        "^(?:cutter_command|gdb_console|rizin_debug_command|open_jeb_project)$"
+      ],
+      "_scopes": "REA's allowed tools preserve the selected target. Session acquisition, provider navigation, additive private evidence and cleanup are read operations here; searches and comparisons are search. Tools that execute or instrument targets, mutate devices, extract content, change annotations, or import/export evidence are absent regardless of stage scope.",
+      "scopes": {
+        "read": [
+          "^(?:inspect|decode|identify|trace|address|comment|current|inline|list|next|prev|procedure|read|resolve|get|analyze|batch|demangle|binary|open|close|build|evaluate|project|reconcile|verify)_?"
+        ],
+        "search": [
+          "^(?:search_|find_|xrefs$|compare_)"
+        ],
+        "administer": [
+          "^(?:capture|observe|start|stop|push|pull|install|uninstall|load|unload|resume|execute|set|unset|annotate|extract|export|import|recover|record|update)_",
+          "^(?:cutter_command|gdb_console|rizin_debug_command|open_jeb_project)$"
+        ]
+      },
+      "mutationApproval": {
+        "gate": "denied",
+        "note": "Ordinary FDE runs expose only the verified target-preserving subset. Runtime execution, debugging, injection, device changes, extraction, annotations and evidence import/export require a separately reviewed capability change; selecting this connector cannot approve them."
+      },
+      "verify": { "method": "tools/list", "timeoutSeconds": 120 },
+      "useWhen": "The user is authorized to inspect a shipped binary, application bundle, package, capture or other artifact, and a concrete architecture or behavior claim cannot be established from available source or documentation.",
+      "preferOver": ["guessing architecture from filenames or screenshots", "treating decompiler output as source truth", "executing an unknown target merely to discover its shape"],
+      "doNotUseWhen": "The question is ordinary source-repository architecture, the target or authorization is unclear, or answering would require target execution, live attachment, injection, device mutation or content extraction that has not been separately approved.",
+      "note": "REA 6.7.0 is catalogued but never installed by FDE. Its skill and MCP registration are separate. The MCP becomes ready only after the pinned executable exists and tools/list verification proves the exact allowed subset; native providers remain separately installed and configured by the operator."
     },
 
     "playwright": {

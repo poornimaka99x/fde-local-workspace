@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "forward-deployed-engineer",
   "label": "Forward Deployed Engineer",
-  "revision": "2026-10-19.1",
+  "revision": "2026-10-19.2",
   "description": "The full forward-deployed delivery lifecycle: business intent through operations, with an independent reviewer at every stage.",
   "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
   "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
@@ -119,6 +119,8 @@
           "agent:fde:solutioner",
           "agent:fde:standards-reviewer",
           "agent:fde:ui-ux-designer",
+          "plugin:rea",
+          "skill:rea:reverse-engineer-anything",
           "tool:fde:WebFetch",
           "tool:fde:WebSearch",
           "tool:fde:Write"
@@ -142,6 +144,7 @@
         "mcp:fde:firecrawl",
         "mcp:fde:openwiki",
         "mcp:fde:projectatlas",
+        "mcp:fde:rea",
         "skill:fde:feature-specs"
       ],
       "mcpScopes": {
@@ -171,10 +174,15 @@
         "mcp:fde:openwiki": [
           "read",
           "search"
+        ],
+        "mcp:fde:rea": [
+          "read",
+          "search"
         ]
       },
       "notes": {
-        "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
+        "rea": "REQ-REA-002/003: REA guidance is available for an explicitly authorized shipped artifact when source cannot answer the question. Select its connector only for that need; ordinary source-repository analysis does not use it. The connector exposes a verified target-preserving static subset and withholds runtime execution, injection, device mutation and extraction.",
+        "selection": "Select optional connectors for a named task need before plan approval: REA for authorized shipped-artifact evidence, ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
       }
     },
     {
@@ -206,8 +214,10 @@
           "agent:fde:solutioner",
           "agent:fde:standards-reviewer",
           "plugin:archify",
+          "plugin:rea",
           "script:archify:archify.mjs",
           "skill:archify:archify",
+          "skill:rea:reverse-engineer-anything",
           "tool:fde:Bash",
           "tool:fde:Write"
         ]
@@ -233,6 +243,7 @@
         "mcp:fde:firecrawl",
         "mcp:fde:openwiki",
         "mcp:fde:projectatlas",
+        "mcp:fde:rea",
         "mcp:fde:serena",
         "skill:fde:feature-specs",
         "skill:ponytail:ponytail-audit",
@@ -263,6 +274,10 @@
           "read",
           "search"
         ],
+        "mcp:fde:rea": [
+          "read",
+          "search"
+        ],
         "mcp:fde:figma": [
           "read"
         ],
@@ -281,6 +296,7 @@
       },
       "notes": {
         "archify": "REQ-ARCHIFY-002: architecture-generation requests use the pinned Archify skill for validated standalone HTML. It is primary-only; reviewers retain their read-only tool boundary. The FDE wrapper disables Archify's optional update request so upgrades remain explicit and checksum-pinned.",
+        "rea": "REQ-REA-002/003: when architecture must be recovered from an explicitly authorized binary, application bundle, package, capture or other shipped artifact, use the pinned REA workflow to collect evidence before drawing. Select the connector only when its static tools are needed. Do not use REA for ordinary source architecture, and do not infer permission to execute a target, attach to a runtime, inject code, modify a device or extract content.",
         "dbhub": "Offered when database analysis is in scope.",
         "cloud": "aws and azure are offered read-only, when cloud architecture is in scope.",
         "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
@@ -867,6 +883,15 @@
     "_scope": "REQ-ARCHIFY-001/002: enabled only for the primary technical-architecture stage, where an operator-approved run may generate a local, validated HTML architecture artifact.",
     "_evidence": "Repository-backed diagrams must preserve Archify source evidence and distinguish authored topology from observed runtime behavior. A passing renderer receipt is artifact evidence, not proof that a live client or deployment enforces the depicted design.",
     "_network": "The FDE entry point sets ARCHIFY_UPDATE_CHECK_DISABLED=1. Updating this vendored copy is an explicit reviewed import, never a runtime side effect."
+  },
+  "rea": {
+    "plugin": "plugin:rea",
+    "version": "6.7.0",
+    "source": "https://github.com/morluto/rea",
+    "connector": "mcp:fde:rea",
+    "_scope": "REQ-REA-001/002: the evidence workflow is primary-only in solution-requirements and technical-architecture; the MCP is optional and must be selected for an explicitly authorized shipped-artifact investigation.",
+    "_evidence": "Treat tool output as observations, label derivations and inferences, preserve evidence identifiers and limitations, and keep unknowns explicit. Reverse-engineered evidence may support an architecture model but does not prove unseen runtime behavior.",
+    "_safety": "REQ-REA-003: ordinary FDE exposure is a verified target-preserving static subset. Target execution, debugger commands, runtime observation, injection, extraction, device mutation, annotations and evidence import/export stay denied. Installing REA or a native provider remains an explicit operator action."
   },
   "evo": {
     "plugin": "plugin:user:evo",
