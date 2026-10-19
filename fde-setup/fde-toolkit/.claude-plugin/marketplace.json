@@ -10,6 +10,11 @@
       "description": "FDE-curated development workflows for API design, debugging, migrations, ADRs, performance, security hardening, and official-source grounding."
     },
     {
+      "name": "archify",
+      "source": "./plugins/archify",
+      "description": "Pinned Archify skill for validated, interactive architecture and system diagrams."
+    },
+    {
       "name": "code-simplifier",
       "source": "./plugins/code-simplifier",
       "description": "Agent that simplifies and refines code for clarity, consistency, and maintainability while preserving functionality"

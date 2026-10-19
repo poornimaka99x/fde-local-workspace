@@ -50,8 +50,12 @@ why, and an engineer asking how. Write for both or it fails with one.
 <what is still unresolved and who owns resolving it>
 ```
 
-Then, where a picture carries the structure better than prose, produce a draw.io
-diagram alongside it.
+Then, where a picture carries the structure better than prose, use the selected
+`archify:archify` capability to produce a validated standalone HTML architecture
+diagram alongside it. For a repository-backed design, preserve file-and-line
+evidence and label proposed components as proposed rather than observed. If the
+run did not select Archify, fall back to a draw.io diagram instead of attempting
+to install or fetch it.
 
 ## Rules
 

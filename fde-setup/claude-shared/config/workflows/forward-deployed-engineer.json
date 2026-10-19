@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "forward-deployed-engineer",
   "label": "Forward Deployed Engineer",
-  "revision": "2026-10-02.1",
+  "revision": "2026-10-19.1",
   "description": "The full forward-deployed delivery lifecycle: business intent through operations, with an independent reviewer at every stage.",
   "_ownership": "Built-in data, layer 8 of the precedence order in docs/FDE-CAPABILITY-MODEL.md. Resolution reads it and never writes it, and an upgrade that replaces this file cannot reach any operator layer.",
   "_unlisted": "A stage bundle is a selection, so a capability this file does not name is not selected for that stage. That is what `unlistedDefault` says, and it is why adding a capability to FDE does not silently widen an existing stage.",
@@ -205,6 +205,10 @@
           "agent:fde:security-reviewer",
           "agent:fde:solutioner",
           "agent:fde:standards-reviewer",
+          "plugin:archify",
+          "script:archify:archify.mjs",
+          "skill:archify:archify",
+          "tool:fde:Bash",
           "tool:fde:Write"
         ]
       },
@@ -276,6 +280,7 @@
         ]
       },
       "notes": {
+        "archify": "REQ-ARCHIFY-002: architecture-generation requests use the pinned Archify skill for validated standalone HTML. It is primary-only; reviewers retain their read-only tool boundary. The FDE wrapper disables Archify's optional update request so upgrades remain explicit and checksum-pinned.",
         "dbhub": "Offered when database analysis is in scope.",
         "cloud": "aws and azure are offered read-only, when cloud architecture is in scope.",
         "selection": "Select optional connectors for a named task need before plan approval: ProjectAtlas for indexed navigation, Serena for symbol/reference analysis, OpenWiki for existing explanations, Figma for designs, Atlassian for linked requirements, and only the relevant cloud/data/observability service. Browser availability preserves the Bedrock research fallback; it does not require a browser call."
@@ -855,6 +860,14 @@
     }
   ],
   "_featureDev": "Anthropic's feature-dev plugin is deliberately not integrated. It is distributed under Anthropic's commercial terms with all rights reserved, and this toolkit is MIT. Its code-explorer, code-architect and code-reviewer roles are held by fde-core's repo-cartographer, solutioner and reviewer/test-engineer respectively.",
+  "archify": {
+    "plugin": "plugin:archify",
+    "version": "3.2.0",
+    "source": "https://github.com/tt-a1i/archify",
+    "_scope": "REQ-ARCHIFY-001/002: enabled only for the primary technical-architecture stage, where an operator-approved run may generate a local, validated HTML architecture artifact.",
+    "_evidence": "Repository-backed diagrams must preserve Archify source evidence and distinguish authored topology from observed runtime behavior. A passing renderer receipt is artifact evidence, not proof that a live client or deployment enforces the depicted design.",
+    "_network": "The FDE entry point sets ARCHIFY_UPDATE_CHECK_DISABLED=1. Updating this vendored copy is an explicit reviewed import, never a runtime side effect."
+  },
   "evo": {
     "plugin": "plugin:user:evo",
     "version": "0.8.0",

@@ -138,6 +138,16 @@ def inspect_tree(root):
                                     "sha256": _sha256(target)})
             if info.st_mode & 0o111:
                 report["executables"].append(relative)
+                try:
+                    first_line = target.open("rb").readline(256).decode("utf-8", errors="replace")
+                except OSError:
+                    first_line = ""
+                match = re.match(
+                    r"^#!\s*(?:/usr/bin/env\s+)?(?:\S*/)?(node|deno|python3|python|bash|sh|ruby|perl)\b",
+                    first_line,
+                )
+                if match:
+                    runtimes.add(match.group(1))
             if name in INSTALL_HOOK_FILES:
                 report["installFiles"].append(relative)
 

@@ -1,0 +1,10 @@
+{
+  "name": "archify",
+  "version": "3.2.0",
+  "description": "Pinned Archify skill for validated, interactive architecture and system diagrams.",
+  "author": {
+    "name": "tt-a1i"
+  },
+  "homepage": "https://github.com/tt-a1i/archify",
+  "license": "MIT"
+}

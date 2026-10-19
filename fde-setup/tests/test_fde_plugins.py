@@ -26,6 +26,7 @@ import fde_plugin_import as imports   # noqa: E402
 
 PONYTAIL_COMMIT = "356918eba965ee1eac64bd3a7f0dd02108350de5"
 CODE_SIMPLIFIER_COMMIT = "da823e86c8feef13b73b6712af11eadd38c992f6"
+ARCHIFY_COMMIT = "654da74e084e5a1faf708779c23d6172766be9c1"
 
 
 class PluginTestCase(unittest.TestCase):
@@ -181,6 +182,15 @@ class ImportRefusalTest(PluginTestCase):
         result = self.fde("plugins", "add", str(source), expected=2)
         self.assertIn("--accept-executables", result.stderr)
         self.fde("plugins", "add", str(source), "--accept-executables")
+
+    def test_an_executable_shebang_records_its_runtime_dependency(self):
+        source = self.candidate("acme", executable=True)
+        payload = json.loads(self.fde("plugins", "add", str(source),
+                                      "--accept-executables", "--json").stdout)
+        self.assertIn("sh", {entry.get("name") for entry in payload["dependencies"]})
+        lock = json.loads((self.plugins / "acme" / ".claude-plugin" / "fde-lock.json")
+                          .read_text(encoding="utf-8"))
+        self.assertIn("sh", lock["runtimes"])
 
     def test_a_symbolic_link_is_refused(self):
         source = self.candidate("acme", symlink="/etc/passwd")
@@ -531,6 +541,41 @@ class PonytailTest(PluginTestCase):
         document, _ = self.resolved("--workflow", "forward-deployed-engineer",
                                     "--stage", "quality-review")
         self.assertIn("skill:ponytail:ponytail-audit", document["enabled"])
+
+
+class ArchifyTest(PluginTestCase):
+    """REQ-ARCHIFY-001/002: pinned, stage-scoped architecture generation."""
+
+    def test_archify_ships_pinned_with_its_licence_and_node_dependency(self):
+        payload = json.loads(self.fde("plugins", "show", "archify", "--json").stdout)["plugin"]
+        self.assertEqual(payload["namespace"], "archify")
+        self.assertEqual(payload["origin"], "external")
+        self.assertEqual(payload["commit"], ARCHIFY_COMMIT)
+        self.assertEqual(payload["license"], "MIT")
+        self.assertTrue(payload["pinned"])
+        self.assertIn("node", {entry.get("name") for entry in payload["dependencies"]})
+
+    def test_the_vendored_archify_tree_still_matches_its_pin(self):
+        payload = json.loads(self.fde("plugins", "verify", "archify", "--json").stdout)
+        self.assertEqual(payload["results"][0]["state"], "valid")
+
+    def test_archify_is_selected_only_for_primary_technical_architecture(self):
+        expected = {"plugin:archify", "skill:archify:archify", "script:archify:archify.mjs"}
+        primary, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                   "--stage", "technical-architecture", "--role", "primary")
+        reviewer, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                    "--stage", "technical-architecture", "--role", "reviewer")
+        research, _ = self.resolved("--workflow", "forward-deployed-engineer",
+                                    "--stage", "solution-requirements", "--role", "primary")
+        self.assertTrue(expected <= set(primary["enabled"]))
+        self.assertIn("tool:fde:Bash", primary["enabled"])
+        self.assertFalse(expected & set(reviewer["enabled"]))
+        self.assertNotIn("tool:fde:Bash", reviewer["enabled"])
+        self.assertFalse(expected & set(research["enabled"]))
+
+    def test_fde_entry_point_disables_archify_update_network_checks(self):
+        entry = (self.plugins / "archify" / "bin" / "archify.mjs").read_text(encoding="utf-8")
+        self.assertIn("ARCHIFY_UPDATE_CHECK_DISABLED = '1'", entry)
 
 
 class GovernanceTest(PluginTestCase):

@@ -356,6 +356,23 @@ modified code, requires exact behavior preservation, and reruns affected checks
 after refinement. The existing implementation write approval and workflow
 governance remain authoritative.
 
+### Archify
+
+`REQ-ARCHIFY-001` — Archify is vendored as the pinned `plugin:archify` external
+plugin at version 3.2.0 under MIT. Its lock records the reviewed source commit,
+the imported file set and every checksum. The FDE entry point disables
+Archify's optional update check; source updates happen only through FDE's
+explicit inspect/approve/activate/lock path.
+
+`REQ-ARCHIFY-002` — The forward-deployed-engineer workflow selects
+`skill:archify:archify` only for the primary `technical-architecture` stage,
+together with its Node entry point and the Bash capability needed to invoke it.
+The solutioner uses it when an architecture request benefits from a diagram and
+falls back to draw.io when it is not selected. The reviewer bundle is unchanged.
+Repository-backed output keeps source evidence, and a passing Archify receipt is
+evidence about the generated artifact—not proof about live infrastructure or a
+client session.
+
 ### Evo autoresearch
 
 The official `evo-hq/evo` plugin is imported at `v0.8.0`, commit

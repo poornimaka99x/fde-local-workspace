@@ -65,7 +65,7 @@ BUILTIN_NAMESPACE = "fde"
 # MIT. Its four roles are covered by fde-core agents that already exist, which
 # is what the requirement asks for anyway where an imported agent overlaps one
 # of ours.
-PINNED_NAMESPACES = ("code-simplifier", "ponytail")
+PINNED_NAMESPACES = ("archify", "code-simplifier", "ponytail")
 
 # The built-in tool surface. Discovery seeds these rather than inferring the
 # whole set from front matter, because a tool nobody happens to declare is still
@@ -108,7 +108,7 @@ def _now():
 def plugin_namespace(plugin_name):
     """Which namespace a plugin directory contributes under.
 
-    The built-in plugin is `fde`; the two pinned external plugins keep their own
+    The built-in plugin is `fde`; pinned external plugins keep their own
     name; everything else an operator imported is under `user:` so it can never
     shadow a capability the FDE defaults refer to by id.
     """
@@ -480,7 +480,19 @@ def _hook_items(plugin_root, manifest, *, namespace, plugin, origin, shared, pro
     return items
 
 
-def _script_items(plugin_root, *, namespace, plugin, origin, shared, provenance):
+def _script_runtime_needs(entry):
+    """Return a script's declared interpreter without executing the file."""
+    try:
+        first_line = entry.open("rb").readline(256).decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    match = re.match(r"^#!\s*(?:/usr/bin/env\s+)?(?:\S*/)?(node|deno|python3|python|bash|sh)\b",
+                     first_line)
+    return [match.group(1)] if match else []
+
+
+def _script_items(plugin_root, *, namespace, plugin, origin, shared, provenance,
+                  runtime_dependencies):
     items = []
     for directory in ("bin", "scripts"):
         target_dir = plugin_root / directory
@@ -491,13 +503,21 @@ def _script_items(plugin_root, *, namespace, plugin, origin, shared, provenance)
         for entry in entries:
             if not entry.is_file() or entry.name.startswith(".") or _escapes(plugin_root, entry):
                 continue
+            needs = _script_runtime_needs(entry)
+            runtime_dependencies.update(needs)
+            deps, missing = _runtime_health(needs)
+            deps.append({"kind": "capability", "id": make_id("plugin", namespace)})
             items.append(_record(
                 kind="script", namespace=namespace, name=entry.name,
                 description=("Runtime helper" if directory == "bin" else "Plugin utility")
                             + f" supplied by {plugin}.",
                 origin=origin, plugin=plugin, source=entry, shared=shared,
                 provenance=provenance,
-                dependencies=[{"kind": "capability", "id": make_id("plugin", namespace)}]))
+                dependencies=deps,
+                health=_ok() if not missing else {
+                    "state": "degraded", "code": "runtime-missing",
+                    "message": f"{', '.join(missing)} is not on PATH."},
+                availability="unavailable" if missing else "available"))
     return items
 
 
@@ -546,7 +566,8 @@ def _plugin_items(shared, warnings):
                                    origin=origin, shared=shared, provenance=provenance,
                                    errors=errors, runtime_dependencies=runtime_dependencies)
         contributed += _script_items(entry, namespace=namespace, plugin=plugin, origin=origin,
-                                     shared=shared, provenance=provenance)
+                                     shared=shared, provenance=provenance,
+                                     runtime_dependencies=runtime_dependencies)
         dependencies, missing = _runtime_health(runtime_dependencies)
         health = _ok()
         if errors:
