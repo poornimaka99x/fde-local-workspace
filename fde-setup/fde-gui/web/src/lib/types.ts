@@ -22,6 +22,7 @@ export interface RunSummary {
   blockedFrom?: string | null
   projectId: string | null
   workingDir?: string | null
+  contextDirs?: string[]
   requirement: string | null
   jiraKey?: string | null
   createdAt?: string | null
@@ -148,6 +149,8 @@ export interface RunStatus {
   projectId: string | null
   project: { projectId: string; name: string | null; repoPaths: string[] } | null
   workingDir?: string | null
+  /** Folders attached as context, granted to the session where they are. */
+  contextDirs?: string[]
   requirement: { summary: string | null; jiraKey: string | null; hasFile: boolean; path: string | null }
   plan: Record<string, unknown> | null
   planLine: string | null

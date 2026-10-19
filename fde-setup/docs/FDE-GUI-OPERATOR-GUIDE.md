@@ -114,6 +114,21 @@ On the Inputs tab, pick a file and press Attach. The bytes go to
 filename, generates the stored name, hashes what it wrote and appends the audit
 record. Your original is copied, never moved or changed.
 
+### Attaching while creating a run
+
+In **New run**, under the ask, press **Attach file or folder…** as often as you
+need (up to 20 picks, 10 of them folders). Click a file to pick it, or **Use this
+folder** to pick the folder you are in.
+
+- A **file** is copied into the run as soon as it is created, exactly like the
+  Inputs tab. If one is refused (too large, say), the run is still created and
+  the form lists what did not attach before you continue.
+- A **folder** is not copied. It is recorded on the run and the orchestrator
+  session is given access to it where it is, from the scoping conversation on.
+  It is shown on the Inputs tab under *Attached folders*; change it from a
+  terminal with `fde context-dirs <run-id>`. The session is told not to modify
+  it, but that is an instruction, not a lock.
+
 ### Projects
 
 Projects group runs. A project is a name, a description and repository paths

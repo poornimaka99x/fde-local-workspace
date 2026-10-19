@@ -10,6 +10,7 @@ import {
   runController,
   runControllerJson,
   runControllerWithStdin,
+  ControllerError,
 } from '../services/controller'
 import {
   attachmentCreatedSchema,
@@ -24,6 +25,7 @@ import { block, describeZod, line } from '../schemas/input'
 import type { Services } from '../services/types'
 import { ACCOUNT_ID_PATTERN, EFFORTS, MODEL_PATTERN } from '../services/accounts'
 import { STRATEGIES as ROUTING_STRATEGIES } from '../schemas/routing'
+import { checkAttachPath, InvalidAttachPath } from '../services/attach-paths'
 import {
   FilePathError,
   listRunFiles,
@@ -50,6 +52,11 @@ const contentQuerySchema = z.object({
   path: z.string().max(1024),
   disposition: z.enum(['inline', 'attachment']).default('inline'),
 })
+
+/** Files plus folders a new run may be given in one request. */
+const MAX_RUN_ATTACHMENTS = 20
+/** Mirrors the controller's CONTEXT_DIR_LIMIT. */
+const MAX_RUN_CONTEXT_DIRS = 10
 
 function matchesQuery(run: RunSummary, needle: string): boolean {
   const haystack = [run.runId, run.requirement ?? '', run.jiraKey ?? '', run.projectId ?? '']
@@ -94,6 +101,19 @@ const createRunBody = z
   .string()
   .max(4096)
   .refine((value) => path.isAbsolute(value) && !value.includes('\0'), 'an absolute folder path')
+      .optional(),
+    // Files and folders picked while writing the ask. Files are copied into the
+    // run by `fde attach`; folders are granted to the session in place with
+    // `fde start --context-dir`. Which is which is decided here, from disk, not
+    // by the browser.
+    attachments: z
+      .array(
+        z
+          .string()
+          .max(4096)
+          .refine((value) => path.isAbsolute(value) && !value.includes('\0'), 'an absolute path'),
+      )
+      .max(MAX_RUN_ATTACHMENTS)
       .optional(),
   })
   .refine(
@@ -352,6 +372,31 @@ export function registerRunRoutes(
         )
       }
     }
+    // Sort what was picked into files and folders before anything is created,
+    // so a path that cannot be attached at all creates no run.
+    const files: string[] = []
+    const contextDirs: string[] = []
+    for (const picked of parsed.data.attachments ?? []) {
+      try {
+        const checked = await checkAttachPath(picked, {
+          home: config.home,
+          profilesRoot: config.profilesRoot,
+          extraRoots: parsed.data.workingDir !== undefined ? [parsed.data.workingDir] : [],
+          noun: "run's working folder",
+        })
+        const bucket = checked.kind === 'directory' ? contextDirs : files
+        if (!bucket.includes(checked.path)) bucket.push(checked.path)
+      } catch (error) {
+        if (error instanceof InvalidAttachPath) {
+          return problem(reply, 400, 'invalid-attachment', `${picked}: ${error.message}`)
+        }
+        throw error
+      }
+    }
+    if (contextDirs.length > MAX_RUN_CONTEXT_DIRS) {
+      return problem(reply, 400, 'invalid-attachment',
+        `A run can have at most ${MAX_RUN_CONTEXT_DIRS} attached folders.`)
+    }
     const release = services.locks.tryAcquire('run:create')
     if (release === null) {
       return problem(reply, 409, 'busy', 'Another run is being created right now.')
@@ -369,14 +414,39 @@ export function registerRunRoutes(
       if (parsed.data.projectId !== undefined) args.push('--project', parsed.data.projectId)
       if (parsed.data.shape !== undefined) args.push('--shape', parsed.data.shape)
       if (parsed.data.workingDir !== undefined) args.push('--workdir', parsed.data.workingDir)
+      for (const folder of contextDirs) args.push('--context-dir', folder)
       // Everything after `--` is the ask, so a requirement that starts with a
       // dash is text and never a flag.
       if (parsed.data.requirement !== undefined && parsed.data.requirement.trim() !== '') {
         args.push('--', parsed.data.requirement)
       }
-      const raw = await runControllerJson(config, args)
+      const created = runCreatedSchema.parse(await runControllerJson(config, args))
       services.watcher.touch()
-      return await reply.status(201).send(runCreatedSchema.parse(raw))
+      // The run exists now, so a file that cannot be attached is reported, not
+      // fatal: the operator keeps the run and can attach it again from the run.
+      const attached: unknown[] = []
+      const failed: Array<{ path: string; message: string }> = []
+      for (const file of files) {
+        try {
+          const result = attachmentCreatedSchema.parse(await runControllerJson(config, [
+            'attach',
+            created.run.runId,
+            file,
+            '--max-bytes',
+            String(config.maxUploadBytes),
+            '--json',
+          ]))
+          attached.push(result.attachment)
+        } catch (error) {
+          if (!(error instanceof ControllerError)) throw error
+          failed.push({ path: file, message: error.detail ?? error.message })
+        }
+      }
+      if (files.length > 0) services.watcher.touch()
+      return await reply.status(201).send({
+        ...created,
+        attached: { files: attached, folders: contextDirs, failed },
+      })
     } finally {
       release()
     }

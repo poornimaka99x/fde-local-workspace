@@ -3411,7 +3411,7 @@ def run_output_hygiene(run: Run, *, apply=True, service_url=None, trigger="manua
 
 def new_run(requirement: str = "", project_id=None, model=None, effort=None,
             routing_mode="manual", routing_strategy=None, artifact_profile=None,
-            working_dir=None) -> Run:
+            working_dir=None, context_dirs=None) -> Run:
     key = (requirement or "").strip()
     m = re.match(r"^([A-Z][A-Z0-9]+-\d+)\b", key)
     jira_key = m.group(1) if m else None
@@ -3453,6 +3453,9 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None,
         # was chosen; without it fde-start keeps the caller's directory and the
         # console keeps the project's first repository, exactly as before.
         **({"workingDir": working_dir} if working_dir else {}),
+        # Folders attached as context, granted to the session in place. Only
+        # present when some were attached.
+        **({"contextDirs": list(context_dirs)} if context_dirs else {}),
     })
     r = Run(stem)
     if key:
@@ -3464,6 +3467,8 @@ def new_run(requirement: str = "", project_id=None, model=None, effort=None,
         project_event(project_id, "run.created", runId=stem)
     if working_dir:
         r.event("workdir.set", path=working_dir, previous=None)
+    for folder in context_dirs or ():
+        r.event("contextdir.added", path=folder)
     if artifact_profile:
         # Selecting the profile enables its skill for this run through the same
         # run-scoped override an operator would set, and nothing else.
@@ -3709,6 +3714,71 @@ def run_working_dir(manifest):
     unless it is an absolute string."""
     value = (manifest or {}).get("workingDir")
     return value if isinstance(value, str) and os.path.isabs(value) else None
+
+
+# Folders the operator attaches to a run as context. They are granted to the
+# orchestrator session with --add-dir where they are, never copied into the run,
+# so the limits below are about what the session may see, not about bytes.
+CONTEXT_DIR_LIMIT = 10
+CONTEXT_DIR_SENSITIVE_SEGMENTS = frozenset({
+    ".ssh", ".aws", ".gnupg", ".kube", ".git", "keychains", ".claude",
+    ".claude-profiles", ".claude-shared", ".codex", ".gemini", ".copilot",
+})
+
+
+def resolve_context_dir(raw):
+    """One absolute, symlink-resolved, existing folder attached as run context.
+
+    The same shape rules as a working folder, and never a credential or
+    tool-configuration location, the controller's own data or an account
+    profile: an attached folder becomes readable by the orchestrator session."""
+    raw = (raw or "").strip()
+    if not raw or "\0" in raw:
+        die("give the folder to attach as context", 2)
+    candidate = pathlib.Path(raw).expanduser()
+    if not candidate.is_absolute():
+        die(f"context folder must be an absolute path: {raw}", 2)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        die(f"context folder does not exist: {raw}", 2)
+    if not resolved.is_dir():
+        die(f"context folder is not a directory: {resolved} (attach a file with: "
+            "fde attach <run-id> <file>)", 2)
+    if resolved == pathlib.Path(resolved.anchor) or resolved == HOME.resolve():
+        die(f"context folder is too broad: {resolved}. Attach the specific folder.", 2)
+    private_roots = []
+    for root in (SHARED, PROFILES_DIR):
+        try:
+            private_roots.append(root.resolve())
+        except (OSError, RuntimeError):
+            private_roots.append(root)
+    if (any(part.lower() in CONTEXT_DIR_SENSITIVE_SEGMENTS for part in resolved.parts)
+            or any(resolved == root or root in resolved.parents for root in private_roots)):
+        die(f"context folder refused: {resolved} is a credential, key or private "
+            "configuration location", 2)
+    return str(resolved)
+
+
+def resolve_context_dirs(raws):
+    """Resolve, de-duplicate (keeping order) and bound a list of context folders."""
+    out = []
+    for raw in raws or ():
+        resolved = resolve_context_dir(raw)
+        if resolved not in out:
+            out.append(resolved)
+    if len(out) > CONTEXT_DIR_LIMIT:
+        die(f"a run can have at most {CONTEXT_DIR_LIMIT} context folders", 2)
+    return out
+
+
+def run_context_dirs(manifest):
+    """The recorded context folders. Data: only absolute strings are returned."""
+    value = (manifest or {}).get("contextDirs")
+    if not isinstance(value, list):
+        return []
+    return [v for v in value
+            if isinstance(v, str) and os.path.isabs(v)][:CONTEXT_DIR_LIMIT]
 
 
 def new_project(name, description="", repos=(), artifact_profile=None):
@@ -4286,6 +4356,7 @@ def run_summary(run_dir: pathlib.Path, manifest, agents):
         "blockedFrom": manifest.get("blockedFrom"),
         "projectId": manifest.get("projectId"),
         "workingDir": run_working_dir(manifest),
+        "contextDirs": run_context_dirs(manifest),
         "requirement": manifest.get("requirement") or None,
         "jiraKey": manifest.get("jiraKey"),
         "createdAt": manifest.get("createdAt"),
@@ -4476,6 +4547,7 @@ def status_payload(run: Run, agents, events_limit=50, events_cursor=None):
         "projectId": project_id,
         "project": project,
         "workingDir": run_working_dir(manifest),
+        "contextDirs": run_context_dirs(manifest),
         "requirement": {
             "summary": manifest.get("requirement") or None,
             "jiraKey": manifest.get("jiraKey"),
@@ -5288,16 +5360,19 @@ def _start(args):
                else (project or {}).get("artifactProfile"))
     workdir_arg = getattr(args, "workdir", None)
     working_dir = resolve_working_dir(workdir_arg) if workdir_arg else None
+    context_dirs = resolve_context_dirs(getattr(args, "context_dir", None) or [])
     run = new_run(req, project_id=project["projectId"] if project else None,
                   model=model, effort=effort, routing_mode=routing_mode,
                   routing_strategy=strategy, artifact_profile=profile,
-                  working_dir=working_dir)
+                  working_dir=working_dir, context_dirs=context_dirs)
     print(f"run    {run.id}")
     if project:
         print(f"project {project['projectId']}  ({project.get('name')})")
     print(f"dir    {run.dir}")
     if working_dir:
         print(f"folder {working_dir}")
+    for folder in context_dirs:
+        print(f"context {folder}")
     if profile:
         print(f"profile {profile}  (feature documents: fde features scaffold {run.id} …)")
     print(f"state  awaiting_orchestrator\n")
@@ -5434,6 +5509,80 @@ def cmd_workdir(args):
                           "workingDir": new, "previous": current, "changed": changed})
     print(f"run    {run.id}")
     print(f"folder {new or '(not set)'}" + ("" if changed else "  (unchanged)"))
+    return 0
+
+
+def cmd_context_dirs(args):
+    """Show, add, remove or clear the folders attached to a run as context.
+
+    An operator decision, like the working folder: a running orchestrator
+    session (FDE_RUN_ID set) may not widen or change its own access. Nothing is
+    copied; the folders are granted to the next session launch in place."""
+    run = Run(args.run_id)
+    manifest = run.manifest()
+    current = run_context_dirs(manifest)
+    adds = list(args.add or [])
+    removes = list(args.remove or [])
+    if not adds and not removes and not args.clear:
+        if args.json:
+            return emit_json({"schemaVersion": SCHEMA_VERSION, "runId": run.id,
+                              "contextDirs": current})
+        for folder in current:
+            print(folder)
+        if not current:
+            print("(none)")
+        return 0
+    if os.environ.get("FDE_RUN_ID", "").strip():
+        die("context folders are the operator's choice; an orchestrator session "
+            "cannot change them. Change them in the FDE console or from a terminal: "
+            f"fde context-dirs {run.id} --add <folder>", 6)
+    if args.clear and (adds or removes):
+        die("give --add/--remove or --clear, not both", 2)
+    new = [] if args.clear else list(current)
+    removed = []
+    for raw in removes:
+        # A removal names what was recorded; the folder may already be gone.
+        target = raw.strip()
+        try:
+            target = str(pathlib.Path(target).expanduser().resolve())
+        except (OSError, RuntimeError):
+            pass
+        match = next((f for f in new if f in (raw.strip(), target)), None)
+        if match is None:
+            die(f"{raw} is not a context folder of run {run.id}", 2)
+        new.remove(match)
+        removed.append(match)
+    if args.clear:
+        removed = list(current)
+    added = []
+    for folder in resolve_context_dirs(adds):
+        if folder not in new:
+            new.append(folder)
+            added.append(folder)
+    if len(new) > CONTEXT_DIR_LIMIT:
+        die(f"a run can have at most {CONTEXT_DIR_LIMIT} context folders", 2)
+    changed = new != current
+    if changed:
+        if new:
+            manifest["contextDirs"] = new
+        else:
+            manifest.pop("contextDirs", None)
+        run.save_manifest(manifest)
+        for folder in removed:
+            run.event("contextdir.removed", path=folder)
+        for folder in added:
+            run.event("contextdir.added", path=folder)
+    if args.json:
+        return emit_json({"schemaVersion": SCHEMA_VERSION, "runId": run.id,
+                          "contextDirs": new, "added": added, "removed": removed,
+                          "changed": changed})
+    print(f"run    {run.id}")
+    for folder in new:
+        print(f"context {folder}")
+    if not new:
+        print("context (none)")
+    if not changed:
+        print("(unchanged)")
     return 0
 
 
@@ -5688,6 +5837,9 @@ CONTRACTS = [
     "project delete --json",
     "attachments --json",
     "attach --stdin --name",
+    "attach <path> --json",
+    "start --context-dir",
+    "context-dirs --json",
     "start --json",
     "start --project",
     "start --model --effort",
@@ -14976,9 +15128,21 @@ def main(argv=None):
     s.add_argument("--workdir", metavar="FOLDER",
                    help="the folder the orchestrator session starts in (absolute, "
                         "existing; not / or your home folder)")
+    s.add_argument("--context-dir", dest="context_dir", metavar="FOLDER", action="append",
+                   help="a folder to attach as context; the session can read it in "
+                        "place, nothing is copied (repeatable)")
     s.add_argument("--json", action="store_true",
                    help="print the created run as JSON; narration goes to stderr")
     s.set_defaults(fn=cmd_start)
+
+    s = sub.add_parser("context-dirs",
+                       help="show, add, remove or clear folders attached to a run as context")
+    s.add_argument("run_id")
+    s.add_argument("--add", metavar="FOLDER", action="append")
+    s.add_argument("--remove", metavar="FOLDER", action="append")
+    s.add_argument("--clear", action="store_true")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_context_dirs)
 
     s = sub.add_parser("workdir", help="show, set or clear the folder a run's session starts in")
     s.add_argument("run_id")

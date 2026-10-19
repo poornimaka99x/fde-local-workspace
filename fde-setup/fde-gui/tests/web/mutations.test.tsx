@@ -171,6 +171,60 @@ describe('creating and editing through the controller', () => {
     expect(window.location.search).toBe('?startSession=1')
   })
 
+  it('attaches picked files and folders when the run is created, and says which failed', async () => {
+    stubFetch((url, init) =>
+      url.startsWith('/api/fs/browse')
+        ? jsonResponse({
+            path: '/home/op/diy',
+            parent: '/home/op',
+            entries: [{
+              name: 'brief.md', path: '/home/op/diy/brief.md', kind: 'file',
+              symlink: false, size: 120, modifiedAt: null,
+            }],
+            truncated: false,
+          })
+        : url === '/api/claude/accounts'
+        ? jsonResponse(accountsResponse)
+        : init?.method === 'POST'
+        ? jsonResponse({
+            schemaVersion: 1,
+            run: { runId: '20260903-acme-1-aaaa' },
+            attached: {
+              files: [],
+              folders: ['/home/op/diy'],
+              failed: [{ path: '/home/op/diy/brief.md', message: 'over the size limit' }],
+            },
+          }, 201)
+        : jsonResponse({ schemaVersion: 1, projects: [], unassignedRunCount: 0, warnings: [] }),
+    )
+    window.history.pushState(null, '', '/runs/new')
+    const user = userEvent.setup()
+    render(<NewRunForm />)
+    await waitFor(() => expect(screen.getByLabelText(/Project/)).toBeInTheDocument())
+    await user.type(screen.getByLabelText(/What do you want done/), 'build the screens in the brief')
+    await user.selectOptions(screen.getByLabelText(/Orchestrator/), 'work')
+    await chooseFolder(user)
+
+    await user.click(screen.getByRole('button', { name: 'Attach file or folder…' }))
+    await user.click(await screen.findByRole('option', { name: /brief\.md/ }))
+    await user.click(screen.getByRole('button', { name: 'Attach file or folder…' }))
+    await user.click(await screen.findByRole('button', { name: /Use this folder/ }))
+    const list = await screen.findByTestId('run-attachments')
+    expect(list).toHaveTextContent('/home/op/diy/brief.md')
+    expect(list).toHaveTextContent('/home/op/diy/')
+
+    await user.click(screen.getByRole('button', { name: 'Create run' }))
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect((sent[0]?.body as Record<string, unknown>).attachments)
+      .toEqual(['/home/op/diy/brief.md', '/home/op/diy'])
+    // The run exists, but the operator is told before the session starts
+    // without the file, instead of being navigated past the problem.
+    expect(await screen.findByRole('alert')).toHaveTextContent('over the size limit')
+    expect(window.location.pathname).toBe('/runs/new')
+    expect(screen.getByRole('link', { name: 'Continue to the run' }))
+      .toHaveAttribute('href', '/runs/20260903-acme-1-aaaa?startSession=1')
+  })
+
   it('is honest that a Codex-led run cannot be driven from here', async () => {
     stubFetch((url) => url === '/api/claude/accounts'
       ? jsonResponse(accountsResponse)

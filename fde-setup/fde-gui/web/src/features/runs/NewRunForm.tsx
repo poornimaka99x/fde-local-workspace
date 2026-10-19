@@ -14,6 +14,20 @@ import { ClaudeSettings } from '../../components/ClaudeSettings'
 import type { ClaudeEffort } from '../../lib/types'
 import { RoutingPreview } from './RoutingPreview'
 
+interface PickedAttachment {
+  path: string
+  kind: 'file' | 'directory'
+}
+
+interface AttachFailure {
+  path: string
+  message: string
+}
+
+/** Matches the server: twenty picks in all, at most ten of them folders. */
+const MAX_ATTACHMENTS = 20
+const MAX_FOLDERS = 10
+
 const STRATEGY_LABELS: Record<string, string> = {
   balanced: 'Balanced',
   quality_first: 'Quality first',
@@ -46,6 +60,9 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
   const [requirement, setRequirement] = useState('')
   const [workingDir, setWorkingDir] = useState('')
   const [browsingFolder, setBrowsingFolder] = useState(false)
+  const [attachments, setAttachments] = useState<PickedAttachment[]>([])
+  const [browsingAttachment, setBrowsingAttachment] = useState(false)
+  const [partial, setPartial] = useState<{ destination: string; failed: AttachFailure[] } | null>(null)
   const [orchestrator, setOrchestrator] = useState('work')
   const [model, setModel] = useState('default')
   const [effort, setEffort] = useState<ClaudeEffort>('auto')
@@ -96,11 +113,22 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
       if (requirement.trim() !== '') body.requirement = requirement.trim()
       if (shape.trim() !== '') body.shape = shape.trim()
       if (workingDir !== '') body.workingDir = workingDir
-      const created = await apiSend<{ run: RunSummary }>('/api/runs', 'POST', body)
+      if (attachments.length > 0) body.attachments = attachments.map((item) => item.path)
+      const created = await apiSend<{
+        run: RunSummary
+        attached?: { failed?: AttachFailure[] }
+      }>('/api/runs', 'POST', body)
       announceChange()
       const destination = shape.trim() === 'design-panel'
         ? `/design-panel/new?runId=${encodeURIComponent(created.run.runId)}`
         : `/runs/${created.run.runId}${codexLed ? '' : '?startSession=1'}`
+      const failed = created.attached?.failed ?? []
+      if (failed.length > 0) {
+        // The run exists. Say which files did not make it before the session
+        // starts without them, rather than navigating past the problem.
+        setPartial({ destination, failed })
+        return
+      }
       window.history.pushState(null, '', destination)
       window.dispatchEvent(new PopStateEvent('popstate'))
     } catch (cause) {
@@ -126,6 +154,18 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
         are reconciled into one recommendation.
       </p>
       {error ? <ErrorState error={error} /> : null}
+      {partial !== null ? (
+        <div className="banner warn" role="alert">
+          <strong>The run was created, but {partial.failed.length === 1 ? 'one file was' : `${partial.failed.length} files were`} not attached:</strong>
+          <ul>
+            {partial.failed.map((item) => (
+              <li key={item.path}><code className="mono">{item.path}</code> — {item.message}</li>
+            ))}
+          </ul>
+          <a className="action primary" href={partial.destination}>Continue to the run</a>{' '}
+          <span className="muted">You can attach files again from the run&apos;s Inputs tab.</span>
+        </div>
+      ) : null}
       <form className="card" onSubmit={(event) => void submit(event)}>
         <p>
           <label>
@@ -193,6 +233,66 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
             />
           </label>
         </p>
+        <div style={{ margin: '0 0 1rem' }}>
+          <strong>Attachments</strong>{' '}
+          <span className="muted">
+            optional — files are copied into the run; folders are not copied, the session is
+            given read access to them where they are
+          </span>
+          {attachments.length > 0 ? (
+            <ul style={{ margin: '4px 0', paddingLeft: 0, listStyle: 'none' }} data-testid="run-attachments">
+              {attachments.map((item) => (
+                <li key={item.path} className="stack" style={{ alignItems: 'center' }}>
+                  <span className="badge">{item.kind === 'directory' ? 'folder' : 'file'}</span>
+                  <code className="mono">{item.path}{item.kind === 'directory' ? '/' : ''}</code>
+                  <button
+                    className="action"
+                    type="button"
+                    aria-label={`Remove ${item.path}`}
+                    onClick={() => setAttachments((current) => current.filter((other) => other.path !== item.path))}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div>
+            <button
+              className="action"
+              type="button"
+              disabled={attachments.length >= MAX_ATTACHMENTS}
+              onClick={() => setBrowsingAttachment(true)}
+            >
+              Attach file or folder…
+            </button>
+          </div>
+          {codexLed && attachments.some((item) => item.kind === 'directory') ? (
+            <p className="banner warn">
+              Attached folders are granted to Claude orchestrator sessions. A Codex-led run records
+              them but its own task will not be given access.
+            </p>
+          ) : null}
+        </div>
+        {browsingAttachment ? (
+          <PathBrowser
+            title="Attach a file or folder to this run"
+            mode="any"
+            startPath={workingDir !== '' ? workingDir : projectRepos[0]}
+            onSelect={(picked, kind) => {
+              setBrowsingAttachment(false)
+              if (attachments.some((item) => item.path === picked)) return
+              if (kind === 'directory'
+                && attachments.filter((item) => item.kind === 'directory').length >= MAX_FOLDERS) {
+                setError(new ApiError(0, 'too-many-folders',
+                  `A run can have at most ${MAX_FOLDERS} attached folders.`))
+                return
+              }
+              setAttachments([...attachments, { path: picked, kind }])
+            }}
+            onClose={() => setBrowsingAttachment(false)}
+          />
+        ) : null}
         <fieldset style={{ border: 'none', padding: 0, margin: '0 0 1rem' }}>
           <legend><strong>Model and effort</strong></legend>
           <p>
@@ -316,7 +416,7 @@ export function NewRunForm({ projectId }: { projectId?: string }): JSX.Element {
             className="action primary"
             type="submit"
             disabled={
-              saving || requirement.trim() === '' || !policyKnown
+              saving || partial !== null || requirement.trim() === '' || !policyKnown
               || (folderRequired && workingDir === '')
             }
           >

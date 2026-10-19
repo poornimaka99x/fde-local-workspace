@@ -47,6 +47,8 @@ export const runSummarySchema = z
     blockedFrom: z.string().nullish(),
     projectId: z.string().nullish(),
     workingDir: z.string().nullish(),
+    // Additive: an older controller omits it.
+    contextDirs: z.array(z.string()).default([]),
     requirement: z.string().nullish(),
     jiraKey: z.string().nullish(),
     createdAt: z.string().nullish(),
@@ -282,6 +284,8 @@ export const statusSchema = z
       .nullish(),
     // Additive: an older controller omits it.
     workingDir: z.string().nullish(),
+    // Folders attached as context, granted to the session in place. Additive.
+    contextDirs: z.array(z.string()).default([]),
     requirement: requirementSchema,
     plan: loose.nullish(),
     planLine: z.string().nullish(),

@@ -401,6 +401,44 @@ fde attachments <run-id> --json
 - Records are immutable. There is no detach in this version.
 - **A GUI uploads through `fde attach --stdin --name`**, so a browser-supplied
   filename never reaches the filesystem or a command line.
+- Files picked in the console's **New run** form are attached right after
+  `fde start`, with `fde attach <run-id> <resolved-path> --max-bytes N --json`.
+  The console checks the path first (inside the operator's home or the run's
+  working folder, never a credential, key or tool-configuration path) and the
+  controller re-applies every rule above. A refused file is reported back; the
+  run is kept.
+
+## Context folders
+
+```bash
+fde start --context-dir <folder> [--context-dir <folder> ...] -- <ask>
+fde context-dirs <run-id> [--add <folder> ...] [--remove <folder> ...] [--clear] [--json]
+```
+
+A folder cannot be attached as bytes. It is recorded on the run instead and
+granted to the orchestrator session **where it is**: nothing is copied, hashed
+or frozen.
+
+- Stored as `manifest.contextDirs`: absolute, symlink-resolved, existing
+  folders, de-duplicated, at most 10. Absent when there are none, so older runs
+  are recorded exactly as before. `status --json` and run summaries report
+  `contextDirs` (`[]` when none).
+- Refused: relative or missing paths, files, `/`, the home folder itself, any
+  path with a `.ssh`, `.aws`, `.gnupg`, `.kube`, `.git`, `keychains`, `.claude*`,
+  `.codex`, `.gemini` or `.copilot` segment, and anything under the shared root
+  or the account profiles.
+- An operator decision: with `FDE_RUN_ID` set (inside a run's own session) a
+  change is refused with exit 6, so a session cannot widen its own access.
+- Every change appends `contextdir.added` / `contextdir.removed`.
+- `fde-start` passes each existing folder, plus `<run-dir>/inputs` when files
+  are attached, to Claude as `--add-dir`, and tells the orchestrator in its
+  system prompt that this operator-attached context may be read from scoping
+  on and must not be modified. A recorded folder that no longer exists is
+  skipped with a warning. **"Read-only" is an instruction in the prompt, not an
+  enforced permission**: `--add-dir` grants the session the same tool access it
+  has in its working folder. Specialist `claude -p` invocations are not given
+  context folders; Codex-led runs record them but are not launched by
+  `fde-start`.
 
 ## What these contracts do not do
 

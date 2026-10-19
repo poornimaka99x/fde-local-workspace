@@ -142,7 +142,7 @@ export function RunDetail({ runId }: { runId: string }): JSX.Element {
             label: 'Routing',
             badge: run.routing?.taskCount ?? undefined,
           },
-          { id: 'inputs', label: 'Inputs', badge: run.attachments.length },
+          { id: 'inputs', label: 'Inputs', badge: run.attachments.length + (run.contextDirs ?? []).length },
           { id: 'artifacts', label: 'Artifacts', badge: artifactFiles.length },
           { id: 'events', label: 'Events', badge: run.events.total },
           { id: 'approvals', label: 'Approvals & evidence', badge: run.approvals.length },
@@ -293,6 +293,20 @@ function Inputs({
             </tbody>
           </table>
         </div>
+      )}
+
+      <h2>Attached folders</h2>
+      {(run.contextDirs ?? []).length === 0 ? (
+        <p className="muted">
+          None. Folders picked when the run was created are listed here; they are not copied
+          — the orchestrator session is given read access to them where they are.
+        </p>
+      ) : (
+        <ul className="card" style={{ listStyle: 'none', paddingLeft: 16 }}>
+          {(run.contextDirs ?? []).map((folder) => (
+            <li key={folder} className="mono">{folder}/</li>
+          ))}
+        </ul>
       )}
 
       <h2>Input files</h2>

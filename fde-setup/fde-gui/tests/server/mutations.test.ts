@@ -1,3 +1,5 @@
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authed, makeHarness, type Harness } from './harness'
 import { claudeSession, statusFixture } from './fixtures'
@@ -280,6 +282,68 @@ describe('safe mutations', () => {
     })
     expect(relative.statusCode).toBe(400)
     expect(harness.calls()).toHaveLength(1)
+  })
+
+  it('sorts picked attachments into copied files and granted folders', async () => {
+    const home = path.join(harness.root, 'home')
+    mkdirSync(path.join(home, 'docs', 'designs'), { recursive: true })
+    writeFileSync(path.join(home, 'docs', 'brief.md'), '# brief\n')
+    writeFileSync(path.join(home, 'docs', 'notes.md'), 'notes\n')
+    const brief = realpathSync(path.join(home, 'docs', 'brief.md'))
+    const notes = realpathSync(path.join(home, 'docs', 'notes.md'))
+    const designs = realpathSync(path.join(home, 'docs', 'designs'))
+    const key = (file: string): string => `attach-${RUN}-${file}`.replace(/[^A-Za-z0-9._-]/g, '_')
+    harness.fixture(key(brief), {
+      schemaVersion: 1,
+      attachment: {
+        attachmentId: 'a1', runId: RUN, originalName: 'brief.md', relativePath: 'inputs/brief.md',
+        mediaType: 'text/markdown', size: 8, sha256: 'f'.repeat(64),
+      },
+    })
+    harness.failure(key(notes), 2, 'attachment refused: over the limit')
+
+    const response = await post('/api/runs', {
+      requirement: 'build the screens in the designs',
+      orchestrator: 'work',
+      attachments: [brief, designs, notes, brief],
+    })
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    expect(body.attached.files).toHaveLength(1)
+    expect(body.attached.folders).toEqual([designs])
+    expect(body.attached.failed).toEqual([
+      { path: notes, message: expect.stringContaining('over the limit') },
+    ])
+    const [start, ...attaches] = harness.calls()
+    const at = (start ?? []).indexOf('--context-dir')
+    expect(start?.[at + 1]).toBe(designs)
+    expect(at).toBeLessThan((start ?? []).indexOf('--'))
+    expect(attaches.map((call) => call.slice(0, 3))).toEqual([
+      ['attach', RUN, brief],
+      ['attach', RUN, notes],
+    ])
+  })
+
+  it('refuses a credential path or a path outside home before creating the run', async () => {
+    const home = path.join(harness.root, 'home')
+    mkdirSync(path.join(home, '.ssh'), { recursive: true })
+    writeFileSync(path.join(home, '.ssh', 'id_ed25519'), 'secret')
+    const refused = await post('/api/runs', {
+      requirement: 'x', orchestrator: 'work',
+      attachments: [path.join(home, '.ssh', 'id_ed25519')],
+    })
+    expect(refused.statusCode).toBe(400)
+    const outside = await post('/api/runs', {
+      requirement: 'x', orchestrator: 'work', attachments: ['/etc/hosts'],
+    })
+    expect(outside.statusCode).toBe(400)
+    const relative = await post('/api/runs', {
+      requirement: 'x', orchestrator: 'work', attachments: ['docs/brief.md'],
+    })
+    expect(relative.statusCode).toBe(400)
+    let calls: string[][] = []
+    try { calls = harness.calls() } catch { /* nothing was called at all */ }
+    expect(calls.some((call) => call[0] === 'start' || call[0] === 'attach')).toBe(false)
   })
 
   it('sets and clears a run\'s working folder through the controller only', async () => {

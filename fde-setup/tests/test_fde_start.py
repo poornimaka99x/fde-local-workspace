@@ -575,6 +575,49 @@ class FdeStartTest(unittest.TestCase):
         self.assertIn("working folder is missing", result.stderr)
         self.assertFalse(self.log.exists())
 
+    def test_resume_grants_attached_files_and_context_folders(self):
+        env = self._workdir_env()
+        workdir = (self.root / "assignments" / "app").resolve()
+        workdir.mkdir(parents=True)
+        designs = (self.root / "designs").resolve()
+        designs.mkdir()
+        gone = (self.root / "gone-later").resolve()
+        gone.mkdir()
+        brief = self.root / "brief.md"
+        brief.write_text("# brief\n")
+        created = subprocess.run(
+            [str(FDE), "start", "--json", "--orchestrator", "work",
+             "--workdir", str(workdir), "--context-dir", str(designs),
+             "--context-dir", str(gone), "--", "build the screens in the designs"],
+            text=True, capture_output=True, env=env, check=True,
+        )
+        run_id = json.loads(created.stdout)["run"]["runId"]
+        subprocess.run([str(FDE), "attach", run_id, str(brief), "--json"],
+                       text=True, capture_output=True, env=env, check=True)
+        gone.rmdir()
+        self.stub.write_text(textwrap.dedent(r"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'ARG=%s\n' "$@" >> "$FDE_TEST_LOG"
+        """).lstrip("\n"))
+        self.stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(LAUNCHER), "--resume", run_id],
+            text=True, capture_output=True, env=env, cwd=str(self.root),
+        )
+        log = self.log.read_text()
+        inputs = self.shared / "runs" / run_id / "inputs"
+        self.assertIn(f"ARG={designs}\n", log, msg=result.stdout + result.stderr)
+        self.assertIn(f"ARG={inputs}\n", log)
+        self.assertNotIn(f"ARG={gone}\n", log)
+        self.assertIn("context folder is missing", result.stderr)
+        self.assertIn("The operator attached this context", log)
+        # --add-dir takes several values; the next argument must end the list.
+        args = [line[4:] for line in log.splitlines() if line.startswith("ARG=")]
+        last = max(i for i, a in enumerate(args) if a == "--add-dir")
+        self.assertTrue(args[last + 2].startswith("--"), args[last:last + 3])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,12 +1,13 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
-import { open, readdir as readdirAsync, realpath, stat } from 'node:fs/promises'
+import { open, readdir as readdirAsync, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { GuiConfig } from '../config'
 import type { AccountService, ChatProvider, Effort } from './accounts'
 import { runController, runControllerWithStdin } from './controller'
+import { checkAttachPath, InvalidAttachPath } from './attach-paths'
 
 export const CHAT_ID_PATTERN = /^chat-[0-9]{8}-[a-f0-9]{8}$/
 
@@ -125,18 +126,9 @@ interface ChatMcpServer {
 }
 interface ChatServiceContext { text: string; mcpServers: ChatMcpServer[]; env: NodeJS.ProcessEnv }
 
-const SENSITIVE_SEGMENTS = new Set([
-  '.ssh', '.aws', '.gnupg', '.kube', '.git', 'keychains', 'mcp',
-  '.claude', '.claude-profiles', '.claude-shared', '.codex', '.gemini', '.copilot',
-])
-const SENSITIVE_FILE = /^(?:\.credentials\.json|credentials(?:\.json)?|orchestrator-session-id|\.netrc|\.npmrc|\.pypirc|\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx))$/i
 const MAX_ATTACHMENT_BYTES = 200_000
 const MAX_ATTACHMENT_TOTAL_BYTES = 800_000
 
-function isInside(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate)
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
-}
 
 /** Durable chat metadata and messages; the provider owns the opaque conversation id. */
 export class ChatService {
@@ -235,48 +227,18 @@ export class ChatService {
 
   async addAttachment(chatId: string, requestedPath: string): Promise<ChatRecord> {
     const chat = this.read(chatId)
-    if (!path.isAbsolute(requestedPath)) {
-      throw new InvalidAttachment('Only an absolute path can be attached.')
-    }
-    let real: string
+    let checked: { path: string; kind: 'file' | 'directory' }
     try {
-      real = await realpath(requestedPath)
-    } catch {
-      throw new InvalidAttachment('That path does not exist.')
+      checked = await checkAttachPath(requestedPath, {
+        home: this.config.home,
+        profilesRoot: this.config.profilesRoot,
+        extraRoots: [chat.cwd],
+      })
+    } catch (error) {
+      if (error instanceof InvalidAttachPath) throw new InvalidAttachment(error.message)
+      throw error
     }
-    let realProfilesRoot = path.resolve(this.config.profilesRoot)
-    try {
-      realProfilesRoot = await realpath(this.config.profilesRoot)
-    } catch {
-      // The configured profiles root need not exist yet. Its resolved path is
-      // still enough to refuse a future path beneath it.
-    }
-    let realHome = path.resolve(this.config.home)
-    let realChatRoot = path.resolve(chat.cwd)
-    try { realHome = await realpath(this.config.home) } catch { /* resolved fallback */ }
-    try { realChatRoot = await realpath(chat.cwd) } catch { /* resolved fallback */ }
-    const segments = real.split(path.sep).map((segment) => segment.toLowerCase())
-    const basename = path.basename(real)
-    const envExample = /^\.env\.(?:example|sample|template)$/i.test(basename)
-    if (!isInside(realHome, real) && !isInside(realChatRoot, real)) {
-      throw new InvalidAttachment('Only paths inside your home folder or the selected project can be attached.')
-    }
-    if (
-      isInside(realProfilesRoot, real) ||
-      segments.some((segment) => SENSITIVE_SEGMENTS.has(segment)) ||
-      (!envExample && SENSITIVE_FILE.test(basename))
-    ) {
-      throw new InvalidAttachment('Credential, key and private configuration paths cannot be attached.')
-    }
-    let info
-    try {
-      info = await stat(real)
-    } catch {
-      throw new InvalidAttachment('That path could not be read.')
-    }
-    if (!info.isFile() && !info.isDirectory()) {
-      throw new InvalidAttachment('Only files and folders can be attached.')
-    }
+    const real = checked.path
     if (chat.attachments.some((item) => item.path === real)) return chat
     if (chat.attachments.length >= 20) {
       throw new InvalidAttachment(`A chat can hold at most 20 attachments.`)
@@ -284,7 +246,7 @@ export class ChatService {
     chat.attachments.push({
       id: randomUUID(),
       path: real,
-      kind: info.isDirectory() ? 'directory' : 'file',
+      kind: checked.kind,
       addedAt: new Date().toISOString(),
     })
     chat.updatedAt = new Date().toISOString()

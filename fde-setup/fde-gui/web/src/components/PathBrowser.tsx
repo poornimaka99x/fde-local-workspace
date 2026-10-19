@@ -37,7 +37,8 @@ export function PathBrowser({
   title: string
   mode: 'directory' | 'any'
   startPath?: string
-  onSelect: (path: string) => void
+  /** The kind is what the picker saw: a file row, or "Use this folder". */
+  onSelect: (path: string, kind: 'file' | 'directory') => void
   onClose: () => void
 }): JSX.Element {
   const [target, setTarget] = useState<string | undefined>(startPath)
@@ -253,7 +254,7 @@ export function PathBrowser({
                     className={entry.kind === 'directory' ? 'is-folder' : undefined}
                     onClick={() => {
                       if (entry.kind === 'directory') { setTarget(entry.path); return }
-                      if (canPick) onSelect(entry.path)
+                      if (canPick) onSelect(entry.path, 'file')
                     }}
                   >
                     <Icon name={rowIcon(entry)} className="rowicon" />
@@ -281,7 +282,7 @@ export function PathBrowser({
                 </span>
                 <div className="mono pathpicker-current">{data.path}</div>
               </div>
-              <button className="action primary" type="button" onClick={() => onSelect(data.path)}>
+              <button className="action primary" type="button" onClick={() => onSelect(data.path, 'directory')}>
                 Use this folder
               </button>
             </footer>
