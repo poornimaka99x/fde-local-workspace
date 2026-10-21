@@ -52,6 +52,14 @@ replaces into `~/.claude-shared/.backups/<timestamp>/`, and leaves client
 contexts, intake, run history, credentials and profile settings alone.
 `--dry-run` shows exactly what it would do.
 
+To move an installation to the newest reviewed stable FDE release, use
+`./install.sh --update --latest-stable --dry-run`, review the result, then rerun
+without `--dry-run`. Stable means the highest `vMAJOR.MINOR.PATCH` (or
+`MAJOR.MINOR.PATCH`) tag on the checkout's `origin`; prerelease tags are
+excluded. The release's curated plugin pins are installed as reviewed. This
+does not silently replace a curated subset with the latest contents of each
+plugin's separate upstream repository.
+
 ---
 
 ## Phase 1 — Bedrock, properly (10 min)

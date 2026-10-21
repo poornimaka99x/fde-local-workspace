@@ -18,6 +18,9 @@ working — jump to *When something is refused* at the bottom.
 cd ~/Library/CloudStorage/OneDrive-AcmeDIYGroup/Acme/FDE-Agent/fde-local-workspace/fde-setup
 ./install.sh --update --dry-run     # look first — nothing is written
 ./install.sh --update
+# To move to the newest reviewed stable FDE release instead:
+./install.sh --update --latest-stable --dry-run
+./install.sh --update --latest-stable
 exec $SHELL -l
 ```
 
@@ -26,6 +29,8 @@ stale; delete it or you will edit the wrong one in three weeks.
 
 `--update` never deletes, shows you a diff before replacing anything you have
 customised, and backs up what it replaces into `~/.claude-shared/.backups/`.
+Add `--latest-stable` to resolve the highest non-prerelease FDE release tag and
+install its reviewed, pinned skills and plugins without changing this checkout.
 Your client contexts, intake files, run history, logins and profile settings are
 not touched.
 

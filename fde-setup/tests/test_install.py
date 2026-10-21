@@ -28,7 +28,7 @@ class InstallScriptTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def env(self, with_claude=False):
+    def env(self, with_claude=False, extra=None):
         # A PATH with the usual tools but deliberately without claude.
         path = [str(self.bindir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
         environment = dict(os.environ)
@@ -44,12 +44,13 @@ class InstallScriptTest(unittest.TestCase):
                 "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CLAUDE_STUB_LOG\"\nexit 0\n"
             )
             stub.chmod(0o755)
+        environment.update(extra or {})
         return environment
 
-    def run_install(self, *args, with_claude=False, expected=0):
+    def run_install(self, *args, with_claude=False, expected=0, env_extra=None):
         result = subprocess.run(
             ["bash", str(INSTALL), *args],
-            capture_output=True, text=True, env=self.env(with_claude),
+            capture_output=True, text=True, env=self.env(with_claude, env_extra),
             cwd=str(ROOT), input="",
         )
         self.assertEqual(result.returncode, expected,
@@ -104,8 +105,9 @@ class InstallScriptTest(unittest.TestCase):
     def test_a_fresh_install_registers_every_shipped_plugin(self):
         self.run_install("work", with_claude=True)
         calls = (self.home / "claude-calls.log").read_text()
-        for plugin in ("addy-agent-skills", "fde-core", "code-simplifier",
-                       "fde-user", "ponytail", "security-guidance"):
+        for plugin in ("addy-agent-skills", "archify", "code-simplifier", "evo",
+                       "fde-core", "fde-user", "ponytail", "rea",
+                       "security-guidance"):
             self.assertIn(f"plugin install {plugin}@fde-toolkit", calls)
         installed_skills = (
             self.home / ".claude-shared" / "fde-toolkit" / "plugins"
@@ -127,9 +129,39 @@ class InstallScriptTest(unittest.TestCase):
         self.run_install("--update", "--yes", "work", with_claude=True)
         calls = (self.home / "claude-calls.log").read_text()
         self.assertIn("plugin marketplace update fde-toolkit", calls)
-        for plugin in ("addy-agent-skills", "fde-core", "code-simplifier",
-                       "fde-user", "ponytail", "security-guidance"):
+        for plugin in ("addy-agent-skills", "archify", "code-simplifier", "evo",
+                       "fde-core", "fde-user", "ponytail", "rea",
+                       "security-guidance"):
             self.assertIn(f"plugin update {plugin}@fde-toolkit", calls)
+
+    def test_latest_stable_uses_highest_non_prerelease_semver_tag(self):
+        remote = Path(self.tmp.name) / "upstream"
+        remote.mkdir()
+        subprocess.run(["git", "init", "-q", str(remote)], check=True)
+        subprocess.run(["git", "-C", str(remote), "config", "user.name", "FDE test"], check=True)
+        subprocess.run(["git", "-C", str(remote), "config", "user.email", "fde@example.test"], check=True)
+        release_installer = remote / "install.sh"
+        release_installer.write_text(
+            "#!/bin/sh\nprintf '%s|%s\\n' \"$FDE_STABLE_RELEASE\" \"$*\" > \"$STABLE_LOG\"\n"
+        )
+        subprocess.run(["git", "-C", str(remote), "add", "install.sh"], check=True)
+        subprocess.run(["git", "-C", str(remote), "commit", "-qm", "release 1.2.0"], check=True)
+        subprocess.run(["git", "-C", str(remote), "tag", "v1.2.0"], check=True)
+        release_installer.write_text(release_installer.read_text() + "# newer\n")
+        subprocess.run(["git", "-C", str(remote), "commit", "-qam", "release 1.10.0"], check=True)
+        subprocess.run(["git", "-C", str(remote), "tag", "v1.10.0"], check=True)
+        release_installer.write_text(release_installer.read_text() + "# prerelease\n")
+        subprocess.run(["git", "-C", str(remote), "commit", "-qam", "release candidate"], check=True)
+        subprocess.run(["git", "-C", str(remote), "tag", "v2.0.0-rc.1"], check=True)
+
+        log = Path(self.tmp.name) / "stable.log"
+        result = self.run_install(
+            "--update", "--latest-stable", "--dry-run", "work",
+            env_extra={"FDE_UPDATE_REMOTE": str(remote), "STABLE_LOG": str(log)},
+        )
+        self.assertIn("newest stable FDE release: v1.10.0", result.stdout)
+        self.assertEqual(log.read_text(), "v1.10.0|--update --dry-run work\n")
+        self.assertFalse((self.home / ".claude-shared").exists())
 
     def test_addy_agent_skills_is_a_non_executable_curated_subset(self):
         plugin = ROOT / "fde-toolkit" / "plugins" / "addy-agent-skills"

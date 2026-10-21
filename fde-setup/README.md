@@ -34,6 +34,9 @@ cd fde-local-workspace
 
 ./install.sh --update --dry-run     # look first — nothing is written
 ./install.sh --update
+# Or resolve and install the newest stable FDE release:
+./install.sh --update --latest-stable --dry-run
+./install.sh --update --latest-stable
 exec $SHELL -l
 
 cp claude-shared/env.sh.example ~/.claude-shared/env.sh   # then edit it
@@ -102,6 +105,7 @@ see the same context without duplicating it.
 ./install.sh                   # profiles: work, msc, alt, bedrock
 ./install.sh work bedrock      # or name your own
 ./install.sh --update          # refresh an existing install
+./install.sh --update --latest-stable  # newest stable FDE release
 ./install.sh --update --dry-run
 ```
 
@@ -109,6 +113,13 @@ The installer never deletes, never overwrites a file you changed without showing
 you the diff first, backs up anything it does replace, and never touches your
 client contexts, intake, run history, credentials or profile settings. A skill
 you wrote that the source does not ship stays where it is.
+
+Plain `--update` installs from the current checkout. `--latest-stable` resolves
+the highest non-prerelease semantic-version tag from the checkout's `origin`,
+stages it without changing the checkout, and runs that release's installer.
+The stable FDE release remains the review boundary: it supplies the curated,
+pinned plugin and skill versions. The installer does not replace those curated
+trees with unreviewed latest versions from their individual upstream projects.
 
 Then open a new shell and sign in once per profile:
 

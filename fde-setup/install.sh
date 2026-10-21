@@ -12,6 +12,7 @@
 #   ./install.sh                     first install; profiles work msc alt bedrock
 #   ./install.sh work bedrock        first install, named profiles only
 #   ./install.sh --update            refresh an existing install in place
+#   ./install.sh --update --latest-stable  install the newest stable FDE release
 #   ./install.sh --update --dry-run  show exactly what would change, touch nothing
 #   ./install.sh --update --yes      don't ask about each changed file
 #
@@ -26,16 +27,19 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED="${CLAUDE_SHARED:-$HOME/.claude-shared}"
 STAMP="$(date +%Y%m%dT%H%M%S)"
 BACKUPS="$SHARED/.backups/$STAMP"
+ORIGINAL_ARGS=("$@")
 
 MODE=install
 DRY=0
 ASSUME_YES=0
 GIT_INIT=0
+LATEST_STABLE=0
 PROFILES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --update)   MODE=update; shift ;;
+    --latest-stable) LATEST_STABLE=1; shift ;;
     --dry-run)  DRY=1; shift ;;
     --yes|-y)   ASSUME_YES=1; shift ;;
     --git-init) GIT_INIT=1; shift ;;
@@ -46,9 +50,106 @@ while [[ $# -gt 0 ]]; do
 done
 [[ ${#PROFILES[@]} -eq 0 ]] && PROFILES=(work msc alt bedrock)
 
+if (( LATEST_STABLE )) && [[ "$MODE" != "update" ]]; then
+  echo "--latest-stable requires --update" >&2
+  exit 2
+fi
+
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 act()  { if (( DRY )); then printf '    would %s\n' "$*"; else printf '    %s\n' "$*"; fi; }
+
+# Resolve a release before touching the installation. Stable releases are FDE's
+# reviewed distribution boundary: their vendored plugins and skills carry the
+# pins, curated file sets and acceptance records approved for that release.
+# Updating every upstream plugin independently here would bypass that review.
+install_latest_stable() {
+  local remote="${FDE_UPDATE_REMOTE:-}" repo_root="" resolved="" tag="" commit=""
+  local stage="" payload="" installer="" status=0 arg
+  local -a release_args=()
+
+  for arg in "${ORIGINAL_ARGS[@]}"; do
+    [[ "$arg" == "--latest-stable" ]] || release_args+=("$arg")
+  done
+
+  for arg in git python3 tar; do
+    command -v "$arg" >/dev/null 2>&1 || {
+      echo "$arg is required for --latest-stable" >&2
+      return 1
+    }
+  done
+
+  if [[ -z "$remote" ]]; then
+    repo_root="$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" || {
+      echo "cannot resolve the FDE upstream: this checkout is not in a git repository" >&2
+      return 1
+    }
+    remote="$(git -C "$repo_root" remote get-url origin 2>/dev/null)" || {
+      echo "cannot resolve the FDE upstream: git remote 'origin' is not configured" >&2
+      return 1
+    }
+  fi
+
+  if ! resolved="$(git ls-remote --tags --refs "$remote" 2>/dev/null | python3 -c '
+import re, sys
+candidates = []
+for line in sys.stdin:
+    fields = line.rstrip("\n").split("\t", 1)
+    if len(fields) != 2 or not fields[1].startswith("refs/tags/"):
+        continue
+    tag = fields[1][len("refs/tags/"):]
+    match = re.fullmatch(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag)
+    if match:
+        candidates.append((tuple(map(int, match.groups())), tag, fields[0]))
+if candidates:
+    _, tag, commit = max(candidates)
+    print(f"{tag}\t{commit}")
+')"; then
+    echo "could not read stable release tags from $remote" >&2
+    return 1
+  fi
+  if [[ -z "$resolved" ]]; then
+    echo "no stable semantic-version release tag was found at $remote" >&2
+    return 1
+  fi
+  IFS=$'\t' read -r tag commit <<< "$resolved"
+
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/fde-stable.XXXXXX")"
+  payload="$stage/release"
+  mkdir -p "$payload"
+  say "resolving newest stable FDE release: $tag (${commit:0:12})"
+  if ! git init --bare -q "$stage/repository.git" ||
+     ! git -C "$stage/repository.git" fetch --quiet --depth=1 "$remote" "refs/tags/$tag" ||
+     ! git -C "$stage/repository.git" archive FETCH_HEAD | tar -x -C "$payload"; then
+    find "$stage" -depth -delete 2>/dev/null || true
+    echo "could not stage stable release $tag from $remote" >&2
+    return 1
+  fi
+
+  if [[ -f "$payload/install.sh" ]]; then
+    installer="$payload/install.sh"
+  elif [[ -f "$payload/fde-setup/install.sh" ]]; then
+    installer="$payload/fde-setup/install.sh"
+  else
+    find "$stage" -depth -delete 2>/dev/null || true
+    echo "stable release $tag does not contain install.sh" >&2
+    return 1
+  fi
+
+  note "using the reviewed skills and plugin pins shipped in $tag"
+  if FDE_STABLE_RELEASE="$tag" bash "$installer" "${release_args[@]}"; then
+    status=0
+  else
+    status=$?
+  fi
+  find "$stage" -depth -delete 2>/dev/null || true
+  return "$status"
+}
+
+if (( LATEST_STABLE )); then
+  install_latest_stable
+  exit $?
+fi
 
 # The Claude CLI is required for a fresh install. During an update it is
 # optional: files can still be synced without it, but when present it also
@@ -147,6 +248,21 @@ matches() {  # matches <relpath> <array-name>
     [[ "$rel" == $pat ]] && return 0
   done
   return 1
+}
+
+shipped_plugins() {
+  python3 - "$SRC/fde-toolkit/.claude-plugin/marketplace.json" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    marketplace = json.load(handle)
+for entry in marketplace.get("plugins", []):
+    name = entry.get("name")
+    if isinstance(name, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        print(name)
+PY
 }
 
 changed=0; skipped=0; preserved=0; added=0
@@ -309,10 +425,10 @@ if [[ "$MODE" == "install" ]]; then
     say "installing FDE plugins into profile: $p"
     if (( ! DRY )); then
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$SHARED/fde-toolkit" 2>/dev/null || true
-      for plugin in addy-agent-skills fde-core code-simplifier fde-user ponytail security-guidance; do
+      while IFS= read -r plugin; do
         CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" 2>/dev/null || \
           note "($plugin install needs an interactive session first — run 'cc-$p' and use /plugin)"
-      done
+      done < <(shipped_plugins)
     fi
   done
 else
@@ -328,10 +444,10 @@ else
       fi
       CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace update fde-toolkit \
         >/dev/null 2>&1 || note "($p marketplace refresh skipped — register fde-toolkit in that profile first)"
-      for plugin in addy-agent-skills fde-core code-simplifier fde-user ponytail security-guidance; do
+      while IFS= read -r plugin; do
         CLAUDE_CONFIG_DIR="$dir" claude plugin update "$plugin@fde-toolkit" \
           >/dev/null 2>&1 || true
-      done
+      done < <(shipped_plugins)
     done
   fi
 fi

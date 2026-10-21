@@ -138,6 +138,14 @@ Highest first. The first layer with an opinion other than `inherit` wins.
 Layer 8 is data shipped with FDE and is never written by resolution or by the
 console. An upgrade replaces it; it cannot reach layers 1–7.
 
+`REQ-INSTALL-STABLE-001` — `install.sh --update --latest-stable` resolves the
+highest stable semantic-version tag from the configured FDE upstream and runs
+that release's installer from a temporary staged tree. Prerelease tags are
+excluded, the working checkout is not changed, operator-owned installation
+state keeps the normal preserve/confirm/backup treatment, and the selected FDE
+release—not each plugin's moving upstream head—remains the reviewed source of
+plugin and skill pins.
+
 ### The invariants
 
 - **An explicit disable survives an upgrade.** User layers are keyed by stable
