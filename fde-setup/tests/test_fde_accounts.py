@@ -98,7 +98,8 @@ class TestProviders(AccountsBase):
         by_name = {p["provider"]: p for p in answer["providers"]}
         self.assertEqual(
             sorted(by_name),
-            ["antigravity", "claude", "claude-bedrock", "claude-omniroute", "codex", "copilot-studio"])
+            ["antigravity", "claude", "claude-bedrock", "claude-omniroute", "codex", "copilot-studio",
+             "gemini-api"])
         for name, provider in by_name.items():
             with self.subTest(provider=name):
                 self.assertTrue(provider["label"])

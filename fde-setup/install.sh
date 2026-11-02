@@ -417,7 +417,7 @@ if [[ "$MODE" == "install" ]]; then
       continue
     fi
     say "creating profile: $p"
-    (( DRY )) || "$SHARED/bin/claude-profile-new" "$p"
+    (( DRY )) || FDE_SKIP_PLUGIN_INSTALL=1 "$SHARED/bin/claude-profile-new" "$p"   # plugins installed below
   done
 
   for p in "${PROFILES[@]}"; do

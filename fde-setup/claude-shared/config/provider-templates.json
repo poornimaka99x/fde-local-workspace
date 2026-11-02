@@ -370,6 +370,59 @@
         "ci-investigation"
       ]
     },
+    "gemini-api": {
+      "label": "Gemini (API key)",
+      "kind": "gemini",
+      "idPrefix": "geminiapi",
+      "loginMode": "secret",
+      "summary": "Gemini through the Gemini API with one API key per account. Each key lives in its own folder, so several Google accounts can be registered side by side and assigned to roles independently.",
+      "credential": {
+        "dirTemplate": "${FDE_GEMINI_PROFILES_DIR:~/.fde-gemini}/{account}",
+        "mode": "0700",
+        "secretFile": "gemini-api-key",
+        "secretFileMode": "0600",
+        "dirEnv": "FDE_GEMINI_ACCOUNT_DIR",
+        "defaultDir": "~/.fde-gemini",
+        "source": "Gemini API keys are created per Google account in Google AI Studio and sent as the x-goog-api-key request header. https://ai.google.dev/gemini-api/docs/api-key",
+        "handling": "The key is written once from stdin to a 0600 file in the account folder. gemini-api reads it at call time and sends it only as a request header. It is never echoed, logged, or placed in argv or the environment."
+      },
+      "secret": {
+        "label": "Gemini API key",
+        "minLength": 20,
+        "instruction": "Google AI Studio (aistudio.google.com/apikey), signed in as the Google account you are adding > Create API key. Paste it; it is stored on this machine only."
+      },
+      "fields": [
+        {
+          "name": "model",
+          "label": "Default model",
+          "required": false,
+          "default": "gemini-pro-latest",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "env": "FDE_GEMINI_API_DEFAULT_MODEL"
+        }
+      ],
+      "verify": {
+        "mode": "argv",
+        "argv": [
+          "ask-gemini",
+          "--check"
+        ],
+        "note": "Lists the models this key can reach. Sends no prompt, so verifying costs nothing; prints no key."
+      },
+      "capabilities": [
+        "product-management",
+        "research",
+        "solutioning",
+        "review",
+        "pr-review",
+        "standards-review",
+        "security-review",
+        "test-engineering",
+        "ci-investigation"
+      ],
+      "interactiveSessionNote": "A Gemini API account is a one-shot request with no session state, so it cannot hold an interactive orchestrator conversation.",
+      "mcpNote": "The Gemini API has no MCP client. Run-scoped MCP servers assigned to this account are withheld, and the run records that they were."
+    },
     "copilot-studio": {
       "label": "Microsoft Copilot",
       "kind": "copilot-studio",

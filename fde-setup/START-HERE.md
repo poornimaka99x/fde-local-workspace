@@ -279,6 +279,7 @@ cc-work  cc-msc  cc-alt  cc-bedrock    the four identities
 cc-which                               which one is active
 
 ask-gemini "..."                    research, long context, web
+ask-gemini --account <name> "..."   same, through a Gemini API-key account
 ask-codex --read-only "..."         second opinion, cannot write
 ask-ms-copilot "..."                SharePoint, Outlook, Teams
 ms-intake - --title "..."           paste a Notebook/recap in by hand

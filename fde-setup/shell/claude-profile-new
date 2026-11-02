@@ -45,6 +45,43 @@ dir="$HOME/.claude-profiles/$name"
 
 mkdir -p "$dir"
 
+# Every profile gets every plugin the fde-toolkit marketplace ships (fde-core
+# carries /engage and the other FDE skills, commands and agents), whatever its
+# provider: a run resumed on any profile must still have /engage. The list is
+# read from marketplace.json, so a plugin added there reaches new profiles too.
+# FDE_SKIP_PLUGIN_INSTALL=1 skips this (install.sh installs them itself).
+install_fde_plugins() {
+  [[ "${FDE_SKIP_PLUGIN_INSTALL:-0}" == "1" ]] && return 0
+  local market="$SHARED/fde-toolkit" plugin missing=0
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "(claude CLI not on PATH — FDE plugins not installed; rerun this command once it is)"
+    return 0
+  fi
+  if [[ ! -f "$market/.claude-plugin/marketplace.json" ]]; then
+    echo "(no fde-toolkit marketplace at $market — run ./install.sh first)"
+    return 0
+  fi
+  CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$market" >/dev/null 2>&1 || \
+    CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace update fde-toolkit >/dev/null 2>&1 || true
+  while IFS= read -r plugin; do
+    if CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" >/dev/null 2>&1; then
+      echo "  installed $plugin"
+    else
+      missing=1
+      echo "  ($plugin not installed — run: CLAUDE_CONFIG_DIR=$dir claude plugin install $plugin@fde-toolkit)"
+    fi
+  done < <(python3 - "$market/.claude-plugin/marketplace.json" <<'PYEOF'
+import json, re, sys
+for entry in json.load(open(sys.argv[1], encoding="utf-8")).get("plugins", []):
+    name = entry.get("name")
+    if isinstance(name, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        print(name)
+PYEOF
+)
+  (( missing )) && echo "  (a plugin that needs sign-in first: run CLAUDE_CONFIG_DIR=$dir claude once, then rerun claude-profile-new $name)"
+  return 0
+}
+
 # Shared context: symlinked, so editing it once changes every profile.
 ln -sfn "$SHARED/CLAUDE.md" "$dir/CLAUDE.md"
 ln -sfn "$SHARED/shared"    "$dir/shared"
@@ -95,15 +132,7 @@ if [[ "$omniroute" == true ]]; then
 JSON
     chmod 600 "$dir/settings.json"
   fi
-  # The FDE plugins, as install.sh adds them to every other profile: a run
-  # resumed here must still have /engage.
-  if command -v claude >/dev/null 2>&1; then
-    CLAUDE_CONFIG_DIR="$dir" claude plugin marketplace add "$SHARED/fde-toolkit" >/dev/null 2>&1 || true
-    for plugin in addy-agent-skills fde-core code-simplifier fde-user ponytail security-guidance; do
-      CLAUDE_CONFIG_DIR="$dir" claude plugin install "$plugin@fde-toolkit" >/dev/null 2>&1 || \
-        echo "($plugin not installed — run: CLAUDE_CONFIG_DIR=$dir claude plugin install $plugin@fde-toolkit)"
-    done
-  fi
+  install_fde_plugins
   echo "omniroute profile '$name' ready at $dir"
   echo "next: store the key with  pbpaste | fde accounts set-secret omniroute_$name"
   echo "      then check it with  fde accounts verify omniroute_$name"
@@ -140,5 +169,7 @@ JSON
   fi
 fi
 
+install_fde_plugins
+
 echo "profile '$name' ready at $dir"
-echo "next: CLAUDE_CONFIG_DIR=$dir claude   # sign in, then install the toolkit plugin"
+echo "next: CLAUDE_CONFIG_DIR=$dir claude   # sign in; FDE plugins, skills and /engage are already installed"

@@ -4,6 +4,7 @@
 #   git diff | ask-gemini "what would break in production?"
 #   ask-gemini --check          report whether a sign-in resolves (prints no credential)
 #   ask-gemini --models         the models this sign-in can reach
+#   ask-gemini --account personal "..."   use a Gemini API-key account instead
 #
 # Lane: bulk reading, long context, and independent web-grounded research.
 # Bedrock has no native WebSearch; approved FDE runs also expose an isolated
@@ -13,6 +14,12 @@
 # a per-account directory, so this machine has ONE Antigravity sign-in and the
 # controller's registry caps it at one account. Nothing here reads that keyring;
 # `--check` asks agy itself.
+#
+# Further Gemini accounts use API keys instead ('fde accounts add --provider
+# gemini-api'). Each key lives in its own folder; when FDE_GEMINI_ACCOUNT_DIR
+# names one (the controller sets it per account, or pass --account <name>), the
+# question goes to the Gemini API through gemini-api rather than to agy. That
+# lane has no file, shell or MCP tools — only Google Search grounding.
 #
 # Antigravity's blanket auto-approval flag is refused here, for the same reason
 # ask-codex refuses Codex's sandbox bypasses: what this toolkit may approve is
@@ -24,6 +31,18 @@ set -uo pipefail
 die() { printf 'ask-gemini: %s\n' "$*" >&2; exit 1; }
 
 AGY="${FDE_AGY_BIN:-agy}"
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")")" && pwd)"
+GEMINI_API="${FDE_GEMINI_API_BIN:-$here/gemini-api}"
+
+# --account <name> selects a registered Gemini API-key account by its name.
+if [[ "${1:-}" == "--account" ]]; then
+  [[ "${2:-}" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "--account needs an account name (as given to fde accounts add)"
+  FDE_GEMINI_ACCOUNT_DIR="${FDE_GEMINI_PROFILES_DIR:-$HOME/.fde-gemini}/$2"
+  [[ -d "$FDE_GEMINI_ACCOUNT_DIR" ]] || die "no Gemini API account named '$2' — fde accounts list"
+  export FDE_GEMINI_ACCOUNT_DIR
+  shift 2
+fi
+api_account="${FDE_GEMINI_ACCOUNT_DIR:-}"
 missing() {
   echo "Antigravity CLI not installed: see https://antigravity.google/docs/cli" >&2
   echo "  the binary is 'agy'; set FDE_AGY_BIN if it lives somewhere unusual" >&2
@@ -44,6 +63,13 @@ gemini_account_check() {
   return 1
 }
 
+if [[ -n "$api_account" ]]; then
+  case "${1:-}" in
+    --check)  exec python3 "$GEMINI_API" --check ;;
+    --models) exec python3 "$GEMINI_API" --models ;;
+  esac
+fi
+
 case "${1:-}" in
   --check)  command -v "$AGY" >/dev/null || missing; gemini_account_check; exit $? ;;
   --models) command -v "$AGY" >/dev/null || missing; exec "$AGY" models ;;
@@ -52,7 +78,7 @@ case "${1:-}" in
             approved is decided by the controller and the user, not here." ;;
 esac
 
-command -v "$AGY" >/dev/null || missing
+[[ -n "$api_account" ]] || command -v "$AGY" >/dev/null || missing
 
 # The standing brief goes FIRST and byte-identical on every call: Antigravity,
 # Gemini and Codex all do automatic prefix caching, and a prefix that shifts by
@@ -128,7 +154,7 @@ prompt="$(compose_prompt "$prompt" ${context_files[@]+"${context_files[@]}"})"
 # lane, so headless mode otherwise soft-denies them and returns no answer. Make
 # the transport contract explicit after the task: return the requested document
 # as the response; the controller, not the model, owns filing it.
-if [[ -n "${FDE_GEMINI_WORKSPACE:-}" ]]; then
+if [[ -n "${FDE_GEMINI_WORKSPACE:-}" || ( -n "$api_account" && "${FDE_ROUTED_INVOCATION:-}" == "1" ) ]]; then
   prompt="$prompt
 
 # FDE response contract
@@ -153,6 +179,19 @@ if [[ -n "$effort" && "$effort" != "auto" ]]; then
     low|medium|high) options+=(--effort "$effort") ;;
     *) die "unusable GEMINI_EFFORT value: $effort (low, medium or high)" ;;
   esac
+fi
+
+# A Gemini API-key account: no workspace, no shadow HOME, no MCP — the API has
+# no local tools to govern. The finished prompt goes on stdin, never in argv.
+if [[ -n "$api_account" ]]; then
+  api_options=()
+  [[ -n "$model" ]] && api_options+=(--model "$model")
+  [[ -n "$effort" ]] && api_options+=(--effort "$effort")
+  [[ "${FDE_GEMINI_NO_WEB:-}" == "1" ]] && api_options+=(--no-web)
+  printf '%s' "$prompt" | python3 "$GEMINI_API" ${api_options[@]+"${api_options[@]}"}
+  rc=$?
+  [[ $rc -ne 0 ]] && echo "(gemini-api exited $rc — run 'ask-gemini --check' with this account selected if this looks like a key problem)" >&2
+  exit $rc
 fi
 
 # A governed run may provide a workspace-local MCP configuration. Antigravity

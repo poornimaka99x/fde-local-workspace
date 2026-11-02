@@ -72,7 +72,7 @@ class Sandbox:
                   self.bindir, self.repo, self.outside):
             d.mkdir(parents=True, exist_ok=True)
 
-        for name in ("fde", "ask-codex", "ask-gemini", "mcp-sync",
+        for name in ("fde", "ask-codex", "ask-gemini", "gemini-api", "mcp-sync",
                      "ask-ms-copilot", "ask-copilot"):
             dst = self.shared / "bin" / name
             shutil.copy2(SRC_SHARED / "bin" / name, dst)
@@ -781,7 +781,8 @@ class TestBedrock(unittest.TestCase):
     def test_profile_creation_writes_the_right_account_and_region(self):
         tmp = pathlib.Path(tempfile.mkdtemp(prefix="fde-bedrock-"))
         try:
-            env = dict(os.environ, HOME=str(tmp), CLAUDE_SHARED=str(tmp / ".claude-shared"))
+            env = dict(os.environ, HOME=str(tmp), CLAUDE_SHARED=str(tmp / ".claude-shared"),
+                       FDE_SKIP_PLUGIN_INSTALL="1")
             for name in ("bedrock", "work"):
                 r = subprocess.run(["bash", str(REPO / "shell/claude-profile-new"), name],
                                    capture_output=True, text=True, env=env)
@@ -919,6 +920,54 @@ class TestAtlassian(FDETest):
         self.assertIn("--task-file", invocation["argv"])
         self.assertIn("--context-file", invocation["argv"])
         self.assertFalse(any("mcp_servers." in item for item in invocation["argv"]))
+
+    def test_a_gemini_api_account_is_invoked_with_its_own_key_folder(self):
+        r = self.sb.fde("accounts", "add", "--provider", "gemini-api", "--name", "personal")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.sb.fde("accounts", "set-secret", "geminiapi_personal",
+                        stdin="AIzaTEST-not-a-real-key-0123456789")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        run_id = self.sb.start_full()
+        result = self.sb.fde("roles", run_id,
+                             "--set", "orchestrator=claude_alt",
+                             "--set", "review=geminiapi_personal",
+                             "--set", "research=gemini",
+                             "--allow-unassigned", "--allow-unavailable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.sb.advance_to(run_id, "review")
+        task = self.sb.run_dir(run_id) / "tasks/review.md"
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("Review the proposal")
+        result = self.sb.fde("invoke", run_id, "geminiapi_personal", str(task),
+                             "--stage", "review", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocation = json.loads(result.stdout)
+        env = invocation["env"]
+        self.assertEqual(env["FDE_ROUTED_INVOCATION"], "1")
+        self.assertEqual(env["FDE_GEMINI_ACCOUNT_DIR"],
+                         str(self.sb.home / ".fde-gemini" / "personal"))
+        # No Antigravity workspace or shadow-HOME settings for an API account,
+        # and the key itself never appears in the plan.
+        self.assertNotIn("FDE_GEMINI_WORKSPACE", env)
+        self.assertNotIn("AIzaTEST", result.stdout + result.stderr)
+        self.assertTrue(invocation["argv"][0].endswith("ask-gemini"))
+
+    def test_an_antigravity_invocation_cannot_be_redirected_to_an_api_key(self):
+        run_id = self.sb.start_full()
+        result = self.sb.fde("roles", run_id,
+                             "--set", "orchestrator=claude_alt",
+                             "--set", "review=gemini",
+                             "--allow-unassigned", "--allow-unavailable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.sb.advance_to(run_id, "review")
+        task = self.sb.run_dir(run_id) / "tasks/review.md"
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("Review the proposal")
+        result = self.sb.fde("invoke", run_id, "gemini", str(task),
+                             "--stage", "review", "--dry-run",
+                             FDE_GEMINI_ACCOUNT_DIR="/somewhere/else")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["env"]["FDE_GEMINI_ACCOUNT_DIR"], "")
 
     def test_specialist_invocations_receive_their_run_scoped_mcp_config(self):
         run_id = self.sb.start_full()

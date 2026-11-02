@@ -361,7 +361,26 @@ ask-gemini "…"                # bulk reading, long context, web research
 ask-codex --read-only "…"     # independent read from another model family
 ask-ms-copilot "…"            # SharePoint, Outlook, Teams, M365 documents
 git diff | ask-gemini "what breaks in production?"
+ask-gemini --account personal "…"   # a Gemini API-key account instead of agy
 ```
+
+**More than one Gemini account.** Antigravity keeps one sign-in per machine (its
+token is in the Keychain), so it stays capped at one account. Further Google
+accounts are added as API-key accounts, each with its own key folder:
+
+```bash
+fde accounts add --provider gemini-api --name personal   # optional: --model <id>
+pbpaste | fde accounts set-secret geminiapi_personal     # key from aistudio.google.com/apikey
+fde accounts verify geminiapi_personal                   # lists models; sends no prompt
+```
+
+The account is then offered for roles like any other identity. Its calls go to
+the Gemini API (`gemini-api`, key sent only as a request header) with Google
+Search grounding and no file, shell or MCP tools, so MCP servers assigned to its
+role are withheld and the run records that. API usage is billed and rate-limited
+per key, separately from any Gemini subscription. Routed Antigravity model ids
+(`gemini-3.1-pro-high`) are split into model and thinking level; a model the key
+cannot reach falls back to the account's default model (`gemini-pro-latest`).
 
 Bedrock has no native WebSearch. Approved FDE runs instead expose the isolated
 Playwright browser for web navigation and search; `ask-gemini` remains useful
@@ -643,7 +662,8 @@ Details, environment variables and the deliberate deviations are in
 The console's **Configuration** page keeps two deliberately separate kinds of
 access. **AI accounts** are identities that may be assigned roles in a run;
 Claude and Codex use isolated profile directories, Gemini uses Antigravity's
-single machine Keychain sign-in, and Copilot Studio uses a separately stored
+single machine Keychain sign-in plus any number of API-key accounts (one key
+folder each under `~/.fde-gemini/`), and Copilot Studio uses a separately stored
 Direct Line credential. **Service connections** are Atlassian REST, Atlassian
 Rovo MCP, GitHub, Bitbucket and Figma access. They never become role identities and configuring
 one never authorises an external write.

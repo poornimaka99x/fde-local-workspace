@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""Gemini through the Gemini API, for one account's API key.
+
+Called by ask-gemini when FDE_GEMINI_ACCOUNT_DIR names a registered
+'gemini-api' account (fde accounts add --provider gemini-api ...). Not meant
+to be called directly: ask-gemini composes the prompt, the standing brief and
+the context files, and passes the finished prompt on stdin.
+
+  gemini-api --check                     whether this account's key works
+  gemini-api --models                    the models this key can reach
+  gemini-api [--model M] [--effort E] [--no-web]   < prompt
+
+The key is read from <account dir>/gemini-api-key at call time and sent only
+as the x-goog-api-key header. It is never printed, logged, placed in argv or
+exported to a child process.
+
+The API has no file, shell or MCP tools. The only tool offered is Google
+Search grounding (on by default, --no-web turns it off), so this lane can
+research but can never touch the machine.
+"""
+import json
+import os
+import re
+import stat
+import sys
+import urllib.error
+import urllib.request
+
+DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
+FALLBACK_MODEL = "gemini-pro-latest"
+MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+EFFORT_SUFFIX_RE = re.compile(r"^(?P<model>.+)-(?P<effort>low|medium|high)$")
+MAX_PROMPT_BYTES = 8 * 1024 * 1024
+KEY_FILE = "gemini-api-key"
+
+
+def die(message, code=1):
+    print(f"gemini-api: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def base_url():
+    # Overridable for isolated tests only. Anything other than https, or plain
+    # http to this machine's loopback, would send the key in the clear.
+    base = os.environ.get("FDE_GEMINI_API_BASE", DEFAULT_BASE).rstrip("/")
+    if not (base.startswith("https://")
+            or re.match(r"^http://(127\.0\.0\.1|localhost)(:\d{2,5})?(/|$)", base)):
+        die("FDE_GEMINI_API_BASE must be https:// (or http:// to loopback)")
+    return base
+
+
+def read_key():
+    directory = os.environ.get("FDE_GEMINI_ACCOUNT_DIR", "")
+    if not directory or not os.path.isabs(directory):
+        die("no Gemini API account selected (FDE_GEMINI_ACCOUNT_DIR is unset)\n"
+            "  add one:  fde accounts add --provider gemini-api --name <name>", 4)
+    path = os.path.join(directory, KEY_FILE)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        die(f"no API key stored for this account\n"
+            f"  store it:  pbpaste | fde accounts set-secret <account-id>", 4)
+    if not stat.S_ISREG(info.st_mode):
+        die("the stored API key is not a regular file; refusing to read it", 4)
+    if info.st_mode & 0o077:
+        die(f"the stored API key is readable by other users ({oct(info.st_mode & 0o777)}); "
+            "run: chmod 600 on it, or store it again with fde accounts set-secret", 4)
+    with open(path, "r", encoding="utf-8") as handle:
+        key = handle.read().strip()
+    if not key or "\n" in key:
+        die("the stored API key is empty or malformed; store it again", 4)
+    return key
+
+
+def request(method, path, key, body=None, timeout=None):
+    url = f"{base_url()}/{path.lstrip('/')}"
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("x-goog-api-key", key)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    timeout = timeout or float(os.environ.get("FDE_GEMINI_API_TIMEOUT", "600"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8") or "{}")
+        except (ValueError, OSError):
+            payload = {}
+        return exc.code, payload
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        die(f"could not reach the Gemini API: {getattr(exc, 'reason', exc)}", 2)
+
+
+def api_message(payload):
+    message = ((payload or {}).get("error") or {}).get("message") or ""
+    # The service never echoes a key, but strip anything key-shaped regardless.
+    return re.sub(r"AIza[0-9A-Za-z_-]{20,}", "[redacted]", str(message))[:500]
+
+
+def explain(status, payload):
+    detail = api_message(payload)
+    if status in (401, 403):
+        return f"the API key was rejected ({status}). {detail}".strip()
+    if status == 429:
+        return f"rate limit or quota reached for this account (429). {detail}".strip()
+    return f"Gemini API error {status}. {detail}".strip()
+
+
+def list_models(key):
+    models, token = [], ""
+    for _ in range(20):
+        path = "models?pageSize=1000" + (f"&pageToken={token}" if token else "")
+        status, payload = request("GET", path, key, timeout=30)
+        if status != 200:
+            return status, payload, []
+        for m in payload.get("models") or []:
+            if "generateContent" in (m.get("supportedGenerationMethods") or []):
+                models.append(str(m.get("name", "")).removeprefix("models/"))
+        token = payload.get("nextPageToken") or ""
+        if not token:
+            break
+    return 200, {}, models
+
+
+def split_route(model, effort):
+    """An FDE route names Antigravity ids such as 'gemini-3.1-pro-high'. The API
+    takes the model and the thinking level separately."""
+    match = EFFORT_SUFFIX_RE.match(model or "")
+    if match:
+        return match["model"], effort or match["effort"]
+    return model, effort
+
+
+def generate(key, model, effort, prompt, web):
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+    if web:
+        body["tools"] = [{"google_search": {}}]
+    thinking = effort in ("low", "high")
+    if thinking:
+        body["generationConfig"] = {"thinkingConfig": {"thinkingLevel": effort}}
+    status, payload = request("POST", f"models/{model}:generateContent", key, body)
+    if status == 400 and thinking:
+        # Not every model accepts a thinking level; answer without one rather
+        # than fail the call.
+        print(f"gemini-api: {model} refused thinking level '{effort}'; "
+              "retrying with the model's default", file=sys.stderr)
+        body.pop("generationConfig", None)
+        status, payload = request("POST", f"models/{model}:generateContent", key, body)
+    return status, payload
+
+
+def render(payload):
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        reason = ((payload.get("promptFeedback") or {}).get("blockReason")) or "no candidates"
+        die(f"Gemini returned no answer ({reason})")
+    first = candidates[0]
+    text = "".join(p.get("text", "") for p in (first.get("content") or {}).get("parts") or []
+                   if not p.get("thought"))
+    if not text.strip():
+        die(f"Gemini returned an empty answer (finishReason: {first.get('finishReason', '?')})")
+    sources = []
+    for chunk in (first.get("groundingMetadata") or {}).get("groundingChunks") or []:
+        web = chunk.get("web") or {}
+        if web.get("uri"):
+            sources.append((web.get("title") or web["uri"], web["uri"]))
+    out = text.rstrip() + "\n"
+    if sources:
+        out += "\nSources (Google Search grounding):\n"
+        seen = set()
+        for title, uri in sources:
+            if uri in seen:
+                continue
+            seen.add(uri)
+            out += f"- {title}: {uri}\n"
+    return out
+
+
+def main(argv):
+    model = os.environ.get("GEMINI_MODEL", "")
+    effort = os.environ.get("GEMINI_EFFORT", "")
+    web = True
+    mode = "ask"
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--check":
+            mode = "check"
+        elif arg == "--models":
+            mode = "models"
+        elif arg == "--model":
+            model = args.pop(0) if args else ""
+        elif arg == "--effort":
+            effort = args.pop(0) if args else ""
+        elif arg == "--no-web":
+            web = False
+        else:
+            die(f"unknown argument: {arg} (the prompt is read from stdin)")
+
+    key = read_key()
+    if mode in ("check", "models"):
+        status, payload, models = list_models(key)
+        if status != 200:
+            die(explain(status, payload), 1)
+        if mode == "models":
+            print("\n".join(models))
+        else:
+            print(f"Gemini (API key): key accepted — {len(models)} model(s) reachable")
+        return 0
+
+    raw = sys.stdin.buffer.read(MAX_PROMPT_BYTES + 1)
+    if len(raw) > MAX_PROMPT_BYTES:
+        die("the prompt is larger than 8 MiB")
+    prompt = raw.decode("utf-8", errors="replace")
+    if not prompt.strip():
+        die("nothing to ask")
+
+    default = os.environ.get("FDE_GEMINI_API_DEFAULT_MODEL") or FALLBACK_MODEL
+    if model in ("", "default"):
+        model = default
+    effort = "" if effort in ("", "auto") else effort
+    model, effort = split_route(model, effort)
+    for value, name in ((model, "model"), (default, "default model")):
+        if not MODEL_RE.match(value):
+            die(f"unusable {name} identifier")
+    if effort and effort not in ("low", "medium", "high"):
+        die(f"unusable effort '{effort}' (low, medium or high)")
+
+    status, payload = generate(key, model, effort, prompt, web)
+    if status == 404 and model != default:
+        # Routed ids come from the Antigravity catalogue, which is not the
+        # API's. Fall back to this account's default instead of failing.
+        print(f"gemini-api: model '{model}' is not available to this key; "
+              f"using the account default '{default}'", file=sys.stderr)
+        status, payload = generate(key, default, effort, prompt, web)
+    if status != 200:
+        die(explain(status, payload), 3 if status == 429 else 1)
+    sys.stdout.write(render(payload))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

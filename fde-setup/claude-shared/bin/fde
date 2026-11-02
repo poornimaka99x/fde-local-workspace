@@ -6955,6 +6955,12 @@ CLAUDE_VERIFICATION_COMMANDS = (
     "Bash(pnpm build)", "Bash(terraform fmt -check -recursive infra)",
     "Bash(terraform -chdir=infra/envs/test init -backend=false)",
     "Bash(terraform -chdir=infra/envs/test validate)",
+    "Bash(npm test)", "Bash(npm run lint)", "Bash(npm run format:check)",
+    "Bash(npm run typecheck)", "Bash(npm run build)",
+    "Bash(quiet npm test)", "Bash(quiet npm run lint)",
+    "Bash(quiet npm run typecheck)", "Bash(quiet npm run build)",
+    "Bash(npx vitest run:*)", "Bash(npx prettier --check:*)",
+    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
 )
 
 
@@ -6977,7 +6983,9 @@ def _claude_tool_scope(run: "Run", stage: str, disabled=()) -> list[str]:
     tools = [t for t in tools if t not in set(disabled)]
     permissions = []
     if stage == "verification" and "Bash" in tools:
-        permissions = ["--allowedTools", ",".join(CLAUDE_VERIFICATION_COMMANDS)]
+        artifacts = f"/{(run.dir.resolve() / 'artifacts').as_posix()}/**"
+        permissions = ["--allowedTools", ",".join(
+            (*CLAUDE_VERIFICATION_COMMANDS, f"Edit({artifacts})", f"Write({artifacts})"))]
     return permissions + ["--strict-mcp-config", "--tools", ",".join(tools),
             "--add-dir", str(run.dir.resolve())]
 
@@ -7074,8 +7082,27 @@ def build_invocation(agents, run: Run, agent_id: str, stage: str, task: pathlib.
                     "--stage", stage, "--task-file", str(task)] + options + mcp_options, env
         return ([_bin("ask-codex"), "--read-only", "--task-file", str(task)]
                 + context_options + options + mcp_options), env
+    if kind == "gemini" and account_provider(a) == "gemini-api":
+        # A Gemini API-key account. account_env has already pointed
+        # FDE_GEMINI_ACCOUNT_DIR at this account's own key folder. The API has
+        # no MCP client, so a run-scoped MCP grant cannot reach it; say so and
+        # record it, rather than let the run believe the servers were in scope.
+        env["FDE_ROUTED_INVOCATION"] = "1"
+        _catalog, _user, _health, chosen, _refused = run_mcp_effective(run, agent_id)
+        if chosen:
+            names = ", ".join(sorted(chosen))
+            print(f"  (MCP servers withheld from {agent_id}: the Gemini API has no "
+                  f"MCP client — {names})", file=sys.stderr)
+            run.event("mcp.server.deactivated",
+                      reason="Gemini API accounts have no MCP client",
+                      agent=agent_id)
+        return ([_bin("ask-gemini"), "--task-file", str(task)]
+                + context_options + options), env
     if kind == "gemini":
         env["FDE_ROUTED_INVOCATION"] = "1"
+        # Antigravity: an API-key account selected in the caller's shell must
+        # not redirect this identity's call to a different Google account.
+        env["FDE_GEMINI_ACCOUNT_DIR"] = ""
         gemini_config = run.dir / ".agents" / "mcp_config.json"
         gemini_settings = run.dir / "mcp" / "gemini-app-data" / "settings.json"
         if gemini_config.is_file() and gemini_settings.is_file():
@@ -15016,6 +15043,8 @@ def main(argv=None):
                    help="provider field baseUrl: the OmniRoute gateway root")
     a.add_argument("--combo", dest="combo", metavar="NAME",
                    help="provider field combo: the approved OmniRoute combo ('auto' is refused)")
+    a.add_argument("--model", dest="model", metavar="ID",
+                   help="provider field model: a Gemini API account's default model")
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_accounts_add)
 
@@ -15025,6 +15054,7 @@ def main(argv=None):
     a.add_argument("--aws-region", dest="awsRegion", metavar="VALUE")
     a.add_argument("--base-url", dest="baseUrl", metavar="URL")
     a.add_argument("--combo", dest="combo", metavar="NAME")
+    a.add_argument("--model", dest="model", metavar="ID")
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_accounts_update)
 
