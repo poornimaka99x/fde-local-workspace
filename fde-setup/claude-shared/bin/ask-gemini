@@ -5,6 +5,8 @@
 #   ask-gemini --check          report whether a sign-in resolves (prints no credential)
 #   ask-gemini --models         the models this sign-in can reach
 #   ask-gemini --account personal "..."   use a Gemini API-key account instead
+#   ask-gemini --orchestrate [--continue] -- "<prompt>"
+#                               interactive orchestrator session (fde-start only)
 #
 # Lane: bulk reading, long context, and independent web-grounded research.
 # Bedrock has no native WebSearch; approved FDE runs also expose an isolated
@@ -118,9 +120,11 @@ compose_prompt() {  # compose_prompt <question> [context-file ...]
 }
 
 task_file=""; prompt=""; model="${GEMINI_MODEL:-}"; effort="${GEMINI_EFFORT:-}"
-context_files=()
+context_files=(); orchestrate=0; continue_session=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --orchestrate) orchestrate=1; shift ;;
+    --continue) continue_session=1; shift ;;
     --task-file) task_file="${2:-}"; shift 2 ;;
     --context-file) context_files+=("${2:-}"); shift 2 ;;
     --model) model="${2:-}"; shift 2 ;;
@@ -145,7 +149,17 @@ if [[ -n "${FDE_RUN_ID:-}" && "${FDE_ROUTED_INVOCATION:-}" != "1" ]]; then
        Direct sidecar calls bypass role checks and the run-scoped MCP boundary."
 fi
 
-prompt="$(compose_prompt "$prompt" ${context_files[@]+"${context_files[@]}"})"
+if (( orchestrate )); then
+  # An orchestrator conversation is driven by fde-start-cli, which passes the
+  # whole instruction text itself; it is never an API-key call or a sidecar.
+  [[ "${FDE_ROUTED_INVOCATION:-}" == "1" && -n "${FDE_GEMINI_WORKSPACE:-}" ]] ||
+    die "--orchestrate is started by fde-start, not called directly"
+  [[ -z "$api_account" ]] || die "a Gemini API-key account cannot orchestrate"
+  [[ ${#context_files[@]} -eq 0 && -z "$task_file" ]] ||
+    die "--orchestrate takes one prompt, not task or context files"
+else
+  prompt="$(compose_prompt "$prompt" ${context_files[@]+"${context_files[@]}"})"
+fi
 
 # A governed invocation is captured from stdout and filed by the controller.
 # Tasks sometimes phrase their deliverable as "write <run artifact>", which can
@@ -154,7 +168,7 @@ prompt="$(compose_prompt "$prompt" ${context_files[@]+"${context_files[@]}"})"
 # lane, so headless mode otherwise soft-denies them and returns no answer. Make
 # the transport contract explicit after the task: return the requested document
 # as the response; the controller, not the model, owns filing it.
-if [[ -n "${FDE_GEMINI_WORKSPACE:-}" || ( -n "$api_account" && "${FDE_ROUTED_INVOCATION:-}" == "1" ) ]]; then
+if (( ! orchestrate )) && [[ -n "${FDE_GEMINI_WORKSPACE:-}" || ( -n "$api_account" && "${FDE_ROUTED_INVOCATION:-}" == "1" ) ]]; then
   prompt="$prompt
 
 # FDE response contract
@@ -210,7 +224,9 @@ workspace_options=()
 if [[ -n "${FDE_GEMINI_WORKSPACE:-}" ]]; then
   [[ "$FDE_GEMINI_WORKSPACE" == /* && -d "$FDE_GEMINI_WORKSPACE" ]] ||
     die "the governed Gemini workspace is not an absolute directory"
-  [[ -f "$FDE_GEMINI_WORKSPACE/.agents/mcp_config.json" ]] ||
+  # A scoping orchestrator runs before any connector is approved, so it is the
+  # one caller that may enter a workspace with no MCP configuration yet.
+  (( orchestrate )) || [[ -f "$FDE_GEMINI_WORKSPACE/.agents/mcp_config.json" ]] ||
     die "the governed Gemini workspace has no MCP configuration"
   if [[ -n "${FDE_GEMINI_PROJECT_DIR:-}" && "$FDE_GEMINI_PROJECT_DIR" != "$FDE_GEMINI_WORKSPACE" ]]; then
     [[ "$FDE_GEMINI_PROJECT_DIR" == /* && -d "$FDE_GEMINI_PROJECT_DIR" ]] ||
@@ -242,7 +258,13 @@ shadow_home() {  # shadow_home <settings-file> <target-dir>
   for e in "$real/.gemini/antigravity-cli"/* "$real/.gemini/antigravity-cli"/.[!.]*; do
     [[ -e "$e" || -L "$e" ]] || continue
     name="${e##*/}"
-    [[ "$name" == "settings.json" || "$name" == "brain" ]] && continue
+    [[ "$name" == "settings.json" ]] && continue
+    # A specialist gets a fresh brain so parallel calls never share state. An
+    # orchestrator keeps the real one: it holds the conversation agy -c resumes.
+    if [[ "$name" == "brain" ]]; then
+      (( orchestrate )) || continue
+      rmdir "$target/.gemini/antigravity-cli/brain" 2>/dev/null || true
+    fi
     ln -s "$e" "$target/.gemini/antigravity-cli/$name" || return 1
   done
   cp "$settings" "$target/.gemini/antigravity-cli/settings.json" &&
@@ -298,6 +320,17 @@ PY
     die "Antigravity is not signed in under the run-scoped home.
        Sign-in state is read through HOME; check it with: ask-gemini --check
        (run by hand, outside a run), or sign in again: fde accounts login <account-id>"
+fi
+
+if (( orchestrate )); then
+  # Interactive: the operator answers agy's own permission prompts in this
+  # terminal. No --sandbox and no plan mode — the orchestrator runs fde
+  # commands — and never the blanket auto-approval flag.
+  resume_options=()
+  (( continue_session )) && resume_options+=(--continue)
+  ${agy_env[@]+"${agy_env[@]}"} "$AGY" ${workspace_options[@]+"${workspace_options[@]}"} \
+    ${resume_options[@]+"${resume_options[@]}"} -i "$prompt"
+  exit $?
 fi
 
 # The prompt is the value of -p and always the last argument, so a question that

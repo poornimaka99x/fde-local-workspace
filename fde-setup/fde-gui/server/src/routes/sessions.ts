@@ -97,14 +97,16 @@ export function registerSessionRoutes(
       const status = statusSchema.parse(
         await runControllerJson(config, ['status', runId, '--json', '--events-limit', '1']),
       )
-      if (status.session.provider !== 'claude' || !status.session.resumable) {
+      // Claude, Codex and Antigravity orchestrators all resume through fde-start;
+      // the controller alone decides whether this run can be resumed.
+      if (!status.session.resumable) {
         return problem(
           reply,
           409,
           'session-not-resumable',
           'This run cannot be resumed from the console.',
           status.session.resumeReason ??
-            'The controller does not report a resumable Claude session for this run.',
+            'The controller does not report a resumable orchestrator session for this run.',
         )
       }
       if (!isExecutable(config.fdeStartBin)) {

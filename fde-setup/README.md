@@ -140,8 +140,9 @@ launch; the profile's `settings.json` retains a compatible copy for direct CLI u
 Start one continuous orchestrator conversation:
 
 ```bash
-fde-start                                    # asks which Claude profile orchestrates
+fde-start                                    # asks which account orchestrates
 fde-start --orchestrator bedrock             # or select it directly
+fde-start --orchestrator chatgpt_codex       # Codex or Antigravity (gemini) work too
 ```
 
 Give the request in chat. The orchestrator proposes the smallest suitable plan
@@ -160,12 +161,28 @@ publication, destructive actions and scope expansion retain their explicit
 gates.
 
 **The orchestrator comes first** because it is the identity that reads your
-sentence and proposes what the run should do. Any Claude profile or Codex can
-hold it; Gemini and Microsoft Copilot cannot — Gemini is a one-shot headless call
-with no session state and Copilot is a chat endpoint over the Microsoft estate,
-so neither can hold a run together. Both can still research or review. The
-continuous `fde-start` launcher currently supports Claude profiles; a Codex-led
-run can still be created and driven with the controller commands.
+sentence and proposes what the run should do. Any Claude profile, Codex, or
+Gemini through Antigravity can hold it. Microsoft Copilot (a chat endpoint) and
+Gemini API-key accounts (no local tools) cannot; both can still research or
+review.
+
+`fde-start` runs Claude itself. For Codex and Antigravity it hands the run to
+`fde-start-cli`, which follows the same two phases (scoping until
+`APPROVE PLAN <run-id>`, then execution with run-scoped connectors) using only
+the argv, environment and folder that `fde session-launch <run-id> --phase
+<phase>` describes:
+
+| | Codex | Antigravity (`agy`) |
+|---|---|---|
+| Workspace | the run folder (`-C`), `workspace-write` sandbox | the run folder; the working folder is added |
+| Working folder | readable, not writable — source changes still go through `fde invoke` and `APPROVE CODEX` | agy asks before each tool |
+| Approvals | `--ask-for-approval on-request`: writes outside the run folder and network use are asked in the TUI | agy's own prompts; never the auto-approve flag |
+| Instructions | the `/engage` skill inlined as `developer_instructions` | inlined in the first prompt |
+| Connectors | run-scoped `-c mcp_servers.*` after approval | run-scoped `.agents/mcp_config.json` and permission rules after approval |
+| Resume | `codex resume <session-id>` (recorded after the first launch), or `--last` in the run folder | `agy -c` in the run folder |
+
+The console's Resume button works for all three. Session-limit handoff to
+another account is offered for Claude orchestrators only.
 
 **A run is a slice of the pipeline, not all of it.** "Research this and get it
 validated" is a real ask; so is "slides and a Jira breakdown". The plan decides

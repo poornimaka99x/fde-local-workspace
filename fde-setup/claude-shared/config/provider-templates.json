@@ -322,7 +322,8 @@
         "observability"
       ],
       "cli": "codex",
-      "interactiveSessionNote": "Codex may orchestrate, but the continuous two-process chat launcher requires a Claude profile. Use: fde start; fde orchestrator <run-id> <this account>."
+      "interactiveSession": true,
+      "interactiveSessionNote": "fde-start runs a Codex orchestrator in the Codex TUI: workspace-write sandbox limited to the run folder (the working folder stays read-only), approvals on request, resumed with codex resume."
     },
     "antigravity": {
       "label": "Gemini (Antigravity)",
@@ -357,8 +358,10 @@
         "statusOnList": true,
         "note": "Lists the models this sign-in can reach. It sends no prompt, so verifying costs nothing; a signed-out CLI cannot answer it."
       },
-      "interactiveSessionNote": "Antigravity is invoked here as a one-shot headless call (agy -p) with no session state, so it cannot hold an interactive orchestrator conversation.",
+      "interactiveSession": true,
+      "interactiveSessionNote": "fde-start runs an Antigravity orchestrator interactively (agy -i) with the run folder as its workspace, so agy -c resumes exactly this run's conversation. Specialist calls stay one-shot headless (agy -p).",
       "capabilities": [
+        "orchestration",
         "product-management",
         "research",
         "solutioning",

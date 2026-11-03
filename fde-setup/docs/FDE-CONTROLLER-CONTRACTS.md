@@ -353,9 +353,18 @@ Derived, honest, and opaque:
   else: no transcript store is read, and no id is derived or invented.
 - Claude-led runs are resumable through `fde-start --resume <run-id>`, whether or
   not a session has been recorded yet; `resumeReason` says which case you are in.
-- Codex-led runs are **not** resumable here. `resumeReason` is
-  `"Resume this run in its original Codex task"`. A Codex task id is never
-  derived from a run id.
+- Codex-led and Antigravity-led runs are resumable through
+  `fde-start --resume <run-id>`, which hands them to `fde-start-cli`. A Codex
+  `sessionId` is the id Codex recorded for the session started in the run
+  folder (read from that session's own `session_meta`, never derived from a run
+  id); until one is recorded `resumeReason` says so. Antigravity resumes the run
+  folder's latest conversation (`agy -c`) and reports no `sessionId`.
+- `fde session-launch <run-id> --phase scoping|execution --json [--dry-run]`
+  returns `{provider, agentId, cwd, argv, env, notices}` for a Codex or
+  Antigravity orchestrator. `env` names folders and the run id, never a
+  credential. Without `--dry-run` it records the session start in
+  `orchestrator-session.json`. A Claude orchestrator is refused (exit 2):
+  `fde-start` launches it itself.
 
 ## Attachments
 

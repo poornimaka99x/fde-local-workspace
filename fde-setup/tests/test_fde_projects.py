@@ -512,10 +512,10 @@ class TestJsonViews(ProjectTest):
         codex_run = self.sb.start("ACME-25 codex", orchestrator="codex")
         session = self.json_of("status", codex_run)["session"]
         self.assertEqual(session["provider"], "codex")
-        self.assertFalse(session["resumable"])
+        # fde-start resumes a Codex orchestrator through fde-start-cli.
+        self.assertTrue(session["resumable"])
         self.assertIsNone(session["sessionId"])
-        self.assertEqual(session["resumeReason"],
-                         "Resume this run in its original Codex task")
+        self.assertIn("no Codex session recorded yet", session["resumeReason"])
 
         fresh = self.sb.fde("start", "ACME-26 no orchestrator")
         no_orchestrator = next(l.split()[1] for l in fresh.stdout.splitlines()
@@ -609,7 +609,8 @@ class TestStartJson(ProjectTest):
         self.assertEqual(unknown.returncode, 4)
         self.assertEqual(unknown.stdout, "")
 
-        cannot = self.sb.fde("start", "ACME-63", "--orchestrator", "gemini", "--json")
+        # Gemini (Antigravity) may orchestrate now; Copilot still cannot.
+        cannot = self.sb.fde("start", "ACME-63", "--orchestrator", "microsoft_copilot", "--json")
         self.assertNotEqual(cannot.returncode, 0)
         self.assertEqual(cannot.stdout, "")
         self.assertIn("cannot orchestrate", cannot.stderr)

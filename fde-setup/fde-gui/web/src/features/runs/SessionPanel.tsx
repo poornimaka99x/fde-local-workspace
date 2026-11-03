@@ -196,11 +196,9 @@ export function SessionPanel({
   // orchestrator: that session is bound to its own run and cannot assign one.
   // The operator chooses it here, and the session starts straight away.
   const unassigned = !run.roles.orchestrator
-  const resumable = run.session.resumable && run.session.provider === 'claude'
+  const resumable = run.session.resumable
   const switchCandidates = (accounts.data?.accounts ?? []).filter((account) =>
     account.orchestratorEligible !== false
-      && account.provider !== 'codex'
-      && account.provider !== 'gemini'
       && account.authState !== 'login_required'
       && account.authState !== 'unavailable'
       && account.identityId !== run.roles.orchestrator?.agentId
@@ -362,7 +360,7 @@ export function SessionPanel({
             </button>
             {accounts.error ? <ErrorState error={accounts.error} /> : null}
             {accounts.data !== null && switchCandidates.length === 0 ? (
-              <p className="muted">No signed-in, orchestration-capable Claude account is available.</p>
+              <p className="muted">No signed-in, orchestration-capable account is available.</p>
             ) : null}
           </div>
         ) : !resumable ? (

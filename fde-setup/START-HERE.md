@@ -319,7 +319,7 @@ credentials. Symlinks and unknown binary metadata are left untouched.
 | What you see | What it means | What to do |
 |---|---|---|
 | `has no orchestrator yet` | the first decision hasn't been made | `fde orchestrator <run-id> <who>` |
-| `cannot orchestrate` | Gemini and MS Copilot can't hold a run together | pick a Claude profile or Codex |
+| `cannot orchestrate` | MS Copilot and Gemini API-key accounts can't hold a run together | pick a Claude profile, Codex or Antigravity (`gemini`) |
 | `has no stated ask yet` | you planned before saying what you want | `fde request <run-id> "..."` |
 | `no confirmed plan` | the run hasn't been scoped | `fde plan <run-id> --stages ...` |
 | `roles are not confirmed` | you tried to read or run something before assigning roles | `fde roles <run-id>` |

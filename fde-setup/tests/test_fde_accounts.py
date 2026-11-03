@@ -416,8 +416,16 @@ class TestLaunch(AccountsBase):
         self.assertEqual(launch["configDir"], str(self.profiles / "work"))
         self.assertEqual(launch["env"]["CLAUDE_PROFILE"], "work")
 
+    def test_codex_and_antigravity_can_hold_an_orchestrator_session(self):
+        for identity in ("gemini", "chatgpt_codex"):
+            with self.subTest(identity=identity):
+                launch = self.json_fde("accounts", "launch", identity)["launch"]
+                self.assertTrue(launch["interactive"])
+                self.assertTrue(launch["canOrchestrate"])
+
     def test_an_account_that_cannot_hold_one_says_why(self):
-        for identity in ("gemini", "microsoft_copilot", "chatgpt_codex"):
+        self.json_fde("accounts", "add", "--provider", "gemini-api", "--name", "personal")
+        for identity in ("microsoft_copilot", "geminiapi_personal"):
             with self.subTest(identity=identity):
                 answer = self.json_fde("accounts", "launch", identity, expected=3)
                 launch = answer["launch"]
@@ -451,11 +459,11 @@ class TestBackwardsCompatibility(AccountsBase):
         self.assertEqual(launch["env"]["CLAUDE_CONFIG_DIR"], str(self.profiles / "msc"))
 
     def test_a_shipped_codex_entry_is_given_no_credential_variable(self):
-        launch = self.json_fde("accounts", "launch", "chatgpt_codex", expected=3)["launch"]
+        launch = self.json_fde("accounts", "launch", "chatgpt_codex")["launch"]
         self.assertNotIn("CODEX_HOME", launch["env"])
 
     def test_a_shipped_antigravity_entry_is_given_no_credential_variable(self):
-        launch = self.json_fde("accounts", "launch", "gemini", expected=3)["launch"]
+        launch = self.json_fde("accounts", "launch", "gemini")["launch"]
         self.assertEqual(launch["env"], {})
 
     def test_a_shipped_copilot_entry_keeps_the_single_fixed_keychain_service(self):

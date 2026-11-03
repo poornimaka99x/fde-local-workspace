@@ -446,8 +446,10 @@ describe('safe mutations', () => {
     }
   })
 
-  it('refuses to switch a run to an unknown or non-interactive account', async () => {
-    for (const accountId of ['missing', 'chatgpt_codex']) {
+  it('refuses to switch a run to an unknown account or one that cannot orchestrate', async () => {
+    // Codex and Antigravity orchestrators are resumable through fde-start, so
+    // the refusal is about the orchestration capability, not the provider.
+    for (const accountId of ['missing', 'gemini']) {
       const response = await post(`/api/runs/${RUN}/orchestrator`, { accountId })
       expect(response.statusCode).toBe(400)
     }

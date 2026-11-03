@@ -47,10 +47,10 @@ Starts a chat with the selected orchestrator. In that chat:
   5. type /exit once prompted; fde-start resumes the same conversation with
      run-scoped connectors and executes the approved plan.
 
-IDENTITY is any registered Claude account — an id or a name (see:
-fde accounts list). Codex remains assignable to any supported role, including
-orchestrator, but the continuous two-process chat launcher currently requires a
-Claude profile; the controller says so by name when you pick one that cannot.
+IDENTITY is any registered Claude account, a Codex account or the Antigravity
+(Gemini) identity — an id or a name (see: fde accounts list). Codex and
+Antigravity sessions are run by fde-start-cli with the same two phases; Gemini
+API-key accounts cannot orchestrate.
 USAGE
 }
 
@@ -178,6 +178,10 @@ json.load(sys.stdin)
   orchestrator="$(launch_field launch.account)"
   orchestrator_id="$(launch_field launch.accountId)"
   launch_provider="$(launch_field launch.provider)"
+  launch_kind="$(launch_field launch.kind)"
+  # Codex and Antigravity orchestrators are run by fde-start-cli, which takes
+  # its argv and environment from the controller; nothing below applies to them.
+  [[ "$launch_kind" == "claude" ]] || return 0
   profile_dir="$(launch_field launch.configDir)"
   [[ -n "$profile_dir" ]] || {
     echo "fde-start: identity '$1' has no Claude profile directory" >&2; return 3; }
@@ -215,9 +219,11 @@ choose_orchestrator() {
 import json, sys
 accounts = json.load(sys.stdin).get("accounts") or []
 launchable = [a for a in accounts
-              if a.get("kind") == "claude" and not a.get("fallbackOnly")]
+              if (a.get("kind") == "claude" and not a.get("fallbackOnly"))
+              or (a.get("provider") in ("codex", "antigravity")
+                  and "orchestration" in (a.get("capabilities") or []))]
 if not launchable:
-    print("  (no Claude account is registered)")
+    print("  (no account that can orchestrate is registered)")
     print("  add one:  fde accounts add --provider claude --name work")
 for a in launchable:
     state = "signed in" if a.get("loggedIn") else "SIGNED OUT"
@@ -258,6 +264,10 @@ else
   [[ -n "$run_id" ]] || { echo "fde-start: controller did not return a run id" >&2; exit 1; }
   "$FDE" orchestrator "$run_id" "$orchestrator_id"
   run_dir="$RUNS/$run_id"
+fi
+
+if [[ "${launch_kind:-claude}" != "claude" ]]; then
+  exec "${FDE_START_CLI:-$here/fde-start-cli}" "$run_id"
 fi
 
 [[ -d "$profile_dir" ]] || {

@@ -104,8 +104,9 @@ alongside the exit code. Read that message before choosing **Start again**.
 An expired Claude login requires signing in again under **Configuration → AI
 accounts** for the selected profile.
 
-A Codex-led run says so instead of offering a button: it is driven from its own
-Codex task, and the console will not pretend otherwise.
+Codex-led and Antigravity-led runs resume the same way: the terminal runs
+`fde-start --resume <run-id>`, which starts the Codex or `agy` TUI for that run.
+Answer their approval prompts in the terminal.
 
 ### Attaching a file
 
@@ -252,7 +253,6 @@ or choose between 1 and 3650 days.
 |---|---|---|
 | *The installed controller is older than this console* | `~/.claude-shared/bin/fde` predates the JSON contracts | `./install.sh --update` from your fde-setup checkout |
 | *This installation has no terminal backend* | `node-pty` did not build here | `fde-start --resume <run-id>` in a terminal; reinstall dependencies to fix it |
-| *Resume this run in its original Codex task* | the run is Codex-led | drive it from Codex; the console can still show its state and files |
 | *The controller refused this request* | a controller gate or a bad input | the message is the controller's own; fix what it names |
 | *This run is busy* | another change is in flight for it | refresh and try again |
 | *N things in this data could not be read cleanly* | a malformed or half-written record | the rest of the run still renders; the file on disk is untouched |

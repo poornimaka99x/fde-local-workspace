@@ -542,14 +542,6 @@ export function registerRunRoutes(
             'That identity is not permitted to orchestrate a run.',
           )
         }
-        if (account.provider === 'codex' || account.provider === 'gemini') {
-          return problem(
-            reply,
-            400,
-            'interactive-orchestrator-required',
-            'Choose a Claude account that can continue this run in the Session tab.',
-          )
-        }
         if (before.roles.orchestrator?.agentId === account.identityId) {
           return problem(reply, 409, 'orchestrator-unchanged', 'That account already orchestrates this run.')
         }

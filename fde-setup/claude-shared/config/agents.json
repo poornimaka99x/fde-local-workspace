@@ -149,6 +149,7 @@
       "label": "Gemini",
       "kind": "gemini",
       "capabilities": [
+        "orchestration",
         "product-management",
         "research",
         "solutioning",
@@ -159,7 +160,7 @@
         "test-engineering",
         "ci-investigation"
       ],
-      "surface": "Gemini through the Antigravity CLI (agy), called headlessly (agy -p). One sign-in per machine: agy keeps its token in the OS keyring, so this identity cannot be split into several accounts."
+      "surface": "Gemini through the Antigravity CLI (agy): one-shot headless (agy -p) as a specialist, interactive (agy -i / -c) as an orchestrator. One sign-in per machine: agy keeps its token in the OS keyring, so this identity cannot be split into several accounts."
     },
     "microsoft_copilot": {
       "label": "Microsoft Copilot",

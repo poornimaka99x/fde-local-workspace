@@ -305,7 +305,7 @@ export class ForwardDeployedEngineerExecutor {
     }
     if (
       input.configuration.routing === 'manual'
-      && account.provider !== 'codex'
+      && account.provider !== 'codex' && account.provider !== 'gemini'
       && !this.accounts.validateSelection(
         accountId,
         input.configuration.model,
@@ -314,7 +314,7 @@ export class ForwardDeployedEngineerExecutor {
     ) {
       throw new Error('The configured model and effort are not available for the selected account.')
     }
-    if (account.provider !== 'codex') {
+    if (account.provider !== 'codex' && account.provider !== 'gemini') {
       const auth = await this.accounts.status(accountId)
       if (auth.state === 'login_required') {
         throw new Error('Sign in to the selected account before starting the run.')
@@ -331,7 +331,7 @@ export class ForwardDeployedEngineerExecutor {
     const args = ['start', '--json', '--orchestrator', account.identityId]
     if (input.configuration.routing === 'auto') {
       args.push('--routing', 'auto', '--strategy', input.configuration.strategy)
-    } else if (account.provider !== 'codex') {
+    } else if (account.provider !== 'codex' && account.provider !== 'gemini') {
       args.push('--model', input.configuration.model, '--effort', input.configuration.effort)
     }
     const projectId = input.projectId ?? input.configuration.projectId

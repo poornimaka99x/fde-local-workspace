@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Run a Codex or Antigravity (Gemini) orchestrator for one FDE run.
+#
+# Started by fde-start when the run's orchestrator is not a Claude account; not
+# meant to be called directly. The flow is fde-start's, in two phases:
+#   1. scoping   — the orchestrator holds the conversation that ends in
+#                  APPROVE PLAN <run-id>; no connector is in scope yet;
+#   2. execution — after you exit, the same conversation is resumed with the
+#                  run-scoped connectors and executes the approved stages.
+#
+# Every argv, environment variable and folder comes from
+# `fde session-launch <run-id> --phase <phase> --json`. This script decides
+# nothing about access; it only runs what the controller describes.
+#
+#   Codex        workspace-write sandbox limited to the run folder (the working
+#                folder is readable, not writable, so the APPROVE CODEX gate
+#                still governs source changes), approvals on request, resumed
+#                with `codex resume`.
+#   Antigravity  the run folder is its workspace (the working folder is added),
+#                agy asks before each tool, resumed with `agy -c`.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FDE="${FDE_CONTROLLER:-$here/fde}"
+MCP_SYNC="${FDE_MCP_SYNC:-$here/mcp-sync}"
+RUNS="${FDE_RUNS_DIR:-${CLAUDE_SHARED:-$HOME/.claude-shared}/runs}"
+
+run_id="${1:-}"
+[[ "$run_id" =~ ^[A-Za-z0-9._-]{1,200}$ ]] || {
+  echo "usage: fde-start-cli <run-id>   (started by fde-start)" >&2; exit 2; }
+run_dir="$RUNS/$run_id"
+[[ -d "$run_dir" ]] || { echo "fde-start-cli: no such run: $run_id" >&2; exit 4; }
+
+state_of() {
+  python3 - "$run_dir/manifest.json" <<'PY'
+import json, pathlib, sys
+print((json.loads(pathlib.Path(sys.argv[1]).read_text()) or {}).get("state") or "")
+PY
+}
+
+# Runs one phase: asks the controller for the plan, then executes exactly that
+# argv in that folder with that environment added. The plan is read by Python
+# and handed to execvpe, so no part of it ever passes through a shell.
+run_phase() {  # run_phase <scoping|execution>
+  local plan
+  plan="$("$FDE" session-launch "$run_id" --phase "$1" --json)" || return $?
+  printf '%s' "$plan" | python3 -c '
+import json, os, sys
+plan = json.load(sys.stdin)
+for notice in plan.get("notices") or []:
+    print("fde-start: " + notice, file=sys.stderr)
+label = {"codex": "Codex", "antigravity": "Antigravity"}.get(plan["provider"], plan["provider"])
+print("fde-start: %s orchestrator %s — %s phase" % (label, plan["agentId"], plan["phase"]), file=sys.stderr)
+' || return 2
+  # The plan travels as an argument, not on stdin: the orchestrator inherits
+  # this terminal's stdin and must be able to read your typing from it.
+  set +e
+  python3 -c '
+import json, os, sys
+plan = json.loads(sys.argv[1])
+os.chdir(plan["cwd"])
+env = dict(os.environ)
+env.update({k: str(v) for k, v in (plan.get("env") or {}).items()})
+os.execvpe(plan["argv"][0], plan["argv"], env)
+' "$plan"
+  local rc=$?
+  set -e
+  return $rc
+}
+
+state="$(state_of)"
+rc=0
+if [[ "$state" == "awaiting_plan" || "$state" == "awaiting_roles" ]]; then
+  run_phase scoping || rc=$?
+fi
+
+state="$(state_of)"
+if [[ "$state" == "awaiting_plan" || "$state" == "awaiting_roles" || \
+      "$state" == "awaiting_orchestrator" ]]; then
+  echo
+  echo "Run $run_id is not approved yet (state: $state)."
+  echo "Resume the same orchestrator chat with: fde-start --resume $run_id"
+  exit "$rc"
+fi
+
+# Writes the run's per-identity MCP configuration (Antigravity reads it from
+# the run folder; Codex receives its scope as -c options from the controller).
+"$MCP_SYNC" --run "$run_id" >/dev/null
+
+run_phase execution || rc=$?
+
+echo
+echo "Run: $run_id"
+echo "Status: $FDE status $run_id"
+echo "Resume: fde-start --resume $run_id"
+exit "$rc"

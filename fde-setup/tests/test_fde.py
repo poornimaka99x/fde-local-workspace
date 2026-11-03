@@ -274,7 +274,11 @@ class TestRoles(FDETest):
             self.assertEqual(m["state"], "awaiting_plan")
 
     def test_identities_that_cannot_orchestrate_are_refused(self):
-        for who in ("gemini", "microsoft_copilot"):
+        # Gemini through Antigravity may orchestrate (fde-start-cli); Copilot
+        # and Gemini API-key accounts cannot.
+        r = self.sb.fde("accounts", "add", "--provider", "gemini-api", "--name", "personal")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for who in ("microsoft_copilot", "geminiapi_personal"):
             r = self.sb.fde("start")
             run_id = next(l.split()[1] for l in r.stdout.splitlines() if l.startswith("run "))
             r = self.sb.fde("orchestrator", run_id, who)
