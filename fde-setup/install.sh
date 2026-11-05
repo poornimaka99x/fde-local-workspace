@@ -511,6 +511,12 @@ if (( DRY )); then
   exit 0
 fi
 [[ -d "$BACKUPS" ]] && note "backups of replaced files: $BACKUPS"
+if ! command -v twg >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/twg" ]]; then
+  note "optional: Atlassian Teamwork Graph CLI (twg) is not installed. Its OAuth"
+  note "sign-in needs your own terminal, so install.sh never runs it. To add it:"
+  note "  curl -fsSL --retry 2 https://teamwork-graph.atlassian.com/cli/install | bash"
+  note "then: twg doctor   (FDE governs it through 'fde twg'; see README → Atlassian)"
+fi
 
 cat <<EOF
 

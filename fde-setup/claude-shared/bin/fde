@@ -72,6 +72,9 @@ try:
     # The optional feature-specs artifact profile: templates and traceability
     # checks, shared by the run commands and repository-only validation.
     import fde_feature_specs  # noqa: E402
+    # Atlassian Teamwork Graph CLI: one classifier for what counts as a write,
+    # shared with the fde-core twg-guard hook.
+    import fde_twg  # noqa: E402
 except ImportError as _exc:  # pragma: no cover — an install missing half of itself
     sys.exit(f"fde: the MCP catalogue library is missing ({_exc}).\n"
              f"       It belongs at {_here.parent / 'lib' / 'fde_mcp.py'}.\n"
@@ -4982,6 +4985,7 @@ def cmd_doctor(args):
 
     _row(rows, "Atlassian MCP", *check_atlassian(), required=True)
     _row(rows, "Confluence CLI", *check_confluence())
+    _row(rows, "Teamwork Graph CLI", *check_twg())
     _row(rows, "rtk output compressor", *check_rtk())
     _row(rows, "DOCX intake", *check_docx())
     _row(rows, "Run directory", *check_runs_dir(), required=True)
@@ -6818,6 +6822,103 @@ def cmd_approve_publish(args):
     print(f"\napproved  {approval_id}  target {target}  valid until {iso(expires)}")
     print(f"manifest  {manifest_path}")
     return 0
+
+
+# ---------------------------------------------------------------------- twg --
+
+
+def _twg_binary():
+    explicit = os.environ.get("FDE_TWG_BIN")
+    if explicit:
+        return explicit
+    found = shutil.which("twg")
+    if found:
+        return found
+    local = HOME / ".local" / "bin" / "twg"
+    return str(local) if local.exists() else None
+
+
+def check_twg():
+    """Presence and version only. Signing in is the operator's terminal step."""
+    binary = _twg_binary()
+    if not binary:
+        return WARN, ("not installed (optional) — curl -fsSL --retry 2 "
+                      "https://teamwork-graph.atlassian.com/cli/install | bash")
+    try:
+        out = subprocess.run([binary, "--version"], capture_output=True, text=True,
+                             timeout=10, env={**os.environ, "TWG_AGENT_DEFAULTS": "1"})
+        version = (out.stdout or out.stderr).strip().splitlines()[:1]
+    except (OSError, subprocess.SubprocessError):
+        return WARN, f"{binary} did not answer --version; run: twg doctor"
+    return OK, f"{binary} {version[0] if version else ''}".strip() + \
+        " — writes go through: fde twg --run <id> -- …"
+
+
+def _twg_approval(run: Run, target: str):
+    """The oldest valid, unconsumed publication approval for this target."""
+    valid = [a for a in approval_state(run).values()
+             if a.get("type") == "publication-approval" and a.get("target") == target
+             and approval_status(a) == "valid"]
+    valid.sort(key=lambda a: a.get("issuedAt", ""))
+    return valid[0] if valid else None
+
+
+def cmd_twg(args):
+    """Run Atlassian's Teamwork Graph CLI under the FDE publication rules.
+
+    Reads run with the operator's own twg login (inside a run, once roles are
+    confirmed). A write to Jira, Confluence or Bitbucket consumes one valid
+    `fde approve-publish` approval for that target, and is refused without one.
+    Commands that change the twg installation or login, or print credentials,
+    are refused: the operator runs those in their own terminal."""
+    twg_args = list(args.twg_args)
+    if twg_args and twg_args[0] == "--":
+        twg_args = twg_args[1:]
+    decision = fde_twg.classify(twg_args)
+    shown = "twg " + " ".join(shlex.quote(a) for a in twg_args)
+    if decision.kind == "operator":
+        die(f"refused: {shown} {decision.reason}.\n"
+            f"       Run it yourself in a terminal; FDE never drives twg login or setup.", 7)
+    binary = _twg_binary()
+    if not binary:
+        die("twg is not installed. Install it in your own terminal:\n"
+            "       curl -fsSL --retry 2 https://teamwork-graph.atlassian.com/cli/install | bash", 4)
+    run_id = args.run or os.environ.get("FDE_RUN_ID") or None
+    run = Run(run_id) if run_id else None
+    approval = None
+    if decision.kind == "read" and run:
+        run.guard_roles("reading Atlassian data through twg")
+    elif decision.kind == "write":
+        if not run:
+            die(f"refused: {shown} writes outside your machine ({decision.reason}).\n"
+                f"       twg writes happen inside a run: fde twg --run <run-id> -- …", 7)
+        run.guard_roles("writing to Atlassian through twg")
+        if not decision.target:
+            head = decision.path[0] if decision.path else "?"
+            die(f"refused: 'twg {head}' is not a publication target FDE governs "
+                f"({', '.join(sorted(set(fde_twg.TARGETS.values())))}).\n"
+                f"       Make that change yourself, outside the run.", 7)
+        approval = _twg_approval(run, decision.target)
+        if not approval:
+            die(f"refused: {shown} needs a {decision.target} publication approval "
+                f"({decision.reason}).\n"
+                f"       run: fde approve-publish {run.id} {decision.target} --summary '<what>'", 7)
+        append_jsonl(run.approvals_path, {
+            "type": "publication-approval-consumed", "approvalId": approval["approvalId"],
+            "runId": run.id, "by": "twg", "command": twg_args[:12], "at": iso(now())})
+    env = {**os.environ}
+    env.setdefault("TWG_AGENT_DEFAULTS", "1")
+    if run:
+        run.event("tool", tool="twg", detail=" ".join(decision.path)[:200],
+                  agent=args.agent or "", twgKind=decision.kind,
+                  target=decision.target, approvalId=(approval or {}).get("approvalId"))
+    if approval:
+        print(f"using approval {approval['approvalId']} ({decision.target}, one use)",
+              file=sys.stderr)
+    try:
+        return subprocess.run([binary, *twg_args], env=env).returncode
+    except OSError as exc:
+        die(f"could not start {binary}: {exc}", 4)
 
 
 # ------------------------------------------------------------------- invoke --
@@ -15605,6 +15706,16 @@ def main(argv=None):
     s.add_argument("--items", help="file listing what would be created, one per line")
     s.add_argument("--ttl", type=int, default=DEFAULT_APPROVAL_TTL_MIN, metavar="MINUTES")
     s.set_defaults(fn=cmd_approve_publish)
+
+    s = sub.add_parser(
+        "twg",
+        help="run Atlassian's Teamwork Graph CLI; writes need approve-publish",
+    )
+    s.add_argument("--run", help="run id (default: $FDE_RUN_ID)")
+    s.add_argument("--agent", help="identity making the call, for the run log")
+    s.add_argument("twg_args", nargs=argparse.REMAINDER,
+                   help="arguments for twg, after --")
+    s.set_defaults(fn=cmd_twg)
 
     s = sub.add_parser("invoke", help="run an assigned identity for a stage")
     s.add_argument("run_id")

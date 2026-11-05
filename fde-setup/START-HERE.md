@@ -223,6 +223,10 @@ confluence create ENG "ADR 004: Token exchange" \
 
 One target, one approval. Approving Jira says nothing about Confluence.
 
+If you installed Atlassian's Teamwork Graph CLI (`twg`), the same approval
+covers one twg write: `fde twg --run <run-id> -- jira workitem create …`.
+Reads need no approval. See README → Atlassian → Teamwork Graph CLI.
+
 ---
 
 ## Cheat sheet

@@ -458,6 +458,52 @@ Reads are allowed once roles are confirmed. Jira, Confluence and Bitbucket
 *writes* need `fde approve-publish`. Every Atlassian call is logged to the run's
 `events.jsonl`.
 
+### Teamwork Graph CLI (twg)
+
+Atlassian's [Teamwork Graph CLI](https://developer.atlassian.com/cloud/twg-cli/)
+gives agents Jira, Confluence, Bitbucket, Rovo search and cross-app graph
+context with your own OAuth login. It is optional and installed by you, not by
+`install.sh`, because its sign-in needs a real terminal:
+
+```bash
+curl -fsSL --retry 2 https://teamwork-graph.atlassian.com/cli/install | bash
+twg doctor
+```
+
+FDE applies the same rule it applies to the Rovo connector:
+
+| twg command | Outside a run | Inside a run |
+|---|---|---|
+| Reads (`get`, `list`, `query`, `search`, context, …) | allowed | allowed once roles are confirmed, logged to `events.jsonl` |
+| Writes to Jira / Confluence / Bitbucket | refused | `fde twg --run <id> -- …` consumes one `fde approve-publish <id> <target>` |
+| Writes to other products (Trello, Assets, JSM, Goals, …) | refused | refused — make those changes yourself |
+| `login`, `setup`, `env`, `auth`, `admin`, `upgrade`, `uninstall` | refused for agents | refused for agents |
+
+```bash
+fde twg -- jira workitem get ACME-142                       # read
+fde approve-publish <run-id> jira --summary "1 story"       # you, typed
+fde twg --run <run-id> -- jira workitem create --summary …  # one write
+```
+
+`claude-shared/lib/fde_twg.py` is the single classifier; anything without a
+recognised read verb counts as a write. The fde-core `twg-guard` hook applies
+it to direct `twg` calls in Claude sessions. That hook reads command text, so
+it is a guardrail for cooperative agents, not a sandbox. Atlassian's OAuth
+permissions (Atlassian Administration → Rovo → Teamwork Graph CLI) stay the
+hard ceiling; turn off *Write and manage* and *Delete* there if the org only
+needs reads.
+
+Things to know:
+
+- twg's installer also writes skills to `~/.agents/skills` (Codex, Gemini and
+  others read this everywhere) and `~/.claude/skills`. The hook covers Claude
+  sessions that load fde-core. It does not cover Codex or Gemini used outside
+  `fde invoke`.
+- Enriched commands (`rovo search`, `context`, `work`, `subgraph`, …) use Rovo
+  credits.
+- Sandboxed agents need `api.media.atlassian.com` and
+  `*.frontend.public.atl-paas.net` allowlisted for attachments and whiteboards.
+
 ## What's in the toolkit
 
 **Skills** — core control and context (`/task-init`, `/engage`, `/repo-init`,
